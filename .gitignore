@@ -1,0 +1,11 @@
+# Secrets — use config.example.js locally; Netlify builds config from env vars
+js/config.js
+
+# Personal budget backups (keep your own copies outside the repo)
+backups/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
