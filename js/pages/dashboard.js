@@ -1,4 +1,5 @@
 import { el, formatCurrency, getCurrentMonth, getMonthLabel } from '../utils.js';
+import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS, MOTIVATIONAL_MESSAGES } from '../defaults.js';
 import { showModal, showToast } from '../components/modal.js';
@@ -27,7 +28,7 @@ export function renderDashboard(container) {
   const upcoming = store.getUpcomingBills(7);
   const inbox = store.getReviewInbox(month);
   const paychecks = store.getPaycheckStatus(month);
-  const reconciliation = store.getReconciliationStatus();
+  const reconciliation = store.getReconciliationMatches();
   const msg = MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
 
   container.innerHTML = '';
@@ -279,7 +280,7 @@ function reconciliationCard(recon) {
       ? '✓ Matches your logged checking balance'
       : `${formatCurrency(Math.abs(gap))} ${gap > 0 ? 'higher' : 'lower'} than logged`;
 
-  return el('div', { className: 'card' },
+  const card = el('div', { className: 'card' },
     el('div', { className: 'card-title' }, 'Checking Reconciliation'),
     el('div', { style: 'font-size:0.85rem;line-height:1.6;margin-bottom:0.75rem' },
       el('div', {}, `Logged: ${formatCurrency(recon.logged)}`),
@@ -291,25 +292,102 @@ function reconciliationCard(recon) {
         `As of ${recon.asOfDate}`
       ) : null,
     ),
+  );
+
+  if (!recon.matched && recon.candidates?.length) {
+    card.appendChild(renderReconciliationMatches(recon.candidates, { compact: true, limit: 2 }));
+  }
+
+  card.appendChild(el('button', {
+    className: 'btn btn-sm btn-primary',
+    onClick: () => openReconciliationDialog(recon),
+  }, recon.bankBalance == null ? 'Reconcile' : 'Update'));
+
+  return card;
+}
+
+function renderReconciliationMatches(candidates, { compact = false, limit = 5 } = {}) {
+  const shown = candidates.slice(0, limit);
+  return el('div', { className: `reconcile-matches${compact ? ' reconcile-matches-compact' : ''}` },
+    el('div', { className: 'reconcile-matches-title' }, 'Possible explanations'),
+    el('p', { className: 'reconcile-matches-note' },
+      'Recent transactions that add up to the gap — often a duplicate import or a missing entry.'
+    ),
+    ...shown.map((candidate, idx) => renderReconciliationCandidate(candidate, idx)),
+    candidates.length > shown.length
+      ? el('div', { className: 'reconcile-matches-more' },
+        `+ ${candidates.length - shown.length} more combination${candidates.length - shown.length === 1 ? '' : 's'}`
+      )
+      : null,
+  );
+}
+
+function renderReconciliationCandidate(candidate, idx) {
+  const lines = formatCandidateSummary(candidate);
+  return el('div', { className: 'reconcile-candidate' },
+    el('div', { className: 'reconcile-candidate-head' },
+      el('span', { className: 'reconcile-candidate-label' }, `Match ${idx + 1}`),
+      el('span', { className: 'reconcile-candidate-total' }, formatCurrency(candidate.totalAmount)),
+    ),
+    el('p', { className: 'reconcile-candidate-hint' }, candidate.hint),
+    el('ul', { className: 'reconcile-candidate-list' },
+      ...lines.map(line => el('li', {}, line)),
+    ),
     el('button', {
-      className: 'btn btn-sm btn-primary',
-      onClick: () => openReconciliationDialog(recon),
-    }, recon.bankBalance == null ? 'Reconcile' : 'Update'),
+      className: 'btn btn-sm btn-secondary',
+      onClick: () => window.appNavigate('transactions'),
+    }, 'Review in Transactions'),
   );
 }
 
 function openReconciliationDialog(recon) {
   const input = el('input', { type: 'number', step: '0.01', value: recon.bankBalance ?? recon.logged });
   const dateIn = el('input', { type: 'date', value: recon.asOfDate || new Date().toISOString().slice(0, 10) });
+  const gapPreview = el('p', { className: 'reconcile-gap-preview' });
+  const matchesHost = el('div', {});
+
+  function refreshGapPreview() {
+    const bank = Number(input.value);
+    if (Number.isNaN(bank)) {
+      gapPreview.textContent = '';
+      matchesHost.replaceChildren();
+      return;
+    }
+    const gap = Math.round((bank - recon.logged) * 100) / 100;
+    if (Math.abs(gap) < 0.02) {
+      gapPreview.textContent = 'Balances match.';
+      gapPreview.style.color = 'var(--positive)';
+      matchesHost.replaceChildren();
+      return;
+    }
+    gapPreview.textContent = `Gap: ${formatCurrency(Math.abs(gap))} ${gap > 0 ? 'higher' : 'lower'} than logged`;
+    gapPreview.style.color = 'var(--negative)';
+
+    const candidates = store.findReconciliationCandidates(gap, dateIn.value);
+    matchesHost.replaceChildren(
+      candidates.length
+        ? renderReconciliationMatches(candidates, { limit: 4 })
+        : el('p', { className: 'reconcile-matches-empty' },
+          'No recent transactions add up to this gap. Check for a missing import or manual balance typo.'
+        ),
+    );
+  }
+
+  input.addEventListener('input', refreshGapPreview);
+  dateIn.addEventListener('change', refreshGapPreview);
+  refreshGapPreview();
+
   showModal({
     title: 'Reconcile Checking',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem' },
-        'Enter the balance shown in your bank app. A gap usually means a missing import, duplicate, or Mark Paid double-count.'
+        'Enter the balance shown in your bank app. We will scan recent transactions for combinations that explain any gap.'
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Bank balance'), input),
       el('div', { className: 'form-group' }, el('label', {}, 'As of date'), dateIn),
-      el('p', { style: 'font-size:0.85rem' }, `Logged checking: ${formatCurrency(recon.logged)}`),
+      el('p', { style: 'font-size:0.85rem;margin-bottom:0.5rem' }, `Logged checking: ${formatCurrency(recon.logged)}`),
+      gapPreview,
+      matchesHost,
     ),
     footer: el('button', {
       className: 'btn btn-primary',

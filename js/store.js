@@ -10,7 +10,8 @@ import {
 } from './utils.js';
 import {
   normalizeImportRow, resolveCategoryId,
-  isDuplicateTransaction, isAmountDateDuplicate, amountDateKey,
+  isLikelyDuplicateTransaction,
+  clusterDuplicateTransactions,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
 import { findBillForTransaction } from './bill-matcher.js';
@@ -41,6 +42,7 @@ import {
   pushState,
   schedulePush,
 } from './cloud-sync.js';
+import { findReconciliationCandidates } from './reconcile-match.js';
 
 const STORAGE_KEY = 'financial-peace-dashboard';
 
@@ -165,6 +167,22 @@ class Store {
 
   hasMeaningfulLocalData() {
     return !isBlankBudgetState(this.state);
+  }
+
+  async forcePullFromCloud() {
+    const remote = await loadRemoteState();
+    if (!remote?.state || typeof remote.state !== 'object') {
+      throw new Error('No budget found in the cloud. Sync from your live site first (Settings → Sync Now).');
+    }
+    const remoteTime = new Date(remote.updated_at || 0).getTime();
+    this.state = normalizeState({
+      ...createDefaultState(),
+      ...remote.state,
+      _cloudUpdatedAt: remoteTime,
+    });
+    this.writeLocal();
+    this.notify();
+    return true;
   }
 
   async pullFromCloud() {
@@ -540,18 +558,8 @@ class Store {
   }
 
   getDuplicateTransactionMeta(month = null) {
-    const txs = month
-      ? this.getTransactionsForMonth(month)
-      : (this.state.transactions || []);
-    const groups = new Map();
-    txs.forEach(tx => {
-      const key = amountDateKey(tx);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(tx);
-    });
     const meta = new Map();
-    groups.forEach(items => {
-      if (items.length < 2) return;
+    this.getDuplicateTransactionGroups(month).forEach(items => {
       items.forEach(tx => meta.set(tx.id, items.length));
     });
     return meta;
@@ -573,13 +581,7 @@ class Store {
     const txs = month
       ? this.getTransactionsForMonth(month)
       : (this.state.transactions || []);
-    const groups = new Map();
-    txs.forEach(tx => {
-      const key = amountDateKey(tx);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(tx);
-    });
-    return [...groups.values()].filter(items => items.length >= 2);
+    return clusterDuplicateTransactions(txs);
   }
 
   getReviewInbox(month = getCurrentMonth()) {
@@ -897,6 +899,26 @@ class Store {
       gap,
       matched: Math.abs(gap) < 0.02,
       asOfDate: this.state.reconciliation.asOfDate,
+    };
+  }
+
+  findReconciliationCandidates(gap, asOfDate = this.state.reconciliation?.asOfDate || todayISO()) {
+    return findReconciliationCandidates(
+      this.state.transactions,
+      gap,
+      asOfDate,
+      (type, amount) => this.getCheckingDelta(type, amount),
+    );
+  }
+
+  getReconciliationMatches() {
+    const status = this.getReconciliationStatus();
+    if (status.matched || status.gap == null) {
+      return { ...status, candidates: [] };
+    }
+    return {
+      ...status,
+      candidates: this.findReconciliationCandidates(status.gap, status.asOfDate),
     };
   }
 
@@ -1243,8 +1265,7 @@ class Store {
           description: tx.description,
         };
 
-        if (isDuplicateTransaction(s.transactions, candidate)
-          || isAmountDateDuplicate(s.transactions, candidate)) {
+        if (isLikelyDuplicateTransaction(s.transactions, candidate)) {
           stats.duplicates++;
           return;
         }

@@ -85,6 +85,18 @@ export async function renderSettings(container) {
             className: 'btn btn-secondary btn-sm',
             onClick: async () => {
               try {
+                await store.forcePullFromCloud();
+                showToast('Downloaded budget from cloud');
+                window.location.reload();
+              } catch (e) {
+                showToast(e.message || 'Pull failed', 'info');
+              }
+            },
+          }, 'Pull from Cloud'),
+          el('button', {
+            className: 'btn btn-secondary btn-sm',
+            onClick: async () => {
+              try {
                 await store.pushToCloud({ force: true });
                 showToast('Synced to cloud!');
                 window.appRefresh();

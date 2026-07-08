@@ -2,6 +2,12 @@ import { el, formatCurrency, formatDate } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from './modal.js';
 
+function duplicateGroupDateLabel(items) {
+  const dates = [...new Set(items.map(t => t.date))].sort();
+  if (dates.length <= 1) return formatDate(dates[0]);
+  return `${formatDate(dates[0])} – ${formatDate(dates[dates.length - 1])}`;
+}
+
 const TX_TYPE_LABELS = {
   expense: 'Expense',
   income: 'Income',
@@ -65,7 +71,7 @@ export function openDuplicateReview() {
   const list = el('div', { className: 'review-list duplicate-review-list' },
     ...groups.map(items => el('div', { className: 'duplicate-review-group' },
       el('div', { className: 'duplicate-review-group-header' },
-        el('strong', {}, formatDate(items[0].date)),
+        el('strong', {}, duplicateGroupDateLabel(items)),
         ' · ',
         formatCurrency(items[0].amount),
         el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
@@ -117,7 +123,7 @@ export function openDuplicateReview() {
     title: 'Possible Duplicate Transactions',
     body: el('div', {},
       el('p', { className: 'tx-form-hint' },
-        'These entries share the same date and dollar amount. Delete any extras from a bad import or double-entry.'
+        'These entries share the same amount and look like the same merchant — often from overlapping CSV imports. Delete any extras.'
       ),
       list,
     ),

@@ -52,11 +52,13 @@ export function getRecentMonths(count = 6, fromMonth = getCurrentMonth()) {
 
 export function getPayDaysInMonth(monthKey, day1, day2 = null) {
   const [y, m] = monthKey.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const pad = n => String(n).padStart(2, '0');
   const days = [];
   const add = (day) => {
     if (!day || day < 1 || day > 31) return;
-    const d = new Date(y, m - 1, Math.min(day, new Date(y, m, 0).getDate()));
-    days.push(d.toISOString().slice(0, 10));
+    const dom = Math.min(day, lastDay);
+    days.push(`${y}-${pad(m)}-${pad(dom)}`);
   };
   add(day1);
   if (day2) add(day2);

@@ -7,13 +7,15 @@ export function normalizePaySchedule(paySchedule) {
     return { mode: 'recurring', checks: [], recurring: { ...DEFAULT_RECURRING }, perCheckAmount: null };
   }
   if (Array.isArray(paySchedule.checks)) {
+    const recurring = { ...DEFAULT_RECURRING, ...(paySchedule.recurring || {}) };
+    if (!recurring.frequency) recurring.frequency = 'monthly';
     return {
       mode: paySchedule.mode === 'dates' ? 'dates' : 'recurring',
       checks: paySchedule.checks
         .filter(c => c?.date)
         .map(c => ({ date: c.date.slice(0, 10), amount: c.amount != null ? Number(c.amount) : null }))
         .sort((a, b) => a.date.localeCompare(b.date)),
-      recurring: { ...DEFAULT_RECURRING, ...(paySchedule.recurring || {}) },
+      recurring,
       perCheckAmount: paySchedule.perCheckAmount != null ? Number(paySchedule.perCheckAmount) : null,
     };
   }

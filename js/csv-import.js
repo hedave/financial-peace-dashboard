@@ -245,7 +245,59 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
   return null;
 }
 
-/** Unique key for duplicate detection across imports */
+export const DUPLICATE_DATE_WINDOW_DAYS = 7;
+
+const DESC_NOISE = /\b(pos|debit|credit|purchase|withdrawal|chk|card|pending|visa|mastercard|amex|usaa|ach|web|id|ref|transaction|payment|auth)\b/gi;
+const STORE_NUMBER = /#?\s*\d{3,}\b/g;
+
+function daysBetween(dateA, dateB) {
+  const a = new Date(String(dateA).slice(0, 10) + 'T12:00:00');
+  const b = new Date(String(dateB).slice(0, 10) + 'T12:00:00');
+  return Math.abs(Math.round((a - b) / (1000 * 60 * 60 * 24)));
+}
+
+function descriptionTokens(str) {
+  return new Set(
+    normalizeMerchantDescription(str).split(' ').filter(t => t.length > 1),
+  );
+}
+
+/** Strip bank noise so "SAM'S CLUB #4823" and "POS DEBIT SAMS CLUB" match */
+export function normalizeMerchantDescription(description) {
+  let s = String(description || '').toLowerCase();
+  s = s.replace(/[''`]/g, '');
+  s = s.replace(STORE_NUMBER, ' ');
+  s = s.replace(DESC_NOISE, ' ');
+  s = s.replace(/[^a-z0-9\s]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+export function descriptionSimilarity(a, b) {
+  const na = normalizeMerchantDescription(a);
+  const nb = normalizeMerchantDescription(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer = na.length <= nb.length ? nb : na;
+  if (shorter.length >= 6 && longer.includes(shorter)) return 0.9;
+
+  const ta = descriptionTokens(na);
+  const tb = descriptionTokens(nb);
+  if (!ta.size || !tb.size) return 0;
+
+  let overlap = 0;
+  ta.forEach(token => { if (tb.has(token)) overlap++; });
+  const union = ta.size + tb.size - overlap;
+  return overlap / union;
+}
+
+export function areDescriptionsSimilar(a, b, threshold = 0.55) {
+  return descriptionSimilarity(a, b) >= threshold;
+}
+
+/** Unique key for exact duplicate detection across imports */
 export function transactionFingerprint({ date, type, amount, description }) {
   const desc = String(description || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const amt = (Math.round(Math.abs(Number(amount) || 0) * 100) / 100).toFixed(2);
@@ -268,6 +320,77 @@ export function amountDateKey({ date, amount, type = null }) {
 export function isAmountDateDuplicate(existing, tx) {
   const key = amountDateKey({ ...tx, type: tx.type });
   return existing.some(t => amountDateKey(t) === key);
+}
+
+export function areLikelyDuplicatePair(a, b, {
+  dateWindowDays = DUPLICATE_DATE_WINDOW_DAYS,
+  crossDaySimilarity = 0.55,
+} = {}) {
+  if (!a || !b || a.id === b.id) return false;
+  if (a.type !== b.type) return false;
+
+  const amtA = Math.round(Math.abs(Number(a.amount) || 0) * 100);
+  const amtB = Math.round(Math.abs(Number(b.amount) || 0) * 100);
+  if (!amtA || amtA !== amtB) return false;
+
+  const dayDiff = daysBetween(a.date, b.date);
+  if (dayDiff === 0) return true;
+  if (dayDiff > dateWindowDays) return false;
+
+  return areDescriptionsSimilar(a.description, b.description, crossDaySimilarity);
+}
+
+export function isLikelyDuplicateTransaction(existing, tx, options = {}) {
+  if (isDuplicateTransaction(existing, tx) || isAmountDateDuplicate(existing, tx)) return true;
+  const candidate = { ...tx, type: tx.type };
+  return existing.some(t => areLikelyDuplicatePair(t, candidate, options));
+}
+
+export function clusterDuplicateTransactions(transactions, options = {}) {
+  const txs = (transactions || []).filter(t => t?.id && Math.abs(Number(t.amount) || 0) > 0);
+  const buckets = new Map();
+
+  txs.forEach(tx => {
+    const key = `${tx.type}|${Math.round(Math.abs(Number(tx.amount)) * 100)}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(tx);
+  });
+
+  const parent = new Map();
+  const find = (id) => {
+    if (parent.get(id) !== id) parent.set(id, find(parent.get(id)));
+    return parent.get(id);
+  };
+  const unite = (idA, idB) => {
+    const rootA = find(idA);
+    const rootB = find(idB);
+    if (rootA !== rootB) parent.set(rootA, rootB);
+  };
+
+  buckets.forEach(items => {
+    if (items.length < 2) return;
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        if (areLikelyDuplicatePair(items[i], items[j], options)) {
+          if (!parent.has(items[i].id)) parent.set(items[i].id, items[i].id);
+          if (!parent.has(items[j].id)) parent.set(items[j].id, items[j].id);
+          unite(items[i].id, items[j].id);
+        }
+      }
+    }
+  });
+
+  const groups = new Map();
+  parent.forEach((_, id) => {
+    const root = find(id);
+    if (!groups.has(root)) groups.set(root, []);
+    const tx = txs.find(t => t.id === id);
+    if (tx) groups.get(root).push(tx);
+  });
+
+  return [...groups.values()]
+    .filter(items => items.length >= 2)
+    .map(items => items.sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id))));
 }
 
 export function detectBankFormat(rows) {

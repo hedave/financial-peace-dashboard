@@ -1452,6 +1452,83 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 .paycheck-dot.overdue { background: rgba(220, 38, 38, 0.12); color: var(--negative); border-color: transparent; }
 .paycheck-dot.soon { background: rgba(245, 158, 11, 0.15); color: #b45309; border-color: transparent; }
 
+.reconcile-matches {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.reconcile-matches-compact {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+
+.reconcile-matches-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.reconcile-matches-note,
+.reconcile-matches-empty,
+.reconcile-gap-preview {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-bottom: 0.5rem;
+}
+
+.reconcile-candidate {
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.reconcile-candidate:first-of-type { border-top: none; padding-top: 0; }
+
+.reconcile-candidate-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.reconcile-candidate-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.reconcile-candidate-total {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.reconcile-candidate-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.reconcile-candidate-list {
+  margin: 0 0 0.5rem 1rem;
+  padding: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.reconcile-matches-more {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);

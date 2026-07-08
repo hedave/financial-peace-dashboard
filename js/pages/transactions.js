@@ -161,7 +161,7 @@ export function renderTransactions(container, mode) {
       el('div', { className: 'banner-icon' }, '⚠️'),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'Possible duplicate transactions'),
-        el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} share the same date and amount as another entry. Review and delete any extras.`)
+        el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} look like duplicates — same amount and similar merchant. Review and delete any extras.`)
       ),
       el('button', {
         className: 'btn btn-secondary btn-sm',
@@ -668,7 +668,7 @@ function openImportDialog() {
     el('br'),
     'Use Edit or Category on each row to assign envelopes manually.',
     el('br'),
-    'Duplicate transactions (same date, amount, and description) are skipped automatically.',
+    'Likely duplicates (same amount + similar merchant, within 7 days) are skipped automatically.',
     el('br'),
     el('label', { style: 'display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;color:var(--text)' },
       includePendingIn, ' Include pending/unposted transactions'
