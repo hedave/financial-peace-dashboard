@@ -83,6 +83,8 @@ export async function loadRemoteState() {
 
   if (error) throw error;
   if (!data) return null;
+  lastSyncedAt = data.updated_at ? new Date(data.updated_at) : new Date();
+  syncStatus = 'ok';
   return { state: data.state, updated_at: data.updated_at };
 }
 

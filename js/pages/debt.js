@@ -65,7 +65,8 @@ export function renderDebt(container) {
   if (!debts.length) {
     container.appendChild(emptyState('🎉', 'Debt Free!', 'You\'ve crushed the snowball. Time to build wealth!'));
   } else {
-    container.appendChild(el('div', { className: 'card section' },
+    const list = el('div', { className: 'section debt-list' });
+    list.appendChild(el('div', { className: 'card debt-desktop-list' },
       el('div', { className: 'table-wrap' },
         el('table', {},
           el('thead', {}, el('tr', {},
@@ -84,6 +85,10 @@ export function renderDebt(container) {
         )
       )
     ));
+    list.appendChild(el('div', { className: 'debt-mobile-list' },
+      ...debts.map((d, i) => debtCard(d, i === 0))
+    ));
+    container.appendChild(list);
   }
 
   if (archived.length) {
@@ -99,6 +104,51 @@ export function renderDebt(container) {
       )
     ));
   }
+}
+
+function debtMoreMenu(debt) {
+  const menu = el('details', { className: 'tx-more-menu' });
+  const summary = el('summary', {
+    className: 'btn btn-sm btn-secondary tx-more-trigger',
+    title: 'More actions',
+  }, '⋯');
+  summary.addEventListener('click', e => e.stopPropagation());
+  const items = el('div', { className: 'tx-more-dropdown' });
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: () => { menu.removeAttribute('open'); openDebtForm(debt); },
+  }, 'Edit'));
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: () => {
+      menu.removeAttribute('open');
+      confirmDialog('Mark Paid Off', `Celebrate paying off ${debt.name}?`, () => {
+        store.payOffDebt(debt.id);
+        showToast(`🎉 ${debt.name} is PAID OFF!`, 'celebration', 5000);
+        window.appRefresh();
+      });
+    },
+  }, 'Paid Off!'));
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item tx-more-item-danger',
+    onClick: () => { menu.removeAttribute('open'); deleteDebt(debt.id); },
+  }, 'Delete'));
+  menu.appendChild(summary);
+  menu.appendChild(items);
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    const close = e => {
+      if (!menu.contains(e.target)) {
+        menu.removeAttribute('open');
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  });
+  return menu;
 }
 
 function debtRow(debt, isTarget) {
@@ -128,6 +178,42 @@ function debtRow(debt, isTarget) {
         }, 'Paid Off!'),
         el('button', { className: 'btn btn-sm btn-danger', onClick: () => deleteDebt(debt.id) }, '×'),
       )
+    )
+  );
+}
+
+function debtCard(debt, isTarget) {
+  const state = store.getState();
+  const cat = (state.categories || []).find(c => c.id === debt.categoryId);
+  return el('article', {
+    className: `tx-card debt-card${isTarget ? ' debt-target' : ''}`,
+  },
+    el('div', { className: 'tx-card-top' },
+      el('span', { className: 'tx-card-desc' },
+        isTarget ? '🎯 ' : '',
+        debt.name
+      ),
+      el('span', { className: 'tx-card-amount' }, formatCurrency(debt.balance))
+    ),
+    el('div', { className: 'tx-card-body' },
+      el('div', { className: 'tx-card-meta' },
+        `Min ${formatCurrency(debt.minPayment)}`,
+        debt.interestRate ? ` · ${debt.interestRate}%` : '',
+        cat?.name ? ` · ${cat.name}` : '',
+      ),
+      (debt.dueDate || debt.notes)
+        ? el('div', { className: 'tx-card-meta' }, debt.dueDate || debt.notes)
+        : null,
+      isTarget ? el('div', { className: 'tx-card-badges' },
+        el('span', { className: 'tx-type-badge' }, 'Snowball target')
+      ) : null,
+    ),
+    el('div', { className: 'tx-card-actions' },
+      el('button', {
+        className: 'btn btn-sm btn-primary',
+        onClick: () => makePayment(debt),
+      }, 'Pay'),
+      debtMoreMenu(debt)
     )
   );
 }

@@ -93,12 +93,46 @@ export function renderBudget(container) {
   const prevMonth = getPreviousMonth();
   const hasSnapshot = !!store.getState().monthBudgetSnapshots[prevMonth];
 
-  container.appendChild(el('div', { className: 'btn-group section' },
+  const toolsMenu = el('details', { className: 'page-tools-menu' });
+  toolsMenu.appendChild(el('summary', { className: 'btn btn-secondary' }, 'Budget tools'));
+  const toolsList = el('div', { className: 'page-tools-dropdown' });
+  toolsList.appendChild(el('button', {
+    type: 'button',
+    className: 'page-tools-item',
+    onClick: () => { toolsMenu.removeAttribute('open'); addCategory(true); },
+  }, '+ Add Sinking Fund'));
+  toolsList.appendChild(el('button', {
+    type: 'button',
+    className: 'page-tools-item',
+    onClick: () => { toolsMenu.removeAttribute('open'); fundAllEnvelopes(); },
+  }, 'Fund All from Checking'));
+  if (hasSnapshot) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => {
+        toolsMenu.removeAttribute('open');
+        confirmDialog(
+          'Copy Last Month\'s Budget',
+          `Replace current envelope amounts with ${getMonthLabel(prevMonth)}?`,
+          () => {
+            if (store.copyBudgetFromMonth(prevMonth)) {
+              showToast('Budget copied from last month!');
+              window.appRefresh();
+            }
+          },
+        );
+      },
+    }, 'Copy Last Month'));
+  }
+  toolsMenu.appendChild(toolsList);
+
+  container.appendChild(el('div', { className: 'btn-group section budget-actions' },
     el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
-    el('button', { className: 'btn btn-accent', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
-    el('button', { className: 'btn btn-secondary', onClick: fundAllEnvelopes }, 'Fund All from Checking'),
+    el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
+    el('button', { className: 'btn btn-secondary budget-action-secondary', onClick: fundAllEnvelopes }, 'Fund All from Checking'),
     hasSnapshot ? el('button', {
-      className: 'btn btn-secondary',
+      className: 'btn btn-secondary budget-action-secondary',
       onClick: () => {
         confirmDialog(
           'Copy Last Month\'s Budget',
@@ -112,6 +146,7 @@ export function renderBudget(container) {
         );
       },
     }, 'Copy Last Month') : null,
+    toolsMenu,
   ));
 
   let sortKey = 'budgeted';

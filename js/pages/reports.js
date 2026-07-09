@@ -54,7 +54,7 @@ export function renderReports(container) {
       el('div', { className: 'chart-container', style: 'height:280px' },
         el('canvas', { id: 'trend-chart' }),
       ),
-      el('div', { className: 'table-wrap', style: 'margin-top:1rem' },
+      el('div', { className: 'table-wrap report-desktop-list', style: 'margin-top:1rem' },
         el('table', {},
           el('thead', {}, el('tr', {},
             el('th', {}, 'Month'), el('th', {}, 'Income'), el('th', {}, 'Spent'),
@@ -70,6 +70,17 @@ export function renderReports(container) {
             )),
           ),
         ),
+      ),
+      el('div', { className: 'report-mobile-list', style: 'margin-top:1rem' },
+        ...trends.map(t => el('div', { className: 'report-row' },
+          el('div', { className: 'report-row-top' },
+            el('strong', {}, getMonthLabel(t.month)),
+            el('span', {}, formatCurrency(t.spent)),
+          ),
+          el('div', { className: 'report-row-meta' },
+            `In ${formatCurrency(t.income)} · Budgeted ${formatCurrency(t.budgeted)} · Debt ${formatCurrency(t.debtPaid)}`
+          ),
+        )),
       ),
     ),
   ));
@@ -111,10 +122,11 @@ export function renderReports(container) {
     ),
   ));
 
+  const sortedCats = [...spentByCategory].sort((a, b) => b.spent - a.spent);
   container.appendChild(el('div', { className: 'section' },
     el('div', { className: 'section-title' }, 'Category Breakdown'),
     el('div', { className: 'card' },
-      el('div', { className: 'table-wrap' },
+      el('div', { className: 'table-wrap report-desktop-list' },
         el('table', {},
           el('thead', {}, el('tr', {},
             el('th', {}, 'Category'),
@@ -124,7 +136,7 @@ export function renderReports(container) {
             el('th', {}, '% Used'),
           )),
           el('tbody', {},
-            ...spentByCategory.sort((a, b) => b.spent - a.spent).map(c => el('tr', {},
+            ...sortedCats.map(c => el('tr', {},
               el('td', {}, c.name),
               el('td', {}, formatCurrency(c.budgeted)),
               el('td', {}, formatCurrency(c.spent)),
@@ -135,7 +147,25 @@ export function renderReports(container) {
             ))
           )
         )
-      )
+      ),
+      el('div', { className: 'report-mobile-list' },
+        ...sortedCats.map(c => {
+          const pct = c.budgeted > 0 ? Math.round((c.spent / c.budgeted) * 100) : null;
+          return el('div', { className: 'report-row' },
+            el('div', { className: 'report-row-top' },
+              el('strong', {}, c.name),
+              el('span', {}, formatCurrency(c.spent)),
+            ),
+            el('div', { className: 'report-row-meta' },
+              `Budgeted ${formatCurrency(c.budgeted)} · `,
+              el('span', { style: `color:${c.remaining >= 0 ? 'var(--positive)' : 'var(--negative)'}` },
+                `${c.remaining >= 0 ? '' : ''}${formatCurrency(c.remaining)} left`
+              ),
+              pct != null ? ` · ${pct}%` : '',
+            ),
+          );
+        }),
+      ),
     )
   ));
 

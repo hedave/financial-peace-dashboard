@@ -151,7 +151,7 @@ export async function hashPassword(password) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const DOM_PROPS = new Set(['checked', 'disabled', 'selected', 'readOnly', 'multiple', 'value']);
+const DOM_PROPS = new Set(['checked', 'disabled', 'selected', 'readOnly', 'multiple', 'value', 'hidden']);
 
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);

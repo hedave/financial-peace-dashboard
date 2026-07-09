@@ -91,6 +91,24 @@ body {
 }
 
 .nav-link .icon { font-size: 1.1rem; width: 1.5rem; text-align: center; }
+.nav-link-label { flex: 1; min-width: 0; }
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nav-badge[hidden] { display: none !important; }
 
 .sidebar-footer {
   padding: 1rem;
@@ -98,6 +116,224 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.sync-chip {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.85);
+  font-size: 0.72rem;
+  font-family: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.sync-chip:hover { background: rgba(255,255,255,0.12); }
+.sync-chip:disabled { opacity: 0.7; cursor: wait; }
+
+/* FAB — log expense */
+.fab-expense {
+  display: none;
+  position: fixed;
+  right: 1rem;
+  bottom: 1.5rem;
+  z-index: 96;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 1.75rem;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-family: inherit;
+}
+
+.fab-expense:active { transform: scale(0.96); }
+.fab-expense[hidden] { display: none !important; }
+
+/* Page tools menus (mobile collapse) */
+.page-tools-menu {
+  display: none;
+  position: relative;
+}
+
+.page-tools-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.page-tools-menu > summary::-webkit-details-marker { display: none; }
+
+.page-tools-dropdown {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.35rem);
+  min-width: 12rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-tools-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  min-height: 44px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.page-tools-item:hover,
+.page-tools-item:active { background: var(--bg); }
+
+/* Dashboard density helpers */
+.month-close-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.motivation-collapse {
+  padding: 0.65rem 1rem;
+}
+
+.motivation-collapse > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.motivation-collapse > summary::-webkit-details-marker { display: none; }
+
+.motivation-collapse[open] > summary {
+  margin-bottom: 0.35rem;
+}
+
+.dash-bills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dash-bill-row {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.9rem;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.dash-bill-row:hover { box-shadow: var(--shadow); }
+
+.dash-bill-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.dash-bill-amount {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dash-bill-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Mobile lists default hidden */
+.debt-mobile-list,
+.income-mobile-list,
+.report-mobile-list {
+  display: none;
+}
+
+.tx-filters-toggle {
+  display: none;
+}
+
+.report-row {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-row:last-child { border-bottom: none; }
+
+.report-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.report-row-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+
+.month-close-step {
+  flex-wrap: wrap;
+}
+
+.month-close-step-main {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.month-close-count {
+  color: var(--text-muted);
+  margin-left: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.month-close-count.accent { color: var(--accent); }
+
+.month-close-action {
+  margin-left: auto;
 }
 
 .quick-notes-btn {
@@ -142,16 +378,12 @@ body {
   color: #fff;
   padding: 0.75rem 1rem;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
 }
 
-.menu-btn {
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 1.5rem;
-  cursor: pointer;
-  padding: 0.25rem;
+.mobile-header-title {
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 
 .overlay {
@@ -700,7 +932,17 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   white-space: nowrap;
 }
 
-/* Transactions */
+/* Bottom nav (mobile only — shown via media query) */
+.bottom-nav {
+  display: none;
+}
+
+/* Transactions & bill mobile lists (cards shown ≤768px) */
+.tx-mobile-list,
+.bill-mobile-list {
+  display: none;
+}
+
 .tx-category-unmapped {
   color: var(--accent);
   font-size: 0.85rem;
@@ -1158,6 +1400,7 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  flex-wrap: wrap;
 }
 
 .month-close-step.done {
@@ -1529,15 +1772,28 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   margin-top: 0.35rem;
 }
 
+/* —— Mobile (≤768px) —— */
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
   }
   .sidebar.open { transform: translateX(0); }
   .overlay.open { display: block; }
-  .main-content { margin-left: 0; padding: 1rem; }
-  .mobile-header { display: flex; }
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+    width: 100%;
+    max-width: 100%;
+    /* room for bottom nav + FAB + safe area */
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* Keep header out of flex flow — bottom nav replaces top chrome */
+  .mobile-header { display: none !important; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  /* Dashboard stats: 2×2 for faster scan */
+  .dash-stats.grid-4 { grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  .dash-stats .card { padding: 0.9rem; }
+  .dash-stats .card-value { font-size: 1.15rem; }
   .page-header h2 { font-size: 1.35rem; }
   .card-value { font-size: 1.4rem; }
   .input-row { flex-direction: column; }
@@ -1545,9 +1801,519 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   .toolbar input, .toolbar select { width: 100%; }
   .split-row { grid-template-columns: 1fr; }
   .review-item { flex-wrap: wrap; }
+
+  /* FAB above bottom nav */
+  .fab-expense:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+    right: 1rem;
+  }
+
+  /* Bottom nav review badge */
+  .bottom-nav-icon-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .bottom-nav-badge {
+    position: absolute;
+    top: -0.35rem;
+    right: -0.55rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    font-size: 0.6rem;
+  }
+
+  /* Budget / Tx action collapse */
+  .budget-action-secondary,
+  .tx-action-secondary {
+    display: none !important;
+  }
+
+  .page-tools-menu {
+    display: block;
+    width: 100%;
+  }
+
+  .page-tools-menu > summary.btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .page-tools-dropdown {
+    left: 0;
+    right: 0;
+    width: 100%;
+  }
+
+  /* Tx filters collapsed by default */
+  .tx-filters-toggle {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tx-toolbar .tx-filter-fields {
+    display: none;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .tx-toolbar.filters-open .tx-filter-fields {
+    display: flex;
+  }
+
+  .tx-sort-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  /* Debt / income / report mobile lists */
+  .debt-desktop-list,
+  .income-desktop-list,
+  .report-desktop-list {
+    display: none !important;
+  }
+
+  .debt-mobile-list,
+  .income-mobile-list,
+  .report-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .income-mobile-list {
+    margin-bottom: 0.5rem;
+  }
+
+  /* Month-close guided steps */
+  .month-close-step {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .month-close-step-main {
+    width: 100%;
+  }
+
+  .month-close-action {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .month-close-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+
+  .month-close-step.done .month-close-check {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+
+  /* Bottom navigation */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 95;
+    background: var(--primary-dark);
+    color: #fff;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around;
+    align-items: stretch;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+  }
+
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    min-height: 48px;
+    min-width: 0;
+    padding: 0.35rem 0.2rem;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.72);
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .bottom-nav-item:active {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .bottom-nav-item.active {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .bottom-nav-icon {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .bottom-nav-label {
+    line-height: 1.1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Touch targets */
+  .btn {
+    min-height: 44px;
+    padding: 0.7rem 1.1rem;
+  }
+
+  .btn-sm {
+    min-height: 44px;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .btn-sm.btn-danger {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0.45rem 0.65rem;
+    font-size: 1.15rem;
+  }
+
+  .nav-link {
+    min-height: 48px;
+    padding: 0.85rem 1rem;
+  }
+
+  .btn-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .btn-group .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Keep transaction card action row horizontal */
+  .tx-card-actions.btn-group,
+  .tx-card-actions {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .tx-card-actions .btn {
+    width: auto;
+    flex: 1;
+  }
+
+  .banner {
+    flex-wrap: wrap;
+  }
+
+  .banner .btn,
+  .banner .btn-group {
+    width: 100%;
+    margin-left: 0 !important;
+    margin-top: 0.5rem;
+  }
+
+  .banner .btn-group .btn {
+    width: 100%;
+  }
+
+  /* Dashboard quick actions — 2×2 */
+  .quick-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+
+  .quick-action-btn {
+    min-width: 0;
+    min-height: 72px;
+    padding: 0.85rem 0.5rem;
+  }
+
+  /* Transaction & bill cards (hide desktop tables) */
+  .tx-desktop-list,
+  .bill-desktop-list {
+    display: none !important;
+  }
+
+  .tx-mobile-list,
+  .bill-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .tx-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 0.9rem 1rem;
+  }
+
+  .bill-card {
+    border-left: 4px solid var(--border);
+  }
+
+  .bill-card--overdue {
+    border-left-color: var(--destructive);
+  }
+
+  .bill-card--due {
+    border-left-color: var(--warning);
+  }
+
+  .bill-card--ok {
+    border-left-color: var(--primary);
+  }
+
+  .bill-card--paid {
+    border-left-color: var(--border);
+    opacity: 0.92;
+  }
+
+  .bill-card-name {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  .tx-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .tx-card-date {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .tx-card-amount {
+    font-size: 1.15rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .tx-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .tx-card-desc {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-word;
+  }
+
+  .tx-card-meta {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .tx-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+    align-items: center;
+  }
+
+  .tx-type-badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+  }
+
+  .tx-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    border-top: 1px solid var(--border);
+    padding-top: 0.65rem;
+  }
+
+  .tx-more-menu {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .tx-more-menu > summary {
+    list-style: none;
+    cursor: pointer;
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  .tx-more-menu > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tx-more-dropdown {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.35rem);
+    min-width: 9rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    z-index: 20;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .tx-more-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    min-height: 44px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .tx-more-item:hover,
+  .tx-more-item:active {
+    background: var(--bg);
+  }
+
+  .tx-more-item-danger {
+    color: var(--destructive);
+  }
+
+  /* Modals — near full-screen sheets */
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    max-width: 100%;
+    width: 100%;
+    max-height: min(92vh, 100%);
+    max-height: min(92dvh, 100%);
+    border-radius: var(--radius) var(--radius) 0 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal.modal-wide {
+    max-width: 100%;
+  }
+
+  .modal-header {
+    flex-shrink: 0;
+    padding: 1rem 1rem 0.85rem;
+  }
+
+  .modal-header h3 {
+    font-size: 1.05rem;
+    padding-right: 0.5rem;
+  }
+
+  .modal-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 1rem;
+    max-height: none;
+  }
+
+  .modal-footer {
+    flex-shrink: 0;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .modal-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .close-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Toasts above bottom nav */
+  .toast-container {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    right: 0.75rem;
+    left: 0.75rem;
+    align-items: stretch;
+  }
+
+  .toast {
+    max-width: none;
+  }
 }
 
 @media print {
-  .sidebar, .mobile-header, .quick-actions, .btn { display: none !important; }
+  .sidebar, .mobile-header, .bottom-nav, .quick-actions, .btn { display: none !important; }
   .main-content { margin-left: 0; padding: 0; }
+  .tx-mobile-list,
+  .bill-mobile-list,
+  .debt-mobile-list,
+  .income-mobile-list,
+  .report-mobile-list { display: none !important; }
+  .tx-desktop-list,
+  .bill-desktop-list,
+  .debt-desktop-list,
+  .income-desktop-list,
+  .report-desktop-list { display: block !important; }
+  .fab-expense,
+  .bottom-nav { display: none !important; }
 }

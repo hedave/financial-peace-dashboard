@@ -36,9 +36,11 @@ export function renderDashboard(container) {
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Dashboard'),
     el('p', {}, getMonthLabel(month) + ' — Give every dollar a job'),
-    el('div', { className: 'btn-group', style: 'margin-top:0.75rem' },
-      el('button', { className: 'btn btn-secondary btn-sm', onClick: openMonthCloseWizard }, 'Month-Close Checklist'),
-    ),
+    el('button', {
+      type: 'button',
+      className: 'month-close-link',
+      onClick: openMonthCloseWizard,
+    }, 'Month-close checklist →'),
   ));
 
   const reviewBanner = renderReviewBanner(inbox);
@@ -62,9 +64,10 @@ export function renderDashboard(container) {
     ));
   }
 
-  container.appendChild(el('div', { className: 'banner banner-motivation' },
-    el('div', { className: 'banner-text' }, el('p', {}, `"${msg}"`))
-  ));
+  const quote = el('details', { className: 'banner banner-motivation motivation-collapse' });
+  quote.appendChild(el('summary', {}, 'Daily encouragement'));
+  quote.appendChild(el('div', { className: 'banner-text' }, el('p', {}, `"${msg}"`)));
+  container.appendChild(quote);
 
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
@@ -73,8 +76,9 @@ export function renderDashboard(container) {
     quickAction('✉️', 'Fund Envelope', () => window.appNavigate('budget')),
   ));
 
-  container.appendChild(el('div', { className: 'grid grid-4 section' },
+  container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
     statCard('Checking Balance', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
+    statCard('Surplus for Snowball', formatCurrency(surplus), surplus > 0 ? 'positive' : '', null, true, surplusIncomeNote),
     statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
     statCard(
       'Monthly Income',
@@ -84,7 +88,6 @@ export function renderDashboard(container) {
       false,
       bonusLogged > 0 ? `+ ${formatCurrency(bonusLogged)} bonus income allocatable` : null,
     ),
-    statCard('Surplus for Snowball', formatCurrency(surplus), surplus > 0 ? 'positive' : '', null, true, surplusIncomeNote),
   ));
 
   container.appendChild(el('div', { className: 'grid grid-3 section' },
@@ -119,22 +122,23 @@ export function renderDashboard(container) {
   if (upcoming.length) {
     container.appendChild(el('div', { className: 'section' },
       el('div', { className: 'section-title' }, 'Upcoming Bills (7 days)'),
-      el('div', { className: 'card' },
-        el('div', { className: 'table-wrap' },
-          el('table', {},
-            el('thead', {}, el('tr', {},
-              el('th', {}, 'Bill'), el('th', {}, 'Due'), el('th', {}, 'Amount'), el('th', {}, 'Status')
-            )),
-            el('tbody', {},
-              ...upcoming.slice(0, 5).map(b => el('tr', {},
-                el('td', {}, b.name),
-                el('td', {}, b.dueDate),
-                el('td', {}, formatCurrency(b.amount)),
-                el('td', {}, billBadge(b))
-              ))
-            )
-          )
-        )
+      el('div', { className: 'dash-bills-list' },
+        ...upcoming.slice(0, 5).map(b => {
+          const tone = b.daysLeft < 0 ? 'overdue' : b.daysLeft <= 3 ? 'due' : 'ok';
+          return el('article', {
+            className: `dash-bill-row bill-card--${tone}`,
+            onClick: () => window.appNavigate('bills'),
+          },
+            el('div', { className: 'dash-bill-main' },
+              el('strong', {}, b.name),
+              el('span', { className: 'dash-bill-amount' }, formatCurrency(b.amount)),
+            ),
+            el('div', { className: 'dash-bill-meta' },
+              el('span', {}, b.dueDate || '—'),
+              billBadge(b),
+            ),
+          );
+        })
       )
     ));
   }

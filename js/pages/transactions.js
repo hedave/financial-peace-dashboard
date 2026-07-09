@@ -176,19 +176,45 @@ export function renderTransactions(container, mode) {
     ));
   }
 
-  container.appendChild(el('div', { className: 'btn-group section' },
+  const txTools = el('details', { className: 'page-tools-menu' });
+  txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More actions'));
+  const txToolsList = el('div', { className: 'page-tools-dropdown' });
+  txToolsList.appendChild(el('button', {
+    type: 'button', className: 'page-tools-item',
+    onClick: () => { txTools.removeAttribute('open'); openTransactionForm({ type: 'income' }); },
+  }, '+ Log Income'));
+  txToolsList.appendChild(el('button', {
+    type: 'button', className: 'page-tools-item',
+    onClick: () => { txTools.removeAttribute('open'); openImportDialog(); },
+  }, 'Import CSV'));
+  if (inbox.totalCount > 0) {
+    txToolsList.appendChild(el('button', {
+      type: 'button', className: 'page-tools-item',
+      onClick: () => { txTools.removeAttribute('open'); openReviewInbox(inbox); },
+    }, `Review (${inbox.totalCount})`));
+  }
+  if (duplicateCount > 0) {
+    txToolsList.appendChild(el('button', {
+      type: 'button', className: 'page-tools-item',
+      onClick: () => { txTools.removeAttribute('open'); openDuplicateReview(inbox); },
+    }, `Duplicates (${duplicateCount})`));
+  }
+  txTools.appendChild(txToolsList);
+
+  container.appendChild(el('div', { className: 'btn-group section tx-actions' },
     el('button', { className: 'btn btn-primary', onClick: () => openTransactionForm() }, '+ Add Transaction'),
-    el('button', { className: 'btn btn-accent', onClick: () => openTransactionForm({ type: 'income' }) }, '+ Log Income'),
-    el('button', { className: 'btn btn-secondary', onClick: () => openTransactionForm({ type: 'expense' }) }, '+ Log Expense'),
-    el('button', { className: 'btn btn-secondary', onClick: openImportDialog }, 'Import CSV'),
+    el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: () => openTransactionForm({ type: 'expense' }) }, '+ Log Expense'),
+    el('button', { className: 'btn btn-accent tx-action-secondary', onClick: () => openTransactionForm({ type: 'income' }) }, '+ Log Income'),
+    el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: openImportDialog }, 'Import CSV'),
     inbox.totalCount > 0 ? el('button', {
-      className: 'btn btn-accent',
+      className: 'btn btn-accent tx-action-secondary',
       onClick: () => openReviewInbox(inbox),
     }, `Review (${inbox.totalCount})`) : null,
     duplicateCount > 0 ? el('button', {
-      className: 'btn btn-secondary',
+      className: 'btn btn-secondary tx-action-secondary',
       onClick: () => openDuplicateReview(inbox),
     }, `Duplicates (${duplicateCount})`) : null,
+    txTools,
   ));
 
   const sortSelect = el('select', { id: 'tx-sort' },
@@ -198,20 +224,34 @@ export function renderTransactions(container, mode) {
   );
   sortSelect.value = sortOptionValue(sortKey, sortDir);
 
-  const toolbar = el('div', { className: 'toolbar' },
-    el('input', { type: 'search', placeholder: 'Search by description or amount...', id: 'tx-search' }),
-    el('select', { id: 'tx-type-filter' },
-      el('option', { value: 'all' }, 'All Types'),
-      ...EDITABLE_TYPES.map(type => el('option', { value: type }, TYPE_LABELS[type])),
-      el('option', { value: 'duplicates' }, 'Possible Duplicates'),
-    ),
-    el('select', { id: 'tx-cat-filter' },
-      el('option', { value: 'all' }, 'All Categories'),
-      el('option', { value: 'uncategorized' }, 'Uncategorized'),
-      ...state.categories.map(c => el('option', { value: c.id }, c.name))
-    ),
-    el('label', { style: 'font-size:0.85rem;font-weight:600;color:var(--text-muted);white-space:nowrap' }, 'Sort'),
+  const typeSelect = el('select', { id: 'tx-type-filter' },
+    el('option', { value: 'all' }, 'All Types'),
+    ...EDITABLE_TYPES.map(type => el('option', { value: type }, TYPE_LABELS[type])),
+    el('option', { value: 'duplicates' }, 'Possible Duplicates'),
+  );
+  const catSelect = el('select', { id: 'tx-cat-filter' },
+    el('option', { value: 'all' }, 'All Categories'),
+    el('option', { value: 'uncategorized' }, 'Uncategorized'),
+    ...state.categories.map(c => el('option', { value: c.id }, c.name))
+  );
+
+  const filterFields = el('div', { className: 'tx-filter-fields' },
+    typeSelect,
+    catSelect,
+    el('label', { className: 'tx-sort-label' }, 'Sort'),
     sortSelect,
+  );
+
+  const filtersToggle = el('button', {
+    type: 'button',
+    className: 'btn btn-secondary btn-sm tx-filters-toggle',
+    onClick: () => toolbar.classList.toggle('filters-open'),
+  }, 'Filters & sort');
+
+  const toolbar = el('div', { className: 'toolbar tx-toolbar' },
+    el('input', { type: 'search', placeholder: 'Search by description or amount...', id: 'tx-search' }),
+    filtersToggle,
+    filterFields,
   );
   container.appendChild(toolbar);
 
@@ -265,7 +305,14 @@ export function renderTransactions(container, mode) {
       return;
     }
 
-    listEl.appendChild(el('div', { className: 'card' },
+    const visible = txs.slice(0, 200);
+    const moreNote = txs.length > 200
+      ? el('p', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
+        `Showing 200 of ${txs.length} transactions`)
+      : null;
+
+    // Desktop: multi-column table
+    listEl.appendChild(el('div', { className: 'card tx-desktop-list' },
       el('div', { className: 'table-wrap' },
         el('table', { className: 'sortable-table' },
           el('thead', {}, el('tr', {},
@@ -277,13 +324,17 @@ export function renderTransactions(container, mode) {
             el('th', {}, 'Actions'),
           )),
           el('tbody', {},
-            ...txs.slice(0, 200).map(t => txRow(t, currentState, duplicateMeta))
+            ...visible.map(t => txRow(t, currentState, duplicateMeta))
           )
         )
       ),
-      txs.length > 200 ? el('p', { style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
-        `Showing 200 of ${txs.length} transactions`
-      ) : null
+      moreNote ? moreNote.cloneNode(true) : null
+    ));
+
+    // Mobile: card list
+    listEl.appendChild(el('div', { className: 'tx-mobile-list' },
+      ...visible.map(t => txCard(t, currentState, duplicateMeta)),
+      moreNote
     ));
 
     const checking = store.getState().balances.checking;
@@ -349,6 +400,83 @@ function incomeSourceLabel(t, state) {
   );
 }
 
+function txActionButtons(t) {
+  return [
+    el('button', {
+      className: 'btn btn-sm btn-secondary',
+      onClick: () => openTransactionForm({ transaction: t }),
+    }, 'Edit'),
+    t.type === 'expense' ? el('button', {
+      className: 'btn btn-sm btn-accent',
+      onClick: () => openTransactionForm({ transaction: t, splitMode: true }),
+    }, store.isSplitTransaction(t) ? 'Edit Split' : 'Split') : null,
+    transactionNeedsCategory(t) ? el('button', {
+      className: 'btn btn-sm btn-secondary',
+      onClick: () => openTransactionForm({ transaction: t, focusCategory: true }),
+    }, 'Category') : null,
+    el('button', {
+      className: 'btn btn-sm btn-danger',
+      onClick: () => deleteTransaction(t.id),
+    }, '×'),
+  ];
+}
+
+function txMoreMenu(t) {
+  const menu = el('details', { className: 'tx-more-menu' });
+  const summary = el('summary', {
+    className: 'btn btn-sm btn-secondary tx-more-trigger',
+    title: 'More actions',
+  }, '⋯');
+  summary.addEventListener('click', e => e.stopPropagation());
+
+  const items = el('div', { className: 'tx-more-dropdown' });
+  if (t.type === 'expense') {
+    items.appendChild(el('button', {
+      type: 'button',
+      className: 'tx-more-item',
+      onClick: () => {
+        menu.removeAttribute('open');
+        openTransactionForm({ transaction: t, splitMode: true });
+      },
+    }, store.isSplitTransaction(t) ? 'Edit Split' : 'Split'));
+  }
+  if (transactionNeedsCategory(t)) {
+    items.appendChild(el('button', {
+      type: 'button',
+      className: 'tx-more-item',
+      onClick: () => {
+        menu.removeAttribute('open');
+        openTransactionForm({ transaction: t, focusCategory: true });
+      },
+    }, 'Category'));
+  }
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item tx-more-item-danger',
+    onClick: () => {
+      menu.removeAttribute('open');
+      deleteTransaction(t.id);
+    },
+  }, 'Delete'));
+
+  menu.appendChild(summary);
+  menu.appendChild(items);
+
+  // Close when clicking outside
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    const close = e => {
+      if (!menu.contains(e.target)) {
+        menu.removeAttribute('open');
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  });
+
+  return menu;
+}
+
 function txRow(t, state, duplicateMeta = new Map()) {
   const isIncome = t.type === 'income';
   const sourceTag = incomeSourceLabel(t, state);
@@ -375,23 +503,46 @@ function txRow(t, state, duplicateMeta = new Map()) {
     ),
     el('td', {},
       el('div', { className: 'btn-group' },
-        el('button', {
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => openTransactionForm({ transaction: t }),
-        }, 'Edit'),
-        t.type === 'expense' ? el('button', {
-          className: 'btn btn-sm btn-accent',
-          onClick: () => openTransactionForm({ transaction: t, splitMode: true }),
-        }, store.isSplitTransaction(t) ? 'Edit Split' : 'Split') : null,
-        transactionNeedsCategory(t) ? el('button', {
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => openTransactionForm({ transaction: t, focusCategory: true }),
-        }, 'Category') : null,
-        el('button', {
-          className: 'btn btn-sm btn-danger',
-          onClick: () => deleteTransaction(t.id),
-        }, '×'),
+        ...txActionButtons(t)
       )
+    )
+  );
+}
+
+function txCard(t, state, duplicateMeta = new Map()) {
+  const isIncome = t.type === 'income';
+  const sourceTag = incomeSourceLabel(t, state);
+  const dupCount = duplicateMeta.get(t.id);
+  const isDuplicate = dupCount >= 2;
+
+  return el('article', {
+    className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}`,
+  },
+    el('div', { className: 'tx-card-top' },
+      el('span', { className: 'tx-card-date' }, formatDate(t.date)),
+      el('span', {
+        className: 'tx-card-amount',
+        style: `color:${isIncome ? 'var(--positive)' : 'var(--text)'}`,
+      }, `${isIncome ? '+' : '-'}${formatCurrency(t.amount)}`)
+    ),
+    el('div', { className: 'tx-card-body' },
+      el('div', { className: 'tx-card-desc' }, t.description || '—'),
+      sourceTag ? el('div', { className: 'tx-card-meta' }, sourceTag) : null,
+      el('div', { className: 'tx-card-meta' }, categoryLabel(t, state)),
+      el('div', { className: 'tx-card-badges' },
+        el('span', { className: 'tx-type-badge' }, TYPE_LABELS[t.type] || t.type),
+        isDuplicate ? el('span', {
+          className: 'tx-duplicate-badge',
+          title: `${dupCount} transactions with this amount`,
+        }, `Duplicate (${dupCount})`) : null,
+      )
+    ),
+    el('div', { className: 'tx-card-actions' },
+      el('button', {
+        className: 'btn btn-sm btn-secondary',
+        onClick: () => openTransactionForm({ transaction: t }),
+      }, 'Edit'),
+      txMoreMenu(t)
     )
   );
 }

@@ -7,38 +7,50 @@ export function openMonthCloseWizard() {
   const status = store.getMonthCloseStatus();
 
   const stepsEl = el('div', { className: 'month-close-steps' },
-    ...status.steps.map(step => el('div', { className: `month-close-step${step.done ? ' done' : ''}` },
-      el('span', { className: 'month-close-check' }, step.done ? '✓' : '○'),
-      el('div', { className: 'month-close-step-text' },
-        el('strong', {}, step.label),
-        !step.done && step.count != null && typeof step.count === 'number' && step.id !== 'allocate'
-          ? el('span', { style: 'color:var(--text-muted);margin-left:0.35rem' }, `(${step.count})`)
-          : null,
-        !step.done && step.id === 'allocate'
-          ? el('span', { style: 'color:var(--accent);margin-left:0.35rem' }, formatCurrency(step.count))
-          : null,
-      ),
-      !step.done && step.id === 'review' ? el('button', {
-        type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        onClick: () => openReviewInbox(),
-      }, 'Review') : null,
-      !step.done && step.id === 'bills' ? el('button', {
-        type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        onClick: () => openBillMatches(),
-      }, 'Match') : null,
-      !step.done && step.id === 'allocate' ? el('button', {
-        type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        onClick: () => { window.appNavigate('budget'); },
-      }, 'Budget') : null,
-      !step.done && step.id === 'surplus' ? el('button', {
-        type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        onClick: () => { window.appNavigate('debt'); },
-      }, 'Snowball') : null,
-    )),
+    ...status.steps.map((step, idx) => {
+      let action = null;
+      if (!step.done && step.id === 'review') {
+        action = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary month-close-action',
+          onClick: () => openReviewInbox(),
+        }, 'Review');
+      } else if (!step.done && step.id === 'bills') {
+        action = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary month-close-action',
+          onClick: () => openBillMatches(),
+        }, 'Match');
+      } else if (!step.done && step.id === 'allocate') {
+        action = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary month-close-action',
+          onClick: () => { window.appNavigate('budget'); },
+        }, 'Budget');
+      } else if (!step.done && step.id === 'surplus') {
+        action = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary month-close-action',
+          onClick: () => { window.appNavigate('debt'); },
+        }, 'Snowball');
+      }
+
+      return el('div', { className: `month-close-step${step.done ? ' done' : ''}` },
+        el('div', { className: 'month-close-step-main' },
+          el('span', { className: 'month-close-check' }, step.done ? '✓' : String(idx + 1)),
+          el('div', { className: 'month-close-step-text' },
+            el('strong', {}, step.label),
+            !step.done && step.count != null && typeof step.count === 'number' && step.id !== 'allocate'
+              ? el('span', { className: 'month-close-count' }, `(${step.count})`)
+              : null,
+            !step.done && step.id === 'allocate'
+              ? el('span', { className: 'month-close-count accent' }, formatCurrency(step.count))
+              : null,
+          ),
+        ),
+        action,
+      );
+    }),
   );
 
   const modal = showModal({

@@ -1,5 +1,5 @@
 import { store } from './store.js';
-import { renderLayout, updateActiveNav } from './components/layout.js';
+import { renderLayout, updateActiveNav, updateNavBadges, refreshSyncChip } from './components/layout.js';
 import { renderWizard } from './components/wizard.js';
 import { hashPassword } from './utils.js';
 import { applyTheme } from './themes.js';
@@ -72,6 +72,8 @@ function renderPage() {
   const renderer = PAGES[currentPage];
   if (renderer) renderer(mainEl, pageArg);
   pageArg = null;
+  updateNavBadges();
+  refreshSyncChip();
 }
 
 function showLockScreen() {

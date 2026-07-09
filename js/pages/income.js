@@ -31,7 +31,7 @@ export function renderIncome(container) {
       'CSV deposits match by bank description: NOAA → "us department of agriculture", VA → "us department of veterans affairs", CalPers → "public employee retirement system". Anything else goes to Bonus Income.'
     ),
     el('div', { className: 'card' },
-      el('div', { className: 'table-wrap' },
+      el('div', { className: 'table-wrap income-desktop-list' },
         el('table', { className: 'income-table' },
           el('thead', {}, el('tr', {},
             el('th', {}, 'Source'),
@@ -44,6 +44,9 @@ export function renderIncome(container) {
             ...plannedSources.map(src => incomeRow(src, state)),
           ),
         ),
+      ),
+      el('div', { className: 'income-mobile-list' },
+        ...plannedSources.map(src => incomeCard(src, state)),
       ),
       el('button', {
         className: 'btn btn-secondary',
@@ -127,6 +130,14 @@ function bonusIncomeCard(month, bonusLogged, state) {
   );
 }
 
+const TYPE_LABELS = {
+  job: 'Job',
+  va: 'VA Disability',
+  retirement: 'Retirement',
+  side: 'Side Income',
+  other: 'Other',
+};
+
 function incomeRow(src, state) {
   const month = getCurrentMonth();
   const checks = getScheduledChecksForMonth(src, month);
@@ -138,9 +149,8 @@ function incomeRow(src, state) {
   }));
 
   const typeSelect = el('select');
-  ['job', 'va', 'retirement', 'side', 'other'].forEach(t => {
-    const labels = { job: 'Job', va: 'VA Disability', retirement: 'Retirement', side: 'Side Income', other: 'Other' };
-    typeSelect.appendChild(el('option', { value: t }, labels[t]));
+  Object.entries(TYPE_LABELS).forEach(([t, label]) => {
+    typeSelect.appendChild(el('option', { value: t }, label));
   });
   typeSelect.value = src.type;
   typeSelect.addEventListener('change', () => store.update(s => {
@@ -175,6 +185,41 @@ function incomeRow(src, state) {
         },
       }, 'Delete'),
     ),
+  );
+}
+
+function incomeCard(src, state) {
+  const month = getCurrentMonth();
+  const checks = getScheduledChecksForMonth(src, month);
+  const monthTotal = store.getSourceIncomeForMonth(src, month);
+
+  return el('article', { className: 'tx-card income-card' },
+    el('div', { className: 'tx-card-top' },
+      el('span', { className: 'tx-card-desc' }, src.name || 'Income source'),
+      el('span', { className: 'tx-card-amount' }, formatCurrency(monthTotal))
+    ),
+    el('div', { className: 'tx-card-body' },
+      el('div', { className: 'tx-card-meta' },
+        TYPE_LABELS[src.type] || src.type || 'Other',
+        checks.length
+          ? ` · ${checks.length} check${checks.length === 1 ? '' : 's'} this month`
+          : ' · Set pay dates',
+      ),
+      el('div', { className: 'tx-card-meta' }, scheduleSummary(src)),
+    ),
+    el('div', { className: 'tx-card-actions' },
+      el('button', {
+        className: 'btn btn-sm btn-secondary',
+        onClick: () => openPayScheduleEditor(src),
+      }, 'Edit dates'),
+      el('button', {
+        className: 'btn btn-sm btn-danger',
+        onClick: () => {
+          store.update(s => { s.incomeSources = s.incomeSources.filter(x => x.id !== src.id); });
+          window.appRefresh();
+        },
+      }, 'Delete'),
+    )
   );
 }
 

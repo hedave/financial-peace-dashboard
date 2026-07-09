@@ -53,9 +53,28 @@ export function renderBills(container) {
   }
 }
 
+function billDisplay(bill, state, paid) {
+  const cat = (state.categories || []).find(c => c.id === bill.categoryId);
+  const days = bill.dueDate ? daysUntil(bill.dueDate) : NaN;
+  let status = bill.status || 'pending';
+  if (!paid) {
+    if (days < 0) status = 'overdue';
+    else if (days <= 7) status = 'due_soon';
+  } else {
+    status = 'paid';
+  }
+  const amount = paid && bill.paidAmount != null ? bill.paidAmount : bill.amount;
+  const dateLabel = paid ? 'Paid' : 'Due';
+  const dateVal = formatDate(paid ? bill.paidDate : bill.dueDate);
+  return { cat, status, amount, dateLabel, dateVal };
+}
+
 function billsTable(bills, state, variant) {
   const isPaid = variant === 'paid';
-  return el('div', { className: 'card' },
+  const wrap = el('div', { className: 'bills-list' });
+
+  // Desktop table
+  wrap.appendChild(el('div', { className: 'card bill-desktop-list' },
     el('div', { className: 'table-wrap' },
       el('table', {},
         el('thead', {}, el('tr', {},
@@ -71,26 +90,66 @@ function billsTable(bills, state, variant) {
         )
       )
     )
-  );
+  ));
+
+  // Mobile cards
+  wrap.appendChild(el('div', { className: 'bill-mobile-list' },
+    ...bills.map(b => billCard(b, state, { paid: isPaid }))
+  ));
+
+  return wrap;
+}
+
+function billMoreMenu(bill) {
+  const menu = el('details', { className: 'tx-more-menu' });
+  const summary = el('summary', {
+    className: 'btn btn-sm btn-secondary tx-more-trigger',
+    title: 'More actions',
+  }, '⋯');
+  summary.addEventListener('click', e => e.stopPropagation());
+
+  const items = el('div', { className: 'tx-more-dropdown' });
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: () => {
+      menu.removeAttribute('open');
+      openBillForm(bill);
+    },
+  }, 'Edit'));
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item tx-more-item-danger',
+    onClick: () => {
+      menu.removeAttribute('open');
+      deleteBill(bill.id);
+    },
+  }, 'Delete'));
+
+  menu.appendChild(summary);
+  menu.appendChild(items);
+
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    const close = e => {
+      if (!menu.contains(e.target)) {
+        menu.removeAttribute('open');
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  });
+
+  return menu;
 }
 
 function billRow(bill, state, { paid = false } = {}) {
-  const cat = (state.categories || []).find(c => c.id === bill.categoryId);
-  const days = bill.dueDate ? daysUntil(bill.dueDate) : NaN;
-  let status = bill.status || 'pending';
-  if (!paid) {
-    if (days < 0) status = 'overdue';
-    else if (days <= 7) status = 'due_soon';
-  } else {
-    status = 'paid';
-  }
-
-  const paidAmount = bill.paidAmount != null ? bill.paidAmount : bill.amount;
+  const { cat, status, amount, dateVal } = billDisplay(bill, state, paid);
 
   return el('tr', { className: paid ? 'bill-paid-row' : '' },
     el('td', {}, bill.name),
-    el('td', {}, formatDate(paid ? bill.paidDate : bill.dueDate)),
-    el('td', {}, formatCurrency(paid ? paidAmount : bill.amount)),
+    el('td', {}, dateVal),
+    el('td', {}, formatCurrency(amount)),
     el('td', {}, cat?.name || '—'),
     el('td', {}, statusBadge(status, bill.autoPay)),
     el('td', {},
@@ -102,6 +161,36 @@ function billRow(bill, state, { paid = false } = {}) {
         el('button', { className: 'btn btn-sm btn-secondary', onClick: () => openBillForm(bill) }, 'Edit'),
         el('button', { className: 'btn btn-sm btn-danger', onClick: () => deleteBill(bill.id) }, '×'),
       )
+    )
+  );
+}
+
+function billCard(bill, state, { paid = false } = {}) {
+  const { cat, status, amount, dateLabel, dateVal } = billDisplay(bill, state, paid);
+  const tone = paid ? 'paid' : (status === 'overdue' ? 'overdue' : status === 'due_soon' ? 'due' : 'ok');
+
+  return el('article', {
+    className: `tx-card bill-card bill-card--${tone}${paid ? ' bill-paid-row' : ''}`,
+  },
+    el('div', { className: 'tx-card-top' },
+      el('span', { className: 'tx-card-desc bill-card-name' }, bill.name),
+      el('span', { className: 'tx-card-amount' }, formatCurrency(amount))
+    ),
+    el('div', { className: 'tx-card-body' },
+      el('div', { className: 'tx-card-meta' },
+        `${dateLabel} ${dateVal || '—'}`,
+        cat?.name ? ` · ${cat.name}` : ''
+      ),
+      el('div', { className: 'tx-card-badges' },
+        statusBadge(status, bill.autoPay)
+      )
+    ),
+    el('div', { className: 'tx-card-actions' },
+      paid ? null : el('button', {
+        className: 'btn btn-sm btn-primary',
+        onClick: () => markPaid(bill),
+      }, 'Mark Paid'),
+      billMoreMenu(bill)
     )
   );
 }
