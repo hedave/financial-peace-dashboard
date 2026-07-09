@@ -33,6 +33,7 @@ import {
 import {
   applyDefaultMatchTerms,
   ensureBonusIncomeSource,
+  migrateLegacyIncomeSourceNames,
   isBonusIncomeSource,
   BONUS_INCOME_NAME,
 } from './income-sources.js';
@@ -116,6 +117,7 @@ function normalizeState(state) {
   if (!state.settings || typeof state.settings !== 'object') state.settings = { ...defaults.settings };
   if (!state.settings.palette) state.settings.palette = 'forest';
   state.incomeSources = ensureBonusIncomeSource(state.incomeSources);
+  migrateLegacyIncomeSourceNames(state.incomeSources);
   (state.incomeSources || []).forEach(src => {
     src.paySchedule = normalizePaySchedule(src.paySchedule);
     if (!Array.isArray(src.matchTerms)) src.matchTerms = [];

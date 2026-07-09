@@ -3,6 +3,14 @@ import { normalizePaySchedule } from './pay-schedule.js';
 
 export const BONUS_INCOME_NAME = 'Bonus Income';
 
+/** Legacy default names → generic labels (preserves matchTerms / schedules) */
+const LEGACY_INCOME_NAMES = {
+  noaa: 'Primary',
+  'va disability': 'Secondary',
+  calpers: 'Tertiary',
+  'cal pers': 'Tertiary',
+};
+
 export function isBonusIncomeSource(source) {
   return source?.type === 'bonus';
 }
@@ -22,30 +30,40 @@ export function createBonusIncomeSource() {
   };
 }
 
-/** Default CSV description matchers by source name/type hints */
-const MATCH_HINTS = [
-  { hints: ['noaa', 'agriculture', 'primary job'], terms: ['us department of agriculture'] },
-  { hints: ['va', 'veteran', 'disability'], terms: ['us department of veterans affairs'] },
-  { hints: ['calpers', 'cal pers', 'retirement'], terms: ['public employee retirement system'] },
-];
+export function createPlannedIncomeSource(name = 'Additional') {
+  return {
+    id: generateId(),
+    name,
+    amount: 0,
+    type: 'other',
+    matchTerms: [],
+    paySchedule: {
+      mode: 'recurring',
+      checks: [],
+      recurring: { frequency: 'monthly', day1: 1, day2: null },
+      perCheckAmount: null,
+    },
+  };
+}
 
+/** Rename known legacy defaults; leave custom names alone. Keeps match terms. */
+export function migrateLegacyIncomeSourceNames(incomeSources) {
+  if (!Array.isArray(incomeSources)) return incomeSources;
+  incomeSources.forEach(src => {
+    if (!src || isBonusIncomeSource(src)) return;
+    const key = String(src.name || '').trim().toLowerCase();
+    if (LEGACY_INCOME_NAMES[key]) src.name = LEGACY_INCOME_NAMES[key];
+  });
+  return incomeSources;
+}
+
+/**
+ * Optional seed of bank-description matchers. Left empty by default —
+ * users set match terms per source in Edit dates.
+ */
 export function applyDefaultMatchTerms(source) {
   if (!source || isBonusIncomeSource(source)) return;
   if (!Array.isArray(source.matchTerms)) source.matchTerms = [];
-
-  const name = String(source.name || '').toLowerCase();
-  const type = String(source.type || '').toLowerCase();
-
-  MATCH_HINTS.forEach(({ hints, terms }) => {
-    const applies = hints.some(h => name.includes(h) || type === h);
-    if (!applies) return;
-    terms.forEach(term => {
-      const key = term.toLowerCase();
-      if (!source.matchTerms.some(t => String(t).toLowerCase() === key)) {
-        source.matchTerms.push(term);
-      }
-    });
-  });
 }
 
 export function ensureBonusIncomeSource(incomeSources) {

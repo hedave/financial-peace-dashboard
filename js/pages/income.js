@@ -28,7 +28,7 @@ export function renderIncome(container) {
   container.appendChild(el('div', { className: 'section' },
     el('div', { className: 'section-title' }, 'Planned Income Sources'),
     el('p', { className: 'section-hint' },
-      'CSV deposits match by bank description: NOAA → "us department of agriculture", VA → "us department of veterans affairs", CalPers → "public employee retirement system". Anything else goes to Bonus Income.'
+      'Name your pay sources (Primary, Secondary, Tertiary, or add more). In Edit dates, set bank-description match terms so CSV imports assign deposits automatically. Unmatched income goes to Bonus Income.'
     ),
     el('div', { className: 'card' },
       el('div', { className: 'table-wrap income-desktop-list' },
@@ -53,9 +53,15 @@ export function renderIncome(container) {
         style: 'margin-top:1rem',
         onClick: () => {
           store.update(s => {
+            const plannedCount = s.incomeSources.filter(x => x.type !== 'bonus').length;
+            const name = plannedCount === 0 ? 'Primary'
+              : plannedCount === 1 ? 'Secondary'
+              : plannedCount === 2 ? 'Tertiary'
+              : plannedCount === 3 ? 'Additional'
+              : `Additional ${plannedCount - 2}`;
             s.incomeSources.push({
               id: crypto.randomUUID(),
-              name: 'New Source',
+              name,
               amount: 0,
               type: 'other',
               paySchedule: { mode: 'recurring', checks: [], recurring: { frequency: 'monthly', day1: 1, day2: null }, perCheckAmount: null },
@@ -132,7 +138,7 @@ function bonusIncomeCard(month, bonusLogged, state) {
 
 const TYPE_LABELS = {
   job: 'Job',
-  va: 'VA Disability',
+  va: 'Disability',
   retirement: 'Retirement',
   side: 'Side Income',
   other: 'Other',

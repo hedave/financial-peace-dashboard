@@ -96,7 +96,7 @@ function incomeStep(card, data, nav) {
         formField('Type', 'select', src.type, v => { src.type = v; }, {
           options: [
             { value: 'job', label: 'Job / Salary' },
-            { value: 'va', label: 'VA Disability' },
+            { value: 'va', label: 'Disability' },
             { value: 'retirement', label: 'Retirement / Pension' },
             { value: 'side', label: 'Side Income' },
             { value: 'other', label: 'Other' },

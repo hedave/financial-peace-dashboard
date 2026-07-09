@@ -87,18 +87,18 @@ export function createDefaultState() {
     },
     incomeSources: [
       {
-        id: id(), name: 'NOAA', amount: 0, type: 'job',
-        matchTerms: ['us department of agriculture'],
+        id: id(), name: 'Primary', amount: 0, type: 'job',
+        matchTerms: [],
         paySchedule: { mode: 'dates', checks: [], recurring: { frequency: 'biweekly', day1: 1, day2: null }, perCheckAmount: null },
       },
       {
-        id: id(), name: 'VA Disability', amount: 0, type: 'va',
-        matchTerms: ['us department of veterans affairs'],
+        id: id(), name: 'Secondary', amount: 0, type: 'job',
+        matchTerms: [],
         paySchedule: { mode: 'recurring', checks: [], recurring: { frequency: 'monthly', day1: 1, day2: null }, perCheckAmount: null },
       },
       {
-        id: id(), name: 'CalPers', amount: 0, type: 'retirement',
-        matchTerms: ['public employee retirement system'],
+        id: id(), name: 'Tertiary', amount: 0, type: 'other',
+        matchTerms: [],
         paySchedule: { mode: 'recurring', checks: [], recurring: { frequency: 'monthly', day1: 1, day2: null }, perCheckAmount: null },
       },
       createBonusIncomeSource(),

@@ -136,7 +136,7 @@ export function openPayScheduleEditor(source) {
   ));
 
   recurringPanel.appendChild(el('p', { className: 'tx-form-hint' },
-    'Good for fixed deposits like VA disability (1st) or CalPers — same calendar day every month.'
+    'Good for fixed deposits on the same calendar day every month (e.g. the 1st).'
   ));
   recurringPanel.appendChild(el('div', { className: 'input-row' },
     el('div', { className: 'form-group' }, el('label', {}, 'Pattern'), freqSelect),
@@ -162,7 +162,7 @@ export function openPayScheduleEditor(source) {
         el('label', {}, 'CSV description match (one per line)'),
         matchTermsIn,
         el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
-          'Defaults: NOAA → us department of agriculture · VA → us department of veterans affairs · CalPers → public employee retirement system. Unmatched deposits go to Bonus Income.'
+          'Add phrases that appear on bank CSV deposits for this source (one per line). Unmatched deposits go to Bonus Income.'
         ),
       ),
       datesPanel,
