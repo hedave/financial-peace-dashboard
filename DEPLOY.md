@@ -45,7 +45,7 @@ One-time setup; then `git push` updates the live site automatically.
 ### C — Push from your PC
 
 ```powershell
-cd C:\Users\deher\financial-peace-dashboard
+cd path/to/financial-peace-dashboard
 git init
 git add .
 git commit -m "Initial commit: Financial Peace Dashboard"
