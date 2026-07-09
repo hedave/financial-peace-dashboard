@@ -245,6 +245,7 @@ function makePayment(debt) {
             categoryId: d.categoryId || null,
             debtId: d.id,
             description: `Payment to ${d.name}`,
+            clearingStatus: 'cleared',
           });
           if (d.balance <= 0) {
             d.balance = 0;

@@ -12,6 +12,8 @@ import {
   normalizeImportRow, resolveCategoryId,
   isLikelyDuplicateTransaction,
   clusterDuplicateTransactions,
+  findBestPendingMatch,
+  isTransactionPending,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
 import { findBillForTransaction } from './bill-matcher.js';
@@ -121,6 +123,10 @@ function normalizeState(state) {
   });
   ensureDefaultCategories(state);
   (state.transactions || []).forEach(tx => {
+    // Existing data: treat as bank-cleared so balances don't jump
+    if (tx.clearingStatus !== 'pending' && tx.clearingStatus !== 'cleared') {
+      tx.clearingStatus = 'cleared';
+    }
     if (tx.type !== 'income' || tx.incomeSourceId) return;
     const source = resolveIncomeSource(tx.description, state.incomeSources);
     if (source) tx.incomeSourceId = source.id;
@@ -1024,7 +1030,9 @@ class Store {
   }
 
   // --- Actions ---
-  getCheckingDelta(type, amount) {
+  /** Checking impact for a cleared transaction. Pending never moves checking. */
+  getCheckingDelta(type, amount, clearingStatus = 'cleared') {
+    if (clearingStatus === 'pending') return 0;
     const num = Math.abs(Number(amount)) || 0;
     if (type === 'income') return num;
     if (type === 'expense' || type === 'debt_payment' || type === 'transfer') return -num;
@@ -1032,7 +1040,12 @@ class Store {
   }
 
   applyCheckingDelta(state, delta) {
+    if (!delta) return;
     state.balances.checking = (Number(state.balances.checking) || 0) + delta;
+  }
+
+  isPending(tx) {
+    return isTransactionPending(tx);
   }
 
   adjustDebtForPayment(state, debtId, paymentDelta) {
@@ -1066,11 +1079,23 @@ class Store {
     });
   }
 
-  addTransaction({ date, amount, type, categoryId, description, billId, debtId, splits }) {
+  /**
+   * Manual expense/income default to pending (no checking impact) unless
+   * postToChecking / clearingStatus: 'cleared'. Debt payments & transfers default cleared.
+   */
+  addTransaction({
+    date, amount, type, categoryId, description, billId, debtId, splits,
+    clearingStatus, postToChecking = false,
+  }) {
     const num = Math.abs(Number(amount));
     if (!num) return;
     const normalizedSplits = this.normalizeSplits(splits);
     const useSplits = normalizedSplits.length > 0 && type === 'expense';
+    const wantsPending = type === 'expense' || type === 'income';
+    const status = clearingStatus
+      || (postToChecking ? 'cleared' : null)
+      || (wantsPending ? 'pending' : 'cleared');
+
     this.update(s => {
       const newTx = {
         id: generateId(),
@@ -1081,11 +1106,12 @@ class Store {
         description: description || '',
         billId: billId || null,
         debtId: debtId || null,
+        clearingStatus: status,
         ...(useSplits ? { splits: normalizedSplits } : {}),
       };
-      if (type === 'income') this.applyImportedIncome(s, newTx);
+      if (type === 'income' && status === 'cleared') this.applyImportedIncome(s, newTx);
       s.transactions.unshift(newTx);
-      this.applyCheckingDelta(s, this.getCheckingDelta(type, num));
+      this.applyCheckingDelta(s, this.getCheckingDelta(type, num, status));
       if (type === 'debt_payment' && debtId) {
         this.adjustDebtForPayment(s, debtId, num);
       }
@@ -1099,11 +1125,15 @@ class Store {
 
       const oldType = tx.type;
       const oldAmount = Math.abs(Number(tx.amount)) || 0;
+      const oldStatus = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
       const newType = updates.type ?? tx.type;
       const newAmount = updates.amount !== undefined ? Math.abs(Number(updates.amount)) : oldAmount;
-      const oldDelta = this.getCheckingDelta(oldType, oldAmount);
-      const newDelta = this.getCheckingDelta(newType, newAmount);
+      const newStatus = updates.clearingStatus !== undefined
+        ? (updates.clearingStatus === 'pending' ? 'pending' : 'cleared')
+        : oldStatus;
 
+      const oldDelta = this.getCheckingDelta(oldType, oldAmount, oldStatus);
+      const newDelta = this.getCheckingDelta(newType, newAmount, newStatus);
       this.applyCheckingDelta(s, -oldDelta + newDelta);
 
       if (oldType === 'debt_payment' && tx.debtId) {
@@ -1117,6 +1147,7 @@ class Store {
       if (updates.amount !== undefined) tx.amount = newAmount;
       if (updates.type !== undefined) tx.type = newType;
       if (updates.description !== undefined) tx.description = updates.description || '';
+      if (updates.clearingStatus !== undefined) tx.clearingStatus = newStatus;
       if (updates.splits !== undefined) {
         const normalizedSplits = this.normalizeSplits(updates.splits);
         if (normalizedSplits.length) {
@@ -1135,6 +1166,11 @@ class Store {
         }
       }
       if (updates.debtId !== undefined) tx.debtId = updates.debtId || null;
+
+      // Income linkage when first cleared
+      if (newType === 'income' && newStatus === 'cleared' && oldStatus === 'pending') {
+        this.applyImportedIncome(s, tx);
+      }
     });
   }
 
@@ -1152,6 +1188,7 @@ class Store {
         type: 'transfer',
         categoryId,
         description: `Funded envelope: ${cat?.name}`,
+        clearingStatus: 'cleared',
       });
     });
   }
@@ -1174,6 +1211,7 @@ class Store {
         categoryId: debt.categoryId || null,
         debtId: debt.id,
         description: `Snowball payment to ${debt.name}`,
+        clearingStatus: 'cleared',
       });
       if (debt.balance <= 0) {
         debt.balance = 0;
@@ -1240,6 +1278,7 @@ class Store {
         categoryId: b.categoryId,
         billId,
         description: `Bill paid: ${b.name}`,
+        clearingStatus: 'cleared',
       });
       s.balances.checking = (Number(s.balances.checking) || 0) - paid;
     });
@@ -1248,7 +1287,8 @@ class Store {
   importTransactions(rows, { includePending = true } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
-      billMatches: 0, incomeLinked: 0, skipped: 0, duplicates: 0, parsed: rows.length,
+      billMatches: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
+      matchedPending: 0, parsed: rows.length,
     };
     this.update(s => {
       rows.forEach(row => {
@@ -1265,7 +1305,46 @@ class Store {
           description: tx.description,
         };
 
-        if (isLikelyDuplicateTransaction(s.transactions, candidate)) {
+        // Match a pending manual log → clear in place (no second row)
+        const pendingMatch = findBestPendingMatch(s.transactions, candidate);
+        if (pendingMatch) {
+          pendingMatch.clearingStatus = 'cleared';
+          if (tx.date) pendingMatch.date = tx.date;
+          if (tx.description) {
+            // Keep user's category/splits; prefer bank description for the log
+            pendingMatch.description = tx.description;
+          }
+          if (tx.bankCategory && !pendingMatch.categoryId && !this.isSplitTransaction(pendingMatch)) {
+            pendingMatch.importCategory = tx.bankCategory;
+            const resolved = resolveCategoryId(
+              tx.bankCategory,
+              tx.description,
+              s.categories,
+              tx.type,
+            );
+            if (resolved) pendingMatch.categoryId = resolved;
+          }
+          this.applyCheckingDelta(
+            s,
+            this.getCheckingDelta(pendingMatch.type, pendingMatch.amount, 'cleared'),
+          );
+          if (pendingMatch.type === 'income') {
+            this.applyImportedIncome(s, pendingMatch);
+            stats.incomeLinked++;
+            stats.income++;
+          } else if (pendingMatch.type === 'expense') {
+            stats.expense++;
+            if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
+            if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
+          }
+          stats.matchedPending++;
+          stats.count++;
+          return;
+        }
+
+        // Skip if already present among cleared (or any non-pending) txs
+        const nonPending = s.transactions.filter(t => !isTransactionPending(t));
+        if (isLikelyDuplicateTransaction(nonPending, candidate)) {
           stats.duplicates++;
           return;
         }
@@ -1285,6 +1364,7 @@ class Store {
           categoryId,
           description: tx.description,
           importCategory: tx.bankCategory || null,
+          clearingStatus: 'cleared',
         };
 
         if (tx.type === 'expense' && !categoryId) {

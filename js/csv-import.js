@@ -346,6 +346,60 @@ export function isLikelyDuplicateTransaction(existing, tx, options = {}) {
   return existing.some(t => areLikelyDuplicatePair(t, candidate, options));
 }
 
+export function isTransactionPending(tx) {
+  return tx && tx.clearingStatus === 'pending';
+}
+
+/**
+ * Find the best pending manual transaction that matches an import row.
+ * Prefers higher description similarity, then closer dates.
+ */
+export function findBestPendingMatch(transactions, candidate, options = {}) {
+  const {
+    dateWindowDays = DUPLICATE_DATE_WINDOW_DAYS,
+    minSimilarity = 0.35,
+  } = options;
+
+  const pending = (transactions || []).filter(isTransactionPending);
+  if (!pending.length || !candidate) return null;
+
+  const amt = Math.round(Math.abs(Number(candidate.amount) || 0) * 100);
+  if (!amt) return null;
+
+  let best = null;
+  let bestScore = -1;
+
+  pending.forEach(tx => {
+    if (tx.type !== candidate.type) return;
+    const txAmt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
+    if (txAmt !== amt) return;
+
+    const dayDiff = daysBetween(tx.date, candidate.date);
+    if (dayDiff > dateWindowDays) return;
+
+    const sim = descriptionSimilarity(tx.description, candidate.description);
+    // Same day: allow weaker description (amount is strong signal)
+    // Cross-day: require minSimilarity
+    if (dayDiff > 0 && sim < minSimilarity) return;
+    if (dayDiff === 0 && sim < 0.15 && normalizeMerchantDescription(tx.description)
+      && normalizeMerchantDescription(candidate.description)) {
+      // Both have descriptions but totally different — skip unless one is empty
+      const na = normalizeMerchantDescription(tx.description);
+      const nb = normalizeMerchantDescription(candidate.description);
+      if (na && nb && sim < 0.15) return;
+    }
+
+    // Score: similarity primary, recency secondary
+    const score = sim * 10 + (dateWindowDays - dayDiff);
+    if (score > bestScore) {
+      bestScore = score;
+      best = tx;
+    }
+  });
+
+  return best;
+}
+
 export function clusterDuplicateTransactions(transactions, options = {}) {
   const txs = (transactions || []).filter(t => t?.id && Math.abs(Number(t.amount) || 0) > 0);
   const buckets = new Map();

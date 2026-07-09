@@ -484,6 +484,27 @@ body {
   color: var(--negative);
 }
 
+.tx-pending-badge {
+  display: inline-block;
+  margin-top: 0.25rem;
+  margin-right: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
+  vertical-align: middle;
+}
+
+.tx-card-badges .tx-pending-badge {
+  margin-top: 0;
+}
+
+.tx-pending-row {
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+}
+
 .duplicate-review-list {
   display: flex;
   flex-direction: column;

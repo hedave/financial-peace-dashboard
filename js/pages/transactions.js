@@ -227,6 +227,7 @@ export function renderTransactions(container, mode) {
   const typeSelect = el('select', { id: 'tx-type-filter' },
     el('option', { value: 'all' }, 'All Types'),
     ...EDITABLE_TYPES.map(type => el('option', { value: type }, TYPE_LABELS[type])),
+    el('option', { value: 'pending' }, 'Pending bank'),
     el('option', { value: 'duplicates' }, 'Possible Duplicates'),
   );
   const catSelect = el('select', { id: 'tx-cat-filter' },
@@ -284,6 +285,8 @@ export function renderTransactions(container, mode) {
     if (filter) txs = txs.filter(t => transactionMatchesSearch(t, filter));
     if (typeFilter === 'duplicates') {
       txs = txs.filter(t => duplicateMeta.has(t.id));
+    } else if (typeFilter === 'pending') {
+      txs = txs.filter(t => store.isPending(t));
     } else if (typeFilter !== 'all') {
       txs = txs.filter(t => t.type === typeFilter);
     }
@@ -477,14 +480,24 @@ function txMoreMenu(t) {
   return menu;
 }
 
+function pendingBadge(t) {
+  if (!store.isPending(t)) return null;
+  return el('span', {
+    className: 'tx-pending-badge',
+    title: 'Logged manually — checking balance updates when this matches a CSV import',
+  }, 'Pending');
+}
+
 function txRow(t, state, duplicateMeta = new Map()) {
   const isIncome = t.type === 'income';
   const sourceTag = incomeSourceLabel(t, state);
   const dupCount = duplicateMeta.get(t.id);
   const isDuplicate = dupCount >= 2;
-  return el('tr', { className: isDuplicate ? 'tx-duplicate-row' : '' },
+  const isPending = store.isPending(t);
+  return el('tr', { className: `${isDuplicate ? 'tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`.trim() },
     el('td', {},
       formatDate(t.date),
+      isPending ? el('div', {}, pendingBadge(t)) : null,
       isDuplicate ? el('div', {},
         el('span', {
           className: 'tx-duplicate-badge',
@@ -514,9 +527,10 @@ function txCard(t, state, duplicateMeta = new Map()) {
   const sourceTag = incomeSourceLabel(t, state);
   const dupCount = duplicateMeta.get(t.id);
   const isDuplicate = dupCount >= 2;
+  const isPending = store.isPending(t);
 
   return el('article', {
-    className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}`,
+    className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`,
   },
     el('div', { className: 'tx-card-top' },
       el('span', { className: 'tx-card-date' }, formatDate(t.date)),
@@ -531,6 +545,7 @@ function txCard(t, state, duplicateMeta = new Map()) {
       el('div', { className: 'tx-card-meta' }, categoryLabel(t, state)),
       el('div', { className: 'tx-card-badges' },
         el('span', { className: 'tx-type-badge' }, TYPE_LABELS[t.type] || t.type),
+        pendingBadge(t),
         isDuplicate ? el('span', {
           className: 'tx-duplicate-badge',
           title: `${dupCount} transactions with this amount`,
@@ -670,6 +685,27 @@ export function openTransactionForm({
     ),
   );
 
+  // Pending bank: default for new expense/income — does not move checking until CSV match
+  const postToChecking = el('input', { type: 'checkbox' });
+  const alreadyCleared = isEdit && !store.isPending(transaction);
+  if (alreadyCleared) postToChecking.checked = true;
+  if (isEdit && store.isPending(transaction)) postToChecking.checked = false;
+
+  const postCheckingGroup = el('div', { className: 'form-option post-checking-option' },
+    el('div', { className: 'form-option-text' },
+      el('span', { className: 'form-option-label' }, 'Post to checking now'),
+      el('span', { className: 'form-option-hint' },
+        isEdit && store.isPending(transaction)
+          ? 'Turn on to update checking immediately (or wait for CSV import to clear it)'
+          : 'Off = note for envelopes only; checking updates when this matches a bank CSV import'
+      ),
+    ),
+    el('label', { className: 'toggle-switch' },
+      postToChecking,
+      el('span', { className: 'toggle-slider' }),
+    ),
+  );
+
   function syncRemember() {
     const currentType = isCelebration ? transaction?.type : typeSelect.value;
     const useSplit = currentType === 'expense' && splitToggle.checked;
@@ -677,9 +713,17 @@ export function openTransactionForm({
     rememberGroup.style.display = currentType === 'expense' && hasCat && descIn.value.trim() ? '' : 'none';
   }
 
+  function syncPostChecking() {
+    const currentType = isCelebration ? transaction?.type : typeSelect.value;
+    const show = currentType === 'expense' || currentType === 'income';
+    postCheckingGroup.style.display = show ? '' : 'none';
+  }
+
+  typeSelect.addEventListener('change', syncPostChecking);
   catSelect.addEventListener('change', syncRemember);
   descIn.addEventListener('input', syncRemember);
   syncTypeFields();
+  syncPostChecking();
 
   const modal = showModal({
     title: isEdit ? 'Edit Transaction' : 'Add Transaction',
@@ -697,6 +741,7 @@ export function openTransactionForm({
       splitOption,
       catGroup,
       splitSection,
+      postCheckingGroup,
       rememberGroup,
       debtGroup,
     ),
@@ -729,6 +774,9 @@ export function openTransactionForm({
 
           const categoryId = !useSplit && categoryUsesEnvelope(txType) ? (catSelect.value || null) : null;
           const splits = useSplit ? splitEditor.getSplits() : null;
+          const clearingStatus = (txType === 'expense' || txType === 'income')
+            ? (postToChecking.checked ? 'cleared' : 'pending')
+            : 'cleared';
 
           if (isEdit) {
             const updates = {
@@ -736,6 +784,7 @@ export function openTransactionForm({
               amount: amt,
               type: txType,
               description: descIn.value.trim(),
+              clearingStatus,
             };
             if (useSplit) {
               updates.splits = splits;
@@ -754,8 +803,10 @@ export function openTransactionForm({
               description: descIn.value.trim(),
               debtId,
               splits,
+              clearingStatus,
             });
-            showToast(useSplit ? 'Split transaction logged!' : 'Transaction logged!');
+            const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
+            showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
           }
 
           if (rememberRule.checked && txType === 'expense') {
@@ -790,6 +841,9 @@ function formatImportToast(stats) {
   }
   if (stats.count > 0) {
     const parts = [`Imported ${stats.count} transaction${stats.count === 1 ? '' : 's'}`];
+    if (stats.matchedPending) {
+      parts.push(`${stats.matchedPending} pending matched`);
+    }
     if (stats.income) parts.push(`${stats.income} income`);
     if (stats.expense) parts.push(`${stats.expense} expenses`);
     if (stats.categorized) parts.push(`${stats.categorized} categorized`);
@@ -801,9 +855,10 @@ function formatImportToast(stats) {
     return parts.join(' · ');
   }
   const parts = ['No new transactions imported'];
+  if (stats.matchedPending) parts.push(`${stats.matchedPending} pending matched`);
   if (stats.duplicates) parts.push(`${stats.duplicates} already in your log`);
   if (stats.skipped) parts.push(`${stats.skipped} skipped (pending/cancelled or unparseable)`);
-  if (!stats.duplicates && !stats.skipped) {
+  if (!stats.duplicates && !stats.skipped && !stats.matchedPending) {
     parts.push('check that the file has posted transactions with amounts');
   }
   return parts.join(' · ');
@@ -821,8 +876,10 @@ function openImportDialog() {
     el('br'),
     'Likely duplicates (same amount + similar merchant, within 7 days) are skipped automatically.',
     el('br'),
+    'Manual “Pending” logs are matched to bank rows and cleared (checking updates once).',
+    el('br'),
     el('label', { style: 'display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;color:var(--text)' },
-      includePendingIn, ' Include pending/unposted transactions'
+      includePendingIn, ' Include pending/unposted bank rows'
     ),
   );
 
@@ -848,9 +905,9 @@ function openImportDialog() {
                 includePending: includePendingIn.checked,
               });
               modal.close();
-              const type = stats.count > 0 ? 'success' : 'info';
+              const type = (stats.count > 0 || stats.matchedPending > 0) ? 'success' : 'info';
               showToast(formatImportToast(stats), type, 6000);
-              if (stats.count > 0) {
+              if (stats.count > 0 || stats.matchedPending > 0) {
                 window.appRefresh();
                 if (stats.billMatches > 0) {
                   setTimeout(() => openBillMatches(store.getReviewInbox()), 400);
@@ -879,7 +936,8 @@ function deleteTransaction(id) {
     store.update(s => {
       const t = s.transactions.find(x => x.id === id);
       if (t) {
-        s.balances.checking -= store.getCheckingDelta(t.type, t.amount);
+        const status = t.clearingStatus === 'pending' ? 'pending' : 'cleared';
+        s.balances.checking -= store.getCheckingDelta(t.type, t.amount, status);
         if (t.type === 'debt_payment' && t.debtId) {
           store.adjustDebtForPayment(s, t.debtId, -Math.abs(Number(t.amount) || 0));
         }
