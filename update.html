@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Update Financial Peace App</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 28rem;
+      margin: 2rem auto;
+      padding: 1.25rem;
+      line-height: 1.5;
+      color: #1a2e28;
+      background: #f4f7f5;
+    }
+    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    p { color: #4a5c56; font-size: 0.95rem; }
+    button {
+      display: block;
+      width: 100%;
+      margin-top: 1.25rem;
+      padding: 0.9rem 1rem;
+      border: none;
+      border-radius: 10px;
+      background: #145246;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; }
+    #log {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #fff;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      min-height: 3rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Update Financial Peace</h1>
+  <p>
+    Your phone is using an old cached copy of the app. Tap the button below to
+    clear that cache and load the new mobile UI (bottom nav, pending expenses, etc.).
+  </p>
+  <button type="button" id="go">Clear cache &amp; open app</button>
+  <div id="log">Ready.</div>
+  <script>
+    const log = (msg) => {
+      document.getElementById('log').textContent = msg;
+    };
+
+    document.getElementById('go').addEventListener('click', async () => {
+      const btn = document.getElementById('go');
+      btn.disabled = true;
+      const steps = [];
+
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          steps.push('Service workers: ' + regs.length);
+          await Promise.all(regs.map((r) => r.unregister()));
+          steps.push('Unregistered all service workers');
+        } else {
+          steps.push('No service worker API');
+        }
+
+        if (typeof caches !== 'undefined') {
+          const keys = await caches.keys();
+          steps.push('Caches: ' + (keys.join(', ') || '(none)'));
+          await Promise.all(keys.map((k) => caches.delete(k)));
+          steps.push('Deleted all caches');
+        }
+
+        try {
+          localStorage.removeItem('fp_build');
+        } catch (_) {}
+
+        steps.push('Redirecting to app…');
+        log(steps.join('\n'));
+
+        // Hard navigation with cache-buster so HTML is not reused
+        setTimeout(() => {
+          window.location.replace('/?updated=' + Date.now());
+        }, 400);
+      } catch (err) {
+        log(steps.join('\n') + '\nERROR: ' + (err && err.message ? err.message : err));
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
