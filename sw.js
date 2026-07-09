@@ -1,9 +1,7 @@
-const CACHE = 'finpeace-v3';
+const CACHE = 'finpeace-v4';
 
-// App shell only — JS/CSS use network-first so deploys show up without fighting the SW
+// Minimal precache — HTML/JS/CSS always network-first so deploys win
 const PRECACHE = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -17,18 +15,24 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))),
-    ).then(() => self.clients.claim()),
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(clients => {
+        clients.forEach(client => client.postMessage({ type: 'SW_ACTIVATED', cache: CACHE }));
+      }),
   );
 });
 
-function isAppAsset(url) {
-  return url.pathname.endsWith('.js')
-    || url.pathname.endsWith('.css')
-    || url.pathname.endsWith('.html')
-    || url.pathname === '/'
-    || url.pathname.endsWith('/');
+function isAppShell(url) {
+  const p = url.pathname;
+  return p.endsWith('.js')
+    || p.endsWith('.css')
+    || p.endsWith('.html')
+    || p === '/'
+    || p.endsWith('/')
+    || p.endsWith('sw.js');
 }
 
 self.addEventListener('fetch', (e) => {
@@ -37,14 +41,20 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Network-first for navigations and app code so updates deploy cleanly
-  if (e.request.mode === 'navigate' || isAppAsset(url)) {
+  // Never cache the service worker script itself
+  if (url.pathname.endsWith('/sw.js') || url.pathname === '/sw.js') {
+    e.respondWith(fetch(e.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Network-first for app shell — fall back to cache only when offline
+  if (e.request.mode === 'navigate' || isAppShell(url)) {
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: 'no-store' })
         .then(res => {
-          if (res && res.ok) {
+          if (res && res.ok && e.request.method === 'GET') {
             const copy = res.clone();
-            caches.open(CACHE).then(cache => cache.put(e.request, copy));
+            caches.open(CACHE).then(cache => cache.put(e.request, copy)).catch(() => {});
           }
           return res;
         })
@@ -55,14 +65,13 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Cache-first for icons and other static assets
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(res => {
         if (res && res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, copy));
+          caches.open(CACHE).then(cache => cache.put(e.request, copy)).catch(() => {});
         }
         return res;
       });

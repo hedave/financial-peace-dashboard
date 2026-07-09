@@ -128,10 +128,38 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// Build stamp — change this (and index.html ?v=) on every mobile-visible ship
+const APP_BUILD = '20260708h';
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`/sw.js?v=20260708g`).then(reg => {
-      reg.update().catch(() => {});
-    }).catch(() => {});
+  // When a new SW takes control, reload once so HTML/CSS/JS match
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'SW_ACTIVATED' && !sessionStorage.getItem('sw-reloaded-' + APP_BUILD)) {
+      sessionStorage.setItem('sw-reloaded-' + APP_BUILD, '1');
+      window.location.reload();
+    }
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      // Drop any SW registered under a query-string URL (broke updates)
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(async (reg) => {
+        const url = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
+        if (url.includes('sw.js?')) await reg.unregister();
+      }));
+
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      await reg.update();
+    } catch {
+      // offline or unsupported
+    }
   });
 }
