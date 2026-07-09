@@ -1,4 +1,4 @@
-const CACHE = 'finpeace-v2';
+const CACHE = 'finpeace-v3';
 
 // App shell only — JS/CSS use network-first so deploys show up without fighting the SW
 const PRECACHE = [
