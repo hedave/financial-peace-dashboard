@@ -53,6 +53,8 @@ export function applyTheme(settings = {}) {
   const root = document.documentElement;
   root.setAttribute('data-theme', settings.darkMode ? 'dark' : 'light');
   root.setAttribute('data-palette', settings.palette || 'forest');
+  root.setAttribute('data-large-text', settings.largeText ? 'true' : 'false');
+  root.setAttribute('data-reduce-motion', settings.reduceMotion ? 'true' : 'false');
 }
 
 export function getPalette(id) {

@@ -905,21 +905,80 @@ function formatImportToast(stats) {
   return parts.join(' · ');
 }
 
+const BANK_IMPORT_TIPS = {
+  generic: {
+    label: 'Generic / other bank',
+    tips: [
+      'Export transactions as CSV from your bank website or app.',
+      'Need columns that include Date, Description (or Payee), and Amount — or separate Debit/Credit columns.',
+      'Positive amount = income, negative = expense for signed-amount files.',
+      'Manual “Pending” logs are matched to bank rows (checking updates once).',
+    ],
+  },
+  usaa: {
+    label: 'USAA',
+    tips: [
+      'Online banking → Account → Manage account → Export (CSV).',
+      'USAA often uses a signed Amount column (negative = purchase).',
+      'Include pending rows only if you want unposted card activity (or leave the checkbox on).',
+      'After import, assign envelopes for uncategorized rows; use “Remember for future imports”.',
+    ],
+  },
+  chase: {
+    label: 'Chase',
+    tips: [
+      'Accounts → account menu → Download account activity → CSV.',
+      'Chase files usually have Transaction Date, Description, and Amount.',
+      'Credit card exports may reverse the sign of charges — check a known purchase after import.',
+      'Duplicates within 7 days (same amount + similar merchant) are skipped automatically.',
+    ],
+  },
+  bankofamerica: {
+    label: 'Bank of America',
+    tips: [
+      'Accounts → Download → choose CSV date range.',
+      'Look for Date, Description, and Amount (or Running Bal. files — we need amount columns).',
+      'If import finds 0 rows, open the CSV and confirm headers are on the first data row.',
+    ],
+  },
+  wells: {
+    label: 'Wells Fargo',
+    tips: [
+      'Account activity → Download → CSV.',
+      'Typically Date, Amount, Description — should import cleanly.',
+      'Large date ranges are fine; duplicates with existing log entries are skipped.',
+    ],
+  },
+};
+
 function openImportDialog() {
   const fileIn = el('input', { type: 'file', accept: '.csv,.CSV,text/csv' });
   const includePendingIn = el('input', { type: 'checkbox', checked: true, id: 'import-pending' });
+  const bankSelect = el('select', { id: 'import-bank' },
+    ...Object.entries(BANK_IMPORT_TIPS).map(([id, info]) =>
+      el('option', { value: id }, info.label),
+    ),
+  );
+  const tipsEl = el('div', { className: 'import-bank-tips' });
+
+  function paintTips() {
+    const info = BANK_IMPORT_TIPS[bankSelect.value] || BANK_IMPORT_TIPS.generic;
+    tipsEl.innerHTML = '';
+    tipsEl.appendChild(el('ul', { className: 'import-tips-list' },
+      ...info.tips.map(t => el('li', {}, t)),
+    ));
+  }
+  bankSelect.addEventListener('change', paintTips);
+  paintTips();
+
   const preview = el('div', { style: 'margin-top:1rem;font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
-    'Supports USAA, Chase, and most bank exports.',
-    el('br'),
-    'Positive amount = income, negative amount = expense. Category column maps to envelopes when possible.',
-    el('br'),
-    'Use Edit or Category on each row to assign envelopes manually.',
-    el('br'),
-    'Likely duplicates (same amount + similar merchant, within 7 days) are skipped automatically.',
-    el('br'),
-    'Manual “Pending” logs are matched to bank rows and cleared (checking updates once).',
-    el('br'),
-    el('label', { style: 'display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;color:var(--text)' },
+    el('div', { className: 'form-group' },
+      el('label', {}, 'I bank with…'),
+      bankSelect,
+    ),
+    tipsEl,
+    el('hr', { style: 'border:none;border-top:1px solid var(--border);margin:0.85rem 0' }),
+    el('label', { style: 'display:flex;align-items:center;gap:0.5rem;color:var(--text)' },
       includePendingIn, ' Include pending/unposted bank rows'
     ),
   );

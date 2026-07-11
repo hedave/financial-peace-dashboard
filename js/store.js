@@ -116,6 +116,11 @@ function normalizeState(state) {
   if (!Array.isArray(state.balances.savings)) state.balances.savings = [];
   if (!state.settings || typeof state.settings !== 'object') state.settings = { ...defaults.settings };
   if (!state.settings.palette) state.settings.palette = 'forest';
+  if (typeof state.settings.largeText !== 'boolean') state.settings.largeText = false;
+  if (typeof state.settings.reduceMotion !== 'boolean') state.settings.reduceMotion = false;
+  if (state.settings.lastBackupAt != null && typeof state.settings.lastBackupAt !== 'string') {
+    state.settings.lastBackupAt = null;
+  }
   state.incomeSources = ensureBonusIncomeSource(state.incomeSources);
   migrateLegacyIncomeSourceNames(state.incomeSources);
   (state.incomeSources || []).forEach(src => {

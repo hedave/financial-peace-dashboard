@@ -84,6 +84,9 @@ export function createDefaultState() {
       daveRamseyMode: true,
       passwordHash: null,
       familySize: 7,
+      largeText: false,
+      reduceMotion: false,
+      lastBackupAt: null,
     },
     incomeSources: [
       {

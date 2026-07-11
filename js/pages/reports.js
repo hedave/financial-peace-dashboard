@@ -1,20 +1,26 @@
-import { el, formatCurrency, getCurrentMonth, getMonthLabel, toCSV, downloadFile } from '../utils.js';
+import { el, formatCurrency, getCurrentMonth, getPreviousMonth, getMonthLabel, toCSV, downloadFile } from '../utils.js';
 import { store } from '../store.js';
 
 export function renderReports(container) {
   const state = store.getState();
   const month = getCurrentMonth();
+  const prevMonth = getPreviousMonth(month);
   const categories = state.categories;
   const spentByCategory = categories.map(c => ({
+    id: c.id,
     name: c.name,
+    icon: c.icon,
     budgeted: Number(c.monthlyBudget) || 0,
     spent: store.getCategorySpent(c.id, month),
+    prevSpent: store.getCategorySpent(c.id, prevMonth),
     remaining: store.getCategoryRemaining(c.id, month),
-  })).filter(c => c.budgeted > 0 || c.spent > 0);
+  })).filter(c => c.budgeted > 0 || c.spent > 0 || c.prevSpent > 0);
 
   const totalBudgeted = store.getTotalBudgeted();
   const totalSpent = store.getTotalSpent();
+  const prevSpentTotal = categories.reduce((s, c) => s + store.getCategorySpent(c.id, prevMonth), 0);
   const income = store.getTotalIncome(month);
+  const spendDelta = totalSpent - prevSpentTotal;
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
@@ -31,6 +37,42 @@ export function renderReports(container) {
     summaryCard('Income', income, 'accent'),
     summaryCard('Budgeted', totalBudgeted),
     summaryCard('Spent', totalSpent, totalSpent > totalBudgeted ? 'negative' : ''),
+  ));
+
+  container.appendChild(el('div', { className: 'section' },
+    el('div', { className: 'section-title' }, `This month vs ${getMonthLabel(prevMonth)}`),
+    el('div', { className: 'card' },
+      el('p', { className: 'month-compare-summary' },
+        `Spent ${formatCurrency(totalSpent)} this month vs ${formatCurrency(prevSpentTotal)} last month — `,
+        el('strong', {
+          style: `color:${spendDelta > 0 ? 'var(--negative)' : spendDelta < 0 ? 'var(--positive)' : 'var(--text)'}`,
+        }, spendDelta === 0
+          ? 'unchanged'
+          : `${spendDelta > 0 ? '+' : ''}${formatCurrency(spendDelta)}`),
+        '.',
+      ),
+      el('div', { className: 'month-compare-list' },
+        ...spentByCategory
+          .map(c => ({ ...c, delta: c.spent - c.prevSpent }))
+          .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+          .slice(0, 12)
+          .map(c => el('div', { className: 'month-compare-row' },
+            el('span', { className: 'month-compare-name' }, `${c.icon || '✉️'} ${c.name}`),
+            el('span', { className: 'month-compare-vals' },
+              el('span', { title: getMonthLabel(prevMonth) }, formatCurrency(c.prevSpent)),
+              el('span', { className: 'month-compare-arrow' }, '→'),
+              el('span', { title: getMonthLabel(month) }, formatCurrency(c.spent)),
+              el('span', {
+                className: 'month-compare-delta',
+                style: `color:${c.delta > 0 ? 'var(--negative)' : c.delta < 0 ? 'var(--positive)' : 'var(--text-muted)'}`,
+              }, c.delta === 0 ? '—' : `${c.delta > 0 ? '+' : ''}${formatCurrency(c.delta)}`),
+            ),
+          )),
+      ),
+      el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem' },
+        'Left = last month · Right = this month · Delta shows change in spending.',
+      ),
+    ),
   ));
 
   container.appendChild(el('div', { className: 'section' },

@@ -31,10 +31,39 @@ export async function renderSettings(container) {
       store.update(s => { s.settings.darkMode = val; });
       applyTheme({ ...store.getState().settings, darkMode: val });
     }),
+    toggleRow('Larger text', !!state.settings.largeText, val => {
+      store.update(s => { s.settings.largeText = val; });
+      applyTheme(store.getState().settings);
+      showToast(val ? 'Larger text on' : 'Larger text off');
+    }),
+    toggleRow('Reduce motion', !!state.settings.reduceMotion, val => {
+      store.update(s => { s.settings.reduceMotion = val; });
+      applyTheme(store.getState().settings);
+    }),
     toggleRow('Dave Ramsey Mode (strict zero-based)', state.settings.daveRamseyMode, val => {
       store.update(s => { s.settings.daveRamseyMode = val; });
     }),
   ));
+
+  const daysSinceBackup = daysSince(state.settings.lastBackupAt);
+  if (daysSinceBackup == null || daysSinceBackup >= 30) {
+    container.appendChild(el('div', { className: 'banner banner-warning section' },
+      el('div', { className: 'banner-icon' }, '💾'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, 'Backup recommended'),
+        el('p', {},
+          daysSinceBackup == null
+            ? 'You have not exported a JSON backup yet. Download one for peace of mind.'
+            : `Last backup was ${daysSinceBackup} days ago. Export a fresh copy when you can.`,
+        ),
+      ),
+      el('button', {
+        className: 'btn btn-secondary btn-sm',
+        style: 'margin-left:auto;align-self:center',
+        onClick: () => downloadJsonBackup(),
+      }, 'Export Backup'),
+    ));
+  }
 
   container.appendChild(el('div', { className: 'card section' },
     el('div', { className: 'section-title' }, 'Security'),
@@ -139,18 +168,14 @@ export async function renderSettings(container) {
       }, 'Export for Google Sheets'),
       el('button', {
         className: 'btn btn-secondary',
-        onClick: () => {
-          const data = JSON.stringify(store.getState(), null, 2);
-          const blob = new Blob([data], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'financial-peace-backup.json';
-          a.click();
-          URL.revokeObjectURL(url);
-          showToast('Backup downloaded!');
-        }
+        onClick: () => downloadJsonBackup(),
       }, 'Export Backup (JSON)'),
+      state.settings.lastBackupAt
+        ? el('p', {
+          className: 'tx-form-hint',
+          style: 'width:100%;margin-top:0.5rem',
+        }, `Last JSON backup: ${new Date(state.settings.lastBackupAt).toLocaleString()}`)
+        : null,
       el('button', {
         className: 'btn btn-secondary',
         onClick: () => {
@@ -189,37 +214,92 @@ export async function renderSettings(container) {
     ),
   ));
 
-  const rules = state.categoryRules || [];
-  container.appendChild(el('div', { className: 'card section' },
-    el('div', { className: 'section-title' }, 'Category Rules'),
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
-      'Saved when you check "Remember for future imports" on a transaction. Rules auto-categorize CSV imports.'
-    ),
-    rules.length
-      ? el('div', { className: 'table-wrap' },
-        el('table', {},
-          el('thead', {}, el('tr', {},
-            el('th', {}, 'Merchant pattern'), el('th', {}, 'Maps to'), el('th', {}, ''),
-          )),
-          el('tbody', {},
-            ...rules.map(rule => el('tr', {},
-              el('td', {}, `"${rule.pattern}"`),
-              el('td', {}, buildRuleLabel(rule, state.categories)),
-              el('td', {},
-                el('button', {
-                  className: 'btn btn-sm btn-danger',
-                  onClick: () => {
-                    store.removeCategoryRule(rule.id);
-                    showToast('Rule removed');
-                    window.appRefresh();
-                  },
-                }, 'Delete'),
-              ),
-            )),
-          ),
+  const rules = [...(state.categoryRules || [])]
+    .sort((a, b) => String(a.pattern).localeCompare(String(b.pattern)));
+  const rulesHost = el('div', { className: 'rules-list-host' });
+  const rulesSearch = el('input', {
+    type: 'search',
+    placeholder: 'Filter rules by merchant…',
+    className: 'rules-search',
+  });
+
+  function paintRules(query = '') {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? rules.filter(r => String(r.pattern).includes(q) || buildRuleLabel(r, state.categories).toLowerCase().includes(q))
+      : rules;
+    rulesHost.innerHTML = '';
+    if (!filtered.length) {
+      rulesHost.appendChild(el('p', { style: 'color:var(--text-muted);font-size:0.9rem' },
+        rules.length ? 'No rules match that filter.' : 'No rules yet — categorize a transaction and toggle "Remember for future imports".',
+      ));
+      return;
+    }
+    filtered.forEach(rule => {
+      rulesHost.appendChild(el('div', { className: 'rule-card' },
+        el('div', { className: 'rule-card-main' },
+          el('strong', { className: 'rule-pattern' }, `"${rule.pattern}"`),
+          el('div', { className: 'rule-maps' }, buildRuleLabel(rule, state.categories)),
+          rule.createdAt
+            ? el('div', { className: 'rule-meta' }, `Added ${rule.createdAt}`)
+            : null,
         ),
-      )
-      : el('p', { style: 'color:var(--text-muted);font-size:0.9rem' }, 'No rules yet — categorize a transaction and toggle "Remember for future imports".'),
+        el('div', { className: 'btn-group' },
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            onClick: () => {
+              const next = window.prompt('Edit merchant pattern (lowercase match text)', rule.pattern);
+              if (next == null) return;
+              const key = next.trim().toLowerCase();
+              if (!key) return;
+              store.update(s => {
+                const r = (s.categoryRules || []).find(x => x.id === rule.id);
+                if (!r) return;
+                s.categoryRules = s.categoryRules.filter(x => x.id !== rule.id && x.pattern !== key);
+                r.pattern = key;
+                s.categoryRules.push(r);
+              });
+              showToast('Rule updated');
+              window.appRefresh();
+            },
+          }, 'Edit'),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-danger',
+            onClick: () => {
+              store.removeCategoryRule(rule.id);
+              showToast('Rule removed');
+              window.appRefresh();
+            },
+          }, 'Delete'),
+        ),
+      ));
+    });
+  }
+
+  rulesSearch.addEventListener('input', () => paintRules(rulesSearch.value));
+  paintRules();
+
+  container.appendChild(el('div', { className: 'card section' },
+    el('div', { className: 'section-title' }, `Category Rules (${rules.length})`),
+    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+      'Saved when you check "Remember for future imports" on a transaction. Rules auto-categorize CSV imports by merchant text.'
+    ),
+    rules.length ? rulesSearch : null,
+    rulesHost,
+    rules.length ? el('button', {
+      type: 'button',
+      className: 'btn btn-secondary btn-sm',
+      style: 'margin-top:0.75rem',
+      onClick: () => {
+        confirmDialog('Delete all category rules?', 'You can recreate them when categorizing imports.', () => {
+          store.update(s => { s.categoryRules = []; });
+          showToast('All rules cleared');
+          window.appRefresh();
+        });
+      },
+    }, 'Clear all rules') : null,
   ));
 
   container.appendChild(el('div', { className: 'card section' },
@@ -270,6 +350,28 @@ function paletteSelector(currentId) {
   });
 
   return grid;
+}
+
+function daysSince(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+}
+
+function downloadJsonBackup() {
+  const data = JSON.stringify(store.getState(), null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = `financial-peace-backup-${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  store.update(s => { s.settings.lastBackupAt = new Date().toISOString(); });
+  showToast('Backup downloaded!');
+  window.appRefresh();
 }
 
 function toggleRow(label, value, onChange) {

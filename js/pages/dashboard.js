@@ -1,4 +1,4 @@
-import { el, formatCurrency, getCurrentMonth, getMonthLabel } from '../utils.js';
+import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO } from '../utils.js';
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
@@ -111,6 +111,40 @@ export function renderDashboard(container) {
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Fund Envelope', () => window.appNavigate('budget')),
   ));
+
+  container.appendChild(weekAtAGlance(upcoming, paychecks));
+
+  const lastBackup = state.settings.lastBackupAt;
+  if (lastBackup) {
+    const days = Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000);
+    if (days >= 30) {
+      container.appendChild(el('div', { className: 'banner banner-warning section' },
+        el('div', { className: 'banner-icon' }, '💾'),
+        el('div', { className: 'banner-text' },
+          el('h3', {}, 'Backup is getting old'),
+          el('p', {}, `Last JSON backup was ${days} days ago. Settings → Export Backup keeps a safety copy.`),
+        ),
+        el('button', {
+          className: 'btn btn-secondary btn-sm',
+          style: 'margin-left:auto;align-self:center',
+          onClick: () => window.appNavigate('settings'),
+        }, 'Settings'),
+      ));
+    }
+  } else {
+    container.appendChild(el('div', { className: 'banner banner-warning section' },
+      el('div', { className: 'banner-icon' }, '💾'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, 'No backup yet'),
+        el('p', {}, 'Export a JSON backup from Settings when you get a chance — cloud sync is great, local backup is belt-and-suspenders.'),
+      ),
+      el('button', {
+        className: 'btn btn-secondary btn-sm',
+        style: 'margin-left:auto;align-self:center',
+        onClick: () => window.appNavigate('settings'),
+      }, 'Settings'),
+    ));
+  }
 
   container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
     statCard('Checking Balance', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
@@ -231,6 +265,86 @@ function dashSyncLabel() {
     return `Synced ${Math.round(mins / 60)}h ago`;
   }
   return 'Cloud · Tap to sync';
+}
+
+function weekAtAGlance(upcomingBills, paychecks) {
+  const today = todayISO();
+  const in7 = new Date();
+  in7.setDate(in7.getDate() + 7);
+  const end = in7.toISOString().slice(0, 10);
+
+  const payItems = [];
+  (paychecks || []).forEach(p => {
+    (p.checks || []).forEach(c => {
+      if (!c.date || c.date < today || c.date > end) return;
+      if (c.status === 'received') return;
+      payItems.push({
+        kind: 'pay',
+        date: c.date,
+        label: p.name,
+        amount: c.amount || c.receivedAmount || 0,
+        status: c.status,
+      });
+    });
+  });
+  payItems.sort((a, b) => a.date.localeCompare(b.date));
+
+  const billItems = (upcomingBills || []).slice(0, 6).map(b => ({
+    kind: 'bill',
+    date: b.dueDate,
+    label: b.name,
+    amount: b.amount,
+    daysLeft: b.daysLeft,
+  }));
+
+  if (!payItems.length && !billItems.length) {
+    return el('div', { className: 'section' },
+      el('div', { className: 'section-title' }, 'This week'),
+      el('div', { className: 'card' },
+        el('p', { style: 'color:var(--text-muted);font-size:0.9rem;margin:0' },
+          'No bills due or paychecks scheduled in the next 7 days.',
+        ),
+      ),
+    );
+  }
+
+  return el('div', { className: 'section' },
+    el('div', { className: 'section-title' }, 'This week at a glance'),
+    el('div', { className: 'grid grid-2 week-glance' },
+      el('div', { className: 'card' },
+        el('div', { className: 'card-title' }, 'Bills due'),
+        billItems.length
+          ? el('div', { className: 'week-glance-list' },
+            ...billItems.map(b => el('button', {
+              type: 'button',
+              className: 'week-glance-row',
+              onClick: () => window.appNavigate('bills'),
+            },
+              el('span', {}, formatDate(b.date)),
+              el('span', { className: 'week-glance-label' }, b.label),
+              el('strong', {}, formatCurrency(b.amount)),
+            )),
+          )
+          : el('p', { className: 'week-glance-empty' }, 'None in the next 7 days'),
+      ),
+      el('div', { className: 'card' },
+        el('div', { className: 'card-title' }, 'Paychecks expected'),
+        payItems.length
+          ? el('div', { className: 'week-glance-list' },
+            ...payItems.slice(0, 6).map(p => el('button', {
+              type: 'button',
+              className: 'week-glance-row',
+              onClick: () => window.appNavigate('income'),
+            },
+              el('span', {}, formatDate(p.date)),
+              el('span', { className: 'week-glance-label' }, p.label),
+              el('strong', {}, formatCurrency(p.amount)),
+            )),
+          )
+          : el('p', { className: 'week-glance-empty' }, 'None scheduled this week'),
+      ),
+    ),
+  );
 }
 
 function statCard(title, value, cls = '', onClick = null, highlight = false, subtitle = '') {
