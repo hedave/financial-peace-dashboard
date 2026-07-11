@@ -788,10 +788,80 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1rem;
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
 .envelope-card:hover { box-shadow: var(--shadow-lg); }
+
+.envelope-card-clickable {
+  cursor: pointer;
+}
+
+.envelope-card-clickable:hover {
+  border-color: var(--primary);
+}
+
+.envelope-stat-spent .envelope-tx-hint {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--primary);
+  margin-top: 0.15rem;
+}
+
+.envelope-activity-summary {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.envelope-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: min(55vh, 28rem);
+  overflow-y: auto;
+}
+
+.envelope-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.envelope-activity-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.envelope-activity-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.2rem;
+}
+
+.envelope-activity-amt {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.envelope-activity-desc {
+  font-size: 0.9rem;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.envelope-activity-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
 
 .envelope-header {
   display: flex;

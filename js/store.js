@@ -400,16 +400,31 @@ class Store {
   }
 
   getCategorySpent(categoryId, month = getCurrentMonth()) {
+    return this.getCategoryTransactions(categoryId, month)
+      .reduce((sum, t) => sum + (Number(t.envelopeAmount) || 0), 0);
+  }
+
+  /**
+   * Transactions that spent from an envelope this month.
+   * Each item includes envelopeAmount (portion attributed to this category).
+   */
+  getCategoryTransactions(categoryId, month = getCurrentMonth()) {
+    if (!categoryId) return [];
     return this.getTransactionsForMonth(month)
       .filter(t => t.type === 'expense' || t.type === 'debt_payment')
-      .reduce((sum, t) => {
+      .map(t => {
         if (this.isSplitTransaction(t)) {
           const split = t.splits.find(s => s.categoryId === categoryId);
-          return sum + (split ? Math.abs(Number(split.amount)) || 0 : 0);
+          if (!split) return null;
+          return { ...t, envelopeAmount: Math.abs(Number(split.amount)) || 0 };
         }
-        if (t.categoryId === categoryId) return sum + Math.abs(Number(t.amount)) || 0;
-        return sum;
-      }, 0);
+        if (t.categoryId === categoryId) {
+          return { ...t, envelopeAmount: Math.abs(Number(t.amount)) || 0 };
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
   }
 
   getDebtsForCategory(categoryId) {

@@ -138,20 +138,52 @@ function buildCategorySelect(state, { value = '', includeUncategorized = true } 
   return select;
 }
 
-export function renderTransactions(container, mode) {
-  if (mode) openMode = mode;
+export function renderTransactions(container, arg) {
+  // arg: string openMode ('expense'), or { categoryId, type/openMode }
+  let initialCategory = 'all';
+  if (typeof arg === 'string' && arg) {
+    openMode = arg;
+  } else if (arg && typeof arg === 'object') {
+    if (arg.categoryId) initialCategory = arg.categoryId;
+    if (arg.type) openMode = arg.type;
+    else if (arg.openMode) openMode = arg.openMode;
+  }
+
   const state = store.getState();
   let filter = '';
   let typeFilter = 'all';
-  let categoryFilter = 'all';
+  let categoryFilter = initialCategory;
   let sortKey = 'date';
   let sortDir = 'desc';
+
+  const filterCat = state.categories.find(c => c.id === categoryFilter);
+  const filterBanner = filterCat
+    ? el('div', { className: 'banner banner-action section tx-category-filter-banner' },
+      el('div', { className: 'banner-icon' }, filterCat.icon || '✉️'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `Filtered: ${filterCat.name}`),
+        el('p', {}, 'Showing transactions for this envelope. Clear the filter to see everything.'),
+      ),
+      el('button', {
+        className: 'btn btn-secondary btn-sm',
+        style: 'margin-left:auto;align-self:center',
+        onClick: () => {
+          categoryFilter = 'all';
+          const catEl = toolbar.querySelector('#tx-cat-filter');
+          if (catEl) catEl.value = 'all';
+          filterBanner.remove();
+          renderList();
+        },
+      }, 'Clear filter'),
+    )
+    : null;
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Transaction Log'),
     el('p', {}, 'Every dollar in and out — sort, edit, and categorize manually when needed')
   ));
+  if (filterBanner) container.appendChild(filterBanner);
 
   const inbox = store.getReviewInbox();
   const duplicateCount = store.getDuplicateTransactionIds().size;
@@ -235,6 +267,7 @@ export function renderTransactions(container, mode) {
     el('option', { value: 'uncategorized' }, 'Uncategorized'),
     ...state.categories.map(c => el('option', { value: c.id }, c.name))
   );
+  if (categoryFilter !== 'all') catSelect.value = categoryFilter;
 
   const filterFields = el('div', { className: 'tx-filter-fields' },
     typeSelect,

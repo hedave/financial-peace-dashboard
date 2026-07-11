@@ -1,6 +1,7 @@
-import { el, formatCurrency, getPreviousMonth, getMonthLabel, getCurrentMonth } from '../utils.js';
+import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
+import { openTransactionForm } from './transactions.js';
 
 const SORT_OPTIONS = [
   { key: 'budgeted', dir: 'desc', label: 'Budgeted (high to low)' },
@@ -206,8 +207,16 @@ function envelopeCard(cat) {
   const isOver = remaining < 0;
   const health = store.getEnvelopeHealth(cat.id);
   const healthLabel = store.getEnvelopeHealthLabel(health);
+  const txCount = store.getCategoryTransactions(cat.id).length;
 
-  const card = el('div', { className: `envelope-card envelope-${health}` },
+  const card = el('div', {
+    className: `envelope-card envelope-${health} envelope-card-clickable`,
+    title: 'Click to see transactions for this envelope',
+    onClick: (e) => {
+      if (e.target.closest('button, a, input, select, textarea, label, summary')) return;
+      openEnvelopeActivity(cat);
+    },
+  },
     el('div', { className: 'envelope-header' },
       el('div', { className: 'envelope-title' },
         el('span', { className: 'envelope-icon' }, cat.icon || '✉️'),
@@ -216,8 +225,8 @@ function envelopeCard(cat) {
         healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
       ),
       el('div', { className: 'btn-group' },
-        el('button', { className: 'btn btn-sm btn-secondary', onClick: () => editCategory(cat) }, '✏️'),
-        el('button', { className: 'btn btn-sm btn-danger', onClick: () => deleteCategory(cat.id) }, '×'),
+        el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
+        el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×'),
       )
     ),
     el('div', { className: 'envelope-stats' },
@@ -225,9 +234,12 @@ function envelopeCard(cat) {
         el('label', {}, 'Budgeted'),
         el('span', {}, formatCurrency(budgeted))
       ),
-      el('div', { className: 'envelope-stat' },
+      el('div', { className: 'envelope-stat envelope-stat-spent' },
         el('label', {}, 'Spent'),
-        el('span', {}, formatCurrency(spent))
+        el('span', {}, formatCurrency(spent)),
+        txCount > 0
+          ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
+          : null,
       ),
       el('div', { className: 'envelope-stat' },
         el('label', {}, 'Carry-over'),
@@ -246,12 +258,88 @@ function envelopeCard(cat) {
     ),
     linkedItems(cat),
     el('button', {
-      className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.75rem',
-      onClick: () => fundEnvelope(cat)
+      className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
+      onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
+    }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
+    el('button', {
+      className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
+      onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
     }, 'Fund Envelope')
   );
 
   return card;
+}
+
+function openEnvelopeActivity(cat) {
+  const month = getCurrentMonth();
+  const txs = store.getCategoryTransactions(cat.id, month);
+  const spent = store.getCategorySpent(cat.id, month);
+  const list = el('div', { className: 'envelope-activity-list' });
+  let modal;
+
+  if (!txs.length) {
+    list.appendChild(emptyState(
+      '📝',
+      'No spending yet',
+      `Nothing charged to ${cat.name} this month. Log an expense or import a CSV to see activity here.`,
+    ));
+  } else {
+    txs.forEach(t => {
+      const isPending = store.isPending?.(t);
+      const isSplit = store.isSplitTransaction(t);
+      list.appendChild(el('div', { className: 'envelope-activity-row' },
+        el('div', { className: 'envelope-activity-main' },
+          el('div', { className: 'envelope-activity-top' },
+            el('strong', {}, formatDate(t.date)),
+            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.envelopeAmount)),
+          ),
+          el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
+          el('div', { className: 'envelope-activity-meta' },
+            t.type === 'debt_payment' ? 'Debt payment' : 'Expense',
+            isSplit ? ' · Split' : '',
+            isPending ? ' · Pending' : '',
+            t.envelopeAmount !== Math.abs(Number(t.amount))
+              ? ` · of ${formatCurrency(t.amount)} total`
+              : '',
+          ),
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => {
+            modal?.close();
+            openTransactionForm({ transaction: t });
+          },
+        }, 'Edit'),
+      ));
+    });
+  }
+
+  modal = showModal({
+    title: `${cat.icon || '✉️'} ${cat.name}`,
+    body: el('div', {},
+      el('p', { className: 'envelope-activity-summary' },
+        `${getMonthLabel(month)} · Spent ${formatCurrency(spent)} across ${txs.length} transaction${txs.length === 1 ? '' : 's'}`,
+      ),
+      list,
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          modal.close();
+          window.appNavigate('transactions', { categoryId: cat.id });
+        },
+      }, 'Open in Transactions'),
+    ],
+  });
+  modal.modal.classList.add('modal-wide');
 }
 
 function fundEnvelope(cat) {
