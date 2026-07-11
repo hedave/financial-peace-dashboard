@@ -1,7 +1,7 @@
-import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
-import { emptyState } from '../utils.js';
+import { openTransactionForm } from './transactions.js';
 
 function sortByDueDate(a, b) {
   if (!a.dueDate && !b.dueDate) return a.name.localeCompare(b.name);
@@ -146,8 +146,21 @@ function billMoreMenu(bill) {
 function billRow(bill, state, { paid = false } = {}) {
   const { cat, status, amount, dateVal } = billDisplay(bill, state, paid);
 
-  return el('tr', { className: paid ? 'bill-paid-row' : '' },
-    el('td', {}, bill.name),
+  return el('tr', {
+    className: paid ? 'bill-paid-row bill-row-clickable' : 'bill-row-clickable',
+    title: 'Click to see related transactions',
+    onClick: (e) => {
+      if (e.target.closest('button, a, details, summary')) return;
+      openBillActivity(bill);
+    },
+  },
+    el('td', {},
+      el('button', {
+        type: 'button',
+        className: 'linkish',
+        onClick: (e) => { e.stopPropagation(); openBillActivity(bill); },
+      }, bill.name),
+    ),
     el('td', {}, dateVal),
     el('td', {}, formatCurrency(amount)),
     el('td', {}, cat?.name || '—'),
@@ -156,10 +169,16 @@ function billRow(bill, state, { paid = false } = {}) {
       el('div', { className: 'btn-group' },
         paid ? null : el('button', {
           className: 'btn btn-sm btn-primary',
-          onClick: () => markPaid(bill)
+          onClick: (e) => { e.stopPropagation(); markPaid(bill); },
         }, 'Mark Paid'),
-        el('button', { className: 'btn btn-sm btn-secondary', onClick: () => openBillForm(bill) }, 'Edit'),
-        el('button', { className: 'btn btn-sm btn-danger', onClick: () => deleteBill(bill.id) }, '×'),
+        el('button', {
+          className: 'btn btn-sm btn-secondary',
+          onClick: (e) => { e.stopPropagation(); openBillForm(bill); },
+        }, 'Edit'),
+        el('button', {
+          className: 'btn btn-sm btn-danger',
+          onClick: (e) => { e.stopPropagation(); deleteBill(bill.id); },
+        }, '×'),
       )
     )
   );
@@ -168,9 +187,15 @@ function billRow(bill, state, { paid = false } = {}) {
 function billCard(bill, state, { paid = false } = {}) {
   const { cat, status, amount, dateLabel, dateVal } = billDisplay(bill, state, paid);
   const tone = paid ? 'paid' : (status === 'overdue' ? 'overdue' : status === 'due_soon' ? 'due' : 'ok');
+  const linked = store.getBillTransactions(bill.id).length;
 
   return el('article', {
-    className: `tx-card bill-card bill-card--${tone}${paid ? ' bill-paid-row' : ''}`,
+    className: `tx-card bill-card bill-card--${tone}${paid ? ' bill-paid-row' : ''} envelope-card-clickable`,
+    title: 'Tap for related transactions',
+    onClick: (e) => {
+      if (e.target.closest('button, a, details, summary')) return;
+      openBillActivity(bill);
+    },
   },
     el('div', { className: 'tx-card-top' },
       el('span', { className: 'tx-card-desc bill-card-name' }, bill.name),
@@ -179,7 +204,8 @@ function billCard(bill, state, { paid = false } = {}) {
     el('div', { className: 'tx-card-body' },
       el('div', { className: 'tx-card-meta' },
         `${dateLabel} ${dateVal || '—'}`,
-        cat?.name ? ` · ${cat.name}` : ''
+        cat?.name ? ` · ${cat.name}` : '',
+        linked ? ` · ${linked} linked tx` : '',
       ),
       el('div', { className: 'tx-card-badges' },
         statusBadge(status, bill.autoPay)
@@ -188,11 +214,61 @@ function billCard(bill, state, { paid = false } = {}) {
     el('div', { className: 'tx-card-actions' },
       paid ? null : el('button', {
         className: 'btn btn-sm btn-primary',
-        onClick: () => markPaid(bill),
+        onClick: (e) => { e.stopPropagation(); markPaid(bill); },
       }, 'Mark Paid'),
       billMoreMenu(bill)
     )
   );
+}
+
+function openBillActivity(bill) {
+  const txs = store.getBillTransactions(bill.id);
+  const list = el('div', { className: 'envelope-activity-list' });
+  let modal;
+
+  if (!txs.length) {
+    list.appendChild(emptyState(
+      '📋',
+      'No linked transactions',
+      'When you mark this bill paid or match it from Review, payments show up here.',
+    ));
+  } else {
+    txs.forEach(t => {
+      list.appendChild(el('div', { className: 'envelope-activity-row' },
+        el('div', { className: 'envelope-activity-main' },
+          el('div', { className: 'envelope-activity-top' },
+            el('strong', {}, formatDate(t.date)),
+            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
+          ),
+          el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => { modal?.close(); openTransactionForm({ transaction: t }); },
+        }, 'Edit'),
+      ));
+    });
+  }
+
+  modal = showModal({
+    title: `📋 ${bill.name}`,
+    body: el('div', {},
+      el('p', { className: 'envelope-activity-summary' },
+        `${txs.length} linked transaction${txs.length === 1 ? '' : 's'}`,
+      ),
+      list,
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      bill.status !== 'paid' ? el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => { modal.close(); markPaid(bill); },
+      }, 'Mark Paid') : null,
+    ].filter(Boolean),
+  });
+  modal.modal.classList.add('modal-wide');
 }
 
 function statusBadge(status, autoPay) {

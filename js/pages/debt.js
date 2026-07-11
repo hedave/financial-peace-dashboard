@@ -1,6 +1,7 @@
 import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
+import { openTransactionForm } from './transactions.js';
 
 export function renderDebt(container) {
   const debts = store.getActiveDebts();
@@ -154,9 +155,22 @@ function debtMoreMenu(debt) {
 function debtRow(debt, isTarget) {
   const state = store.getState();
   const cat = (state.categories || []).find(c => c.id === debt.categoryId);
-  return el('tr', { className: isTarget ? 'debt-target' : '' },
+  return el('tr', {
+    className: isTarget ? 'debt-target bill-row-clickable' : 'bill-row-clickable',
+    title: 'Click for payment history',
+    onClick: (e) => {
+      if (e.target.closest('button, a, details, summary')) return;
+      openDebtActivity(debt);
+    },
+  },
     el('td', {}, isTarget ? '🎯' : ''),
-    el('td', {}, debt.name),
+    el('td', {},
+      el('button', {
+        type: 'button',
+        className: 'linkish',
+        onClick: (e) => { e.stopPropagation(); openDebtActivity(debt); },
+      }, debt.name),
+    ),
     el('td', { style: 'font-weight:700' }, formatCurrency(debt.balance)),
     el('td', {}, debt.interestRate ? `${debt.interestRate}%` : '—'),
     el('td', {}, formatCurrency(debt.minPayment)),
@@ -164,11 +178,18 @@ function debtRow(debt, isTarget) {
     el('td', {}, debt.dueDate || debt.notes || '—'),
     el('td', {},
       el('div', { className: 'btn-group' },
-        el('button', { className: 'btn btn-sm btn-primary', onClick: () => makePayment(debt) }, 'Pay'),
-        el('button', { className: 'btn btn-sm btn-secondary', onClick: () => openDebtForm(debt) }, 'Edit'),
+        el('button', {
+          className: 'btn btn-sm btn-primary',
+          onClick: (e) => { e.stopPropagation(); makePayment(debt); },
+        }, 'Pay'),
+        el('button', {
+          className: 'btn btn-sm btn-secondary',
+          onClick: (e) => { e.stopPropagation(); openDebtForm(debt); },
+        }, 'Edit'),
         el('button', {
           className: 'btn btn-sm btn-accent',
-          onClick: () => {
+          onClick: (e) => {
+            e.stopPropagation();
             confirmDialog('Mark Paid Off', `Celebrate paying off ${debt.name}?`, () => {
               store.payOffDebt(debt.id);
               showToast(`🎉 ${debt.name} is PAID OFF!`, 'celebration', 5000);
@@ -176,7 +197,10 @@ function debtRow(debt, isTarget) {
             });
           }
         }, 'Paid Off!'),
-        el('button', { className: 'btn btn-sm btn-danger', onClick: () => deleteDebt(debt.id) }, '×'),
+        el('button', {
+          className: 'btn btn-sm btn-danger',
+          onClick: (e) => { e.stopPropagation(); deleteDebt(debt.id); },
+        }, '×'),
       )
     )
   );
@@ -185,8 +209,14 @@ function debtRow(debt, isTarget) {
 function debtCard(debt, isTarget) {
   const state = store.getState();
   const cat = (state.categories || []).find(c => c.id === debt.categoryId);
+  const paidThisMonth = store.getDebtPaidThisMonth(debt.id);
   return el('article', {
-    className: `tx-card debt-card${isTarget ? ' debt-target' : ''}`,
+    className: `tx-card debt-card${isTarget ? ' debt-target' : ''} envelope-card-clickable`,
+    title: 'Tap to see payment history',
+    onClick: (e) => {
+      if (e.target.closest('button, a, details, summary')) return;
+      openDebtActivity(debt);
+    },
   },
     el('div', { className: 'tx-card-top' },
       el('span', { className: 'tx-card-desc' },
@@ -201,6 +231,9 @@ function debtCard(debt, isTarget) {
         debt.interestRate ? ` · ${debt.interestRate}%` : '',
         cat?.name ? ` · ${cat.name}` : '',
       ),
+      paidThisMonth > 0
+        ? el('div', { className: 'tx-card-meta' }, `Paid ${formatCurrency(paidThisMonth)} this month`)
+        : null,
       (debt.dueDate || debt.notes)
         ? el('div', { className: 'tx-card-meta' }, debt.dueDate || debt.notes)
         : null,
@@ -211,11 +244,64 @@ function debtCard(debt, isTarget) {
     el('div', { className: 'tx-card-actions' },
       el('button', {
         className: 'btn btn-sm btn-primary',
-        onClick: () => makePayment(debt),
+        onClick: (e) => { e.stopPropagation(); makePayment(debt); },
       }, 'Pay'),
       debtMoreMenu(debt)
     )
   );
+}
+
+function openDebtActivity(debt) {
+  const txs = store.getDebtTransactions(debt.id);
+  const paidMonth = store.getDebtPaidThisMonth(debt.id);
+  const months = store.estimateMonthsToDebtFree();
+  const list = el('div', { className: 'envelope-activity-list' });
+  let modal;
+
+  if (!txs.length) {
+    list.appendChild(emptyState(
+      '❄️',
+      'No payments logged',
+      'Record a payment to build history for this debt.',
+    ));
+  } else {
+    txs.forEach(t => {
+      list.appendChild(el('div', { className: 'envelope-activity-row' },
+        el('div', { className: 'envelope-activity-main' },
+          el('div', { className: 'envelope-activity-top' },
+            el('strong', {}, formatDate(t.date)),
+            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
+          ),
+          el('div', { className: 'envelope-activity-desc' }, t.description || 'Payment'),
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => { modal?.close(); openTransactionForm({ transaction: t }); },
+        }, 'Edit'),
+      ));
+    });
+  }
+
+  modal = showModal({
+    title: `❄️ ${debt.name}`,
+    body: el('div', {},
+      el('p', { className: 'envelope-activity-summary' },
+        `Balance ${formatCurrency(debt.balance)} · Paid ${formatCurrency(paidMonth)} this month`,
+        months ? ` · ~${months} mo to debt-free (plan)` : '',
+      ),
+      list,
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => { modal.close(); makePayment(debt); },
+      }, 'Make payment'),
+    ],
+  });
+  modal.modal.classList.add('modal-wide');
 }
 
 function makePayment(debt) {

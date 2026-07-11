@@ -51,18 +51,19 @@ function sortCategories(cats, sortKey, sortDir) {
   });
 }
 
-export function renderBudget(container) {
+export function renderBudget(container, arg) {
   const state = store.getState();
   const month = getCurrentMonth();
   const income = store.getTotalIncome(month);
   const bonusLogged = store.getBonusIncomeLogged();
   const budgeted = store.getTotalBudgeted();
   const unallocated = store.getToAllocate();
+  let viewFilter = (arg && arg.filter === 'attention') ? 'attention' : 'all';
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Envelope Budget'),
-    el('p', {}, 'Zero-based budgeting — every dollar has a job')
+    el('p', {}, 'Zero-based budgeting — every dollar has a job · Tap an envelope to see spending')
   ));
 
   container.appendChild(el('div', { className: 'grid grid-3 section' },
@@ -160,6 +161,23 @@ export function renderBudget(container) {
   );
   sortSelect.value = sortOptionValue(sortKey, sortDir);
 
+  const filterBar = el('div', { className: 'chip-bar section' });
+  function renderFilterChips() {
+    filterBar.innerHTML = '';
+    [
+      { id: 'all', label: 'All envelopes' },
+      { id: 'attention', label: 'Needs attention' },
+    ].forEach(opt => {
+      filterBar.appendChild(el('button', {
+        type: 'button',
+        className: `chip${viewFilter === opt.id ? ' active' : ''}`,
+        onClick: () => { viewFilter = opt.id; renderFilterChips(); renderGrid(); },
+      }, opt.label));
+    });
+  }
+  renderFilterChips();
+  container.appendChild(filterBar);
+
   container.appendChild(el('div', { className: 'toolbar section' },
     el('label', { style: 'font-size:0.85rem;font-weight:600;color:var(--text-muted)' }, 'Sort by'),
     sortSelect,
@@ -168,10 +186,27 @@ export function renderBudget(container) {
   const gridEl = el('div', { className: 'envelope-grid' });
   container.appendChild(gridEl);
 
+  function needsAttention(cat) {
+    const health = store.getEnvelopeHealth(cat.id);
+    const remaining = store.getCategoryRemaining(cat.id);
+    return health === 'over' || health === 'depleted' || health === 'warning' || remaining < 0;
+  }
+
   function renderGrid() {
-    const parents = state.categories.filter(c => !c.parentId);
+    let parents = state.categories.filter(c => !c.parentId);
+    if (viewFilter === 'attention') parents = parents.filter(needsAttention);
     const sorted = sortCategories(parents, sortKey, sortDir);
     gridEl.innerHTML = '';
+    if (!sorted.length) {
+      gridEl.appendChild(emptyState(
+        '✓',
+        viewFilter === 'attention' ? 'All clear' : 'No envelopes',
+        viewFilter === 'attention'
+          ? 'No envelopes need attention right now.'
+          : 'Add a category to start budgeting.',
+      ));
+      return;
+    }
     sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat)));
   }
 
@@ -270,65 +305,105 @@ function envelopeCard(cat) {
   return card;
 }
 
-function openEnvelopeActivity(cat) {
-  const month = getCurrentMonth();
-  const txs = store.getCategoryTransactions(cat.id, month);
-  const spent = store.getCategorySpent(cat.id, month);
-  const list = el('div', { className: 'envelope-activity-list' });
+const ACTIVITY_RANGES = [
+  { id: 'month', label: 'This month' },
+  { id: '30d', label: 'Last 30 days' },
+  { id: 'all', label: 'All time' },
+];
+
+function rangeLabel(range) {
+  if (range === '30d') return 'Last 30 days';
+  if (range === 'all') return 'All time';
+  return getMonthLabel(getCurrentMonth());
+}
+
+export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}) {
+  let range = initialRange;
+  const bodyHost = el('div', {});
   let modal;
 
-  if (!txs.length) {
-    list.appendChild(emptyState(
-      '📝',
-      'No spending yet',
-      `Nothing charged to ${cat.name} this month. Log an expense or import a CSV to see activity here.`,
-    ));
-  } else {
-    txs.forEach(t => {
-      const isPending = store.isPending?.(t);
-      const isSplit = store.isSplitTransaction(t);
-      list.appendChild(el('div', { className: 'envelope-activity-row' },
-        el('div', { className: 'envelope-activity-main' },
-          el('div', { className: 'envelope-activity-top' },
-            el('strong', {}, formatDate(t.date)),
-            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.envelopeAmount)),
-          ),
-          el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
-          el('div', { className: 'envelope-activity-meta' },
-            t.type === 'debt_payment' ? 'Debt payment' : 'Expense',
-            isSplit ? ' · Split' : '',
-            isPending ? ' · Pending' : '',
-            t.envelopeAmount !== Math.abs(Number(t.amount))
-              ? ` · of ${formatCurrency(t.amount)} total`
-              : '',
-          ),
-        ),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => {
-            modal?.close();
-            openTransactionForm({ transaction: t });
-          },
-        }, 'Edit'),
+  function paint() {
+    const txs = store.getCategoryTransactions(cat.id, { range });
+    const total = txs.reduce((s, t) => s + (Number(t.envelopeAmount) || 0), 0);
+    const list = el('div', { className: 'envelope-activity-list' });
+
+    if (!txs.length) {
+      list.appendChild(emptyState(
+        '📝',
+        'No spending yet',
+        `Nothing charged to ${cat.name} in this range. Log an expense or import a CSV.`,
       ));
-    });
+    } else {
+      txs.forEach(t => {
+        const isPending = store.isPending?.(t);
+        const isSplit = store.isSplitTransaction(t);
+        list.appendChild(el('div', { className: 'envelope-activity-row' },
+          el('div', { className: 'envelope-activity-main' },
+            el('div', { className: 'envelope-activity-top' },
+              el('strong', {}, formatDate(t.date)),
+              el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.envelopeAmount)),
+            ),
+            el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
+            el('div', { className: 'envelope-activity-meta' },
+              t.type === 'debt_payment' ? 'Debt payment' : 'Expense',
+              isSplit ? ' · Split' : '',
+              isPending ? ' · Pending' : '',
+              t.envelopeAmount !== Math.abs(Number(t.amount))
+                ? ` · of ${formatCurrency(t.amount)} total`
+                : '',
+            ),
+          ),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            onClick: () => {
+              modal?.close();
+              openTransactionForm({ transaction: t });
+            },
+          }, 'Edit'),
+        ));
+      });
+      list.appendChild(el('div', { className: 'envelope-activity-total' },
+        el('span', {}, 'Total'),
+        el('strong', {}, formatCurrency(total)),
+      ));
+    }
+
+    const chips = el('div', { className: 'chip-bar' },
+      ...ACTIVITY_RANGES.map(opt => el('button', {
+        type: 'button',
+        className: `chip${range === opt.id ? ' active' : ''}`,
+        onClick: () => { range = opt.id; paint(); },
+      }, opt.label)),
+    );
+
+    bodyHost.innerHTML = '';
+    bodyHost.appendChild(chips);
+    bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
+      `${rangeLabel(range)} · ${formatCurrency(total)} · ${txs.length} transaction${txs.length === 1 ? '' : 's'}`,
+    ));
+    bodyHost.appendChild(list);
   }
+
+  paint();
 
   modal = showModal({
     title: `${cat.icon || '✉️'} ${cat.name}`,
-    body: el('div', {},
-      el('p', { className: 'envelope-activity-summary' },
-        `${getMonthLabel(month)} · Spent ${formatCurrency(spent)} across ${txs.length} transaction${txs.length === 1 ? '' : 's'}`,
-      ),
-      list,
-    ),
+    body: bodyHost,
     footer: [
       el('button', {
         type: 'button',
         className: 'btn btn-secondary',
         onClick: () => modal.close(),
       }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-accent',
+        onClick: () => {
+          modal.close();
+          openTransactionForm({ type: 'expense', categoryId: cat.id });
+        },
+      }, '+ Log expense'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',

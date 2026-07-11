@@ -400,17 +400,34 @@ class Store {
   }
 
   getCategorySpent(categoryId, month = getCurrentMonth()) {
-    return this.getCategoryTransactions(categoryId, month)
+    return this.getCategoryTransactions(categoryId, { month, range: 'month' })
       .reduce((sum, t) => sum + (Number(t.envelopeAmount) || 0), 0);
   }
 
   /**
-   * Transactions that spent from an envelope this month.
+   * Transactions that spent from an envelope.
+   * range: 'month' | '30d' | 'all'
    * Each item includes envelopeAmount (portion attributed to this category).
    */
-  getCategoryTransactions(categoryId, month = getCurrentMonth()) {
+  getCategoryTransactions(categoryId, opts = {}) {
     if (!categoryId) return [];
-    return this.getTransactionsForMonth(month)
+    const range = opts.range || (typeof opts === 'string' ? 'month' : 'month');
+    // Back-compat: second arg was month string
+    const month = typeof opts === 'string' ? opts : (opts.month || getCurrentMonth());
+
+    let pool;
+    if (range === 'all') {
+      pool = [...(this.state.transactions || [])];
+    } else if (range === '30d') {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const iso = cutoff.toISOString().slice(0, 10);
+      pool = (this.state.transactions || []).filter(t => (t.date || '') >= iso);
+    } else {
+      pool = this.getTransactionsForMonth(month);
+    }
+
+    return pool
       .filter(t => t.type === 'expense' || t.type === 'debt_payment')
       .map(t => {
         if (this.isSplitTransaction(t)) {
@@ -425,6 +442,41 @@ class Store {
       })
       .filter(Boolean)
       .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
+  }
+
+  getTopEnvelopesBySpend(limit = 5, month = getCurrentMonth()) {
+    return (this.state.categories || [])
+      .filter(c => !c.parentId)
+      .map(c => ({
+        category: c,
+        spent: this.getCategorySpent(c.id, month),
+        budgeted: Number(c.monthlyBudget) || 0,
+        remaining: this.getCategoryRemaining(c.id, month),
+        health: this.getEnvelopeHealth(c.id, month),
+      }))
+      .filter(row => row.spent > 0)
+      .sort((a, b) => b.spent - a.spent)
+      .slice(0, limit);
+  }
+
+  getPendingTransactions() {
+    return (this.state.transactions || [])
+      .filter(t => t.clearingStatus === 'pending')
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
+  }
+
+  getBillTransactions(billId) {
+    if (!billId) return [];
+    return (this.state.transactions || [])
+      .filter(t => t.billId === billId)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
+  getDebtTransactions(debtId) {
+    if (!debtId) return [];
+    return (this.state.transactions || [])
+      .filter(t => t.type === 'debt_payment' && t.debtId === debtId)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }
 
   getDebtsForCategory(categoryId) {
@@ -611,11 +663,13 @@ class Store {
     const uncategorized = this.getUncategorizedTransactions(month);
     const billMatches = this.getPendingBillMatches(month);
     const duplicates = this.getDuplicateTransactions(month);
+    const pending = this.getPendingTransactions();
     return {
       uncategorized,
       billMatches,
       duplicates,
-      totalCount: uncategorized.length + billMatches.length + duplicates.length,
+      pending,
+      totalCount: uncategorized.length + billMatches.length + duplicates.length + pending.length,
     };
   }
 

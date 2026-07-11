@@ -1,10 +1,13 @@
 import { el, formatCurrency, getCurrentMonth, getMonthLabel } from '../utils.js';
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
-import { BABY_STEPS, MOTIVATIONAL_MESSAGES } from '../defaults.js';
+import { BABY_STEPS } from '../defaults.js';
 import { showModal, showToast } from '../components/modal.js';
-import { renderReviewBanner } from '../components/review-inbox.js';
+import { renderReviewBanner, openPendingReview, openReviewInbox } from '../components/review-inbox.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
+import { openEnvelopeActivity } from './budget.js';
+import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
+import { refreshSyncChip } from '../components/layout.js';
 
 export function renderDashboard(container) {
   const state = store.getState();
@@ -29,22 +32,60 @@ export function renderDashboard(container) {
   const inbox = store.getReviewInbox(month);
   const paychecks = store.getPaycheckStatus(month);
   const reconciliation = store.getReconciliationMatches();
-  const msg = MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
+  const topEnvelopes = store.getTopEnvelopesBySpend(5, month);
+  const pendingCount = inbox.pending?.length || 0;
 
   container.innerHTML = '';
 
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Dashboard'),
     el('p', {}, getMonthLabel(month) + ' — Give every dollar a job'),
-    el('button', {
-      type: 'button',
-      className: 'month-close-link',
-      onClick: openMonthCloseWizard,
-    }, 'Month-close checklist →'),
+    el('div', { className: 'dash-header-meta' },
+      el('button', {
+        type: 'button',
+        className: 'month-close-link',
+        onClick: openMonthCloseWizard,
+      }, 'Month-close checklist →'),
+      isCloudConfigured() ? el('button', {
+        type: 'button',
+        className: 'dash-sync-pill',
+        title: 'Tap to sync now',
+        onClick: async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Syncing…';
+          try {
+            await store.pushToCloud({ force: true });
+            showToast('Synced to cloud', 'success');
+            refreshSyncChip();
+            window.appRefresh();
+          } catch {
+            showToast('Sync failed — try Settings', 'info');
+          } finally {
+            btn.disabled = false;
+          }
+        },
+      }, dashSyncLabel()) : null,
+    ),
   ));
 
   const reviewBanner = renderReviewBanner(inbox);
   if (reviewBanner) container.appendChild(reviewBanner);
+
+  if (pendingCount > 0 || inbox.uncategorized.length > 0) {
+    container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' },
+      pendingCount > 0 ? el('button', {
+        type: 'button',
+        className: 'chip chip-warn',
+        onClick: () => openPendingReview(),
+      }, `⏳ ${pendingCount} awaiting bank`) : null,
+      inbox.uncategorized.length > 0 ? el('button', {
+        type: 'button',
+        className: 'chip chip-warn',
+        onClick: () => openReviewInbox(inbox),
+      }, `🏷️ ${inbox.uncategorized.length} need categories`) : null,
+    ));
+  }
 
   if (celebration && celebration.date === new Date().toISOString().slice(0, 10)) {
     container.appendChild(el('div', { className: 'banner banner-celebration confetti-burst' },
@@ -64,14 +105,9 @@ export function renderDashboard(container) {
     ));
   }
 
-  const quote = el('details', { className: 'banner banner-motivation motivation-collapse' });
-  quote.appendChild(el('summary', {}, 'Daily encouragement'));
-  quote.appendChild(el('div', { className: 'banner-text' }, el('p', {}, `"${msg}"`)));
-  container.appendChild(quote);
-
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
-    quickAction('📥', 'Review Inbox', () => window.appNavigate('transactions')),
+    quickAction('📥', 'Review Inbox', () => openReviewInbox(inbox)),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Fund Envelope', () => window.appNavigate('budget')),
   ));
@@ -89,6 +125,45 @@ export function renderDashboard(container) {
       bonusLogged > 0 ? `+ ${formatCurrency(bonusLogged)} bonus income allocatable` : null,
     ),
   ));
+
+  if (topEnvelopes.length) {
+    container.appendChild(el('div', { className: 'section' },
+      el('div', { className: 'section-title' }, 'Top spending this month'),
+      el('div', { className: 'card top-envelopes-card' },
+        ...topEnvelopes.map(row => {
+          const pct = row.budgeted > 0 ? Math.min(100, (row.spent / row.budgeted) * 100) : 100;
+          return el('button', {
+            type: 'button',
+            className: 'top-envelope-row',
+            onClick: () => openEnvelopeActivity(row.category),
+          },
+            el('div', { className: 'top-envelope-head' },
+              el('span', {}, `${row.category.icon || '✉️'} ${row.category.name}`),
+              el('strong', {}, formatCurrency(row.spent)),
+            ),
+            el('div', { className: 'progress-bar' },
+              el('div', {
+                className: 'progress-fill',
+                style: `width:${pct}%;${row.remaining < 0 ? 'background:var(--negative)' : ''}`,
+              }),
+            ),
+            el('div', { className: 'top-envelope-meta' },
+              row.budgeted > 0
+                ? `of ${formatCurrency(row.budgeted)} budgeted`
+                : 'no budget set',
+              ' · tap for transactions',
+            ),
+          );
+        }),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          style: 'margin-top:0.75rem;width:100%',
+          onClick: () => window.appNavigate('budget', { filter: 'attention' }),
+        }, 'Envelopes needing attention'),
+      ),
+    ));
+  }
 
   container.appendChild(el('div', { className: 'grid grid-3 section' },
     el('div', { className: 'card' },
@@ -142,6 +217,20 @@ export function renderDashboard(container) {
       )
     ));
   }
+}
+
+function dashSyncLabel() {
+  if (!isCloudConfigured()) return 'Cloud: off';
+  const { status, lastSyncedAt } = getSyncStatus();
+  if (status === 'syncing') return 'Syncing…';
+  if (status === 'error') return 'Sync error · Tap';
+  if (lastSyncedAt) {
+    const mins = Math.round((Date.now() - new Date(lastSyncedAt).getTime()) / 60000);
+    if (mins < 1) return 'Synced just now';
+    if (mins < 60) return `Synced ${mins}m ago`;
+    return `Synced ${Math.round(mins / 60)}h ago`;
+  }
+  return 'Cloud · Tap to sync';
 }
 
 function statCard(title, value, cls = '', onClick = null, highlight = false, subtitle = '') {

@@ -2,7 +2,7 @@ import { el, formatCurrency, formatDate, todayISO, parseCSV, emptyState } from '
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
-import { openReviewInbox, openBillMatches, openDuplicateReview } from '../components/review-inbox.js';
+import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
 
 let openMode = null;
@@ -139,19 +139,21 @@ function buildCategorySelect(state, { value = '', includeUncategorized = true } 
 }
 
 export function renderTransactions(container, arg) {
-  // arg: string openMode ('expense'), or { categoryId, type/openMode }
+  // arg: string openMode ('expense'), or { categoryId, type/openMode, typeFilter }
   let initialCategory = 'all';
+  let initialTypeFilter = 'all';
   if (typeof arg === 'string' && arg) {
     openMode = arg;
   } else if (arg && typeof arg === 'object') {
     if (arg.categoryId) initialCategory = arg.categoryId;
+    if (arg.typeFilter) initialTypeFilter = arg.typeFilter;
     if (arg.type) openMode = arg.type;
     else if (arg.openMode) openMode = arg.openMode;
   }
 
   const state = store.getState();
   let filter = '';
-  let typeFilter = 'all';
+  let typeFilter = initialTypeFilter;
   let categoryFilter = initialCategory;
   let sortKey = 'date';
   let sortDir = 'desc';
@@ -268,6 +270,7 @@ export function renderTransactions(container, arg) {
     ...state.categories.map(c => el('option', { value: c.id }, c.name))
   );
   if (categoryFilter !== 'all') catSelect.value = categoryFilter;
+  if (typeFilter !== 'all') typeSelect.value = typeFilter;
 
   const filterFields = el('div', { className: 'tx-filter-fields' },
     typeSelect,
@@ -600,6 +603,7 @@ export function openTransactionForm({
   transaction = null,
   focusCategory = false,
   splitMode = false,
+  categoryId: presetCategoryId = null,
 } = {}) {
   const state = store.getState();
   const isEdit = !!transaction;
@@ -632,7 +636,9 @@ export function openTransactionForm({
 
   const catGroup = el('div', { className: 'form-group' },
     el('label', {}, 'Envelope / Category'),
-    buildCategorySelect(state, { value: transaction?.categoryId || '' }),
+    buildCategorySelect(state, {
+      value: transaction?.categoryId || presetCategoryId || '',
+    }),
   );
   const catSelect = catGroup.querySelector('select');
 
@@ -885,6 +891,8 @@ function formatImportToast(stats) {
     if (stats.billMatches) parts.push(`${stats.billMatches} bill matches`);
     if (stats.duplicates) parts.push(`${stats.duplicates} duplicates skipped`);
     if (stats.skipped) parts.push(`${stats.skipped} rows skipped`);
+    const stillPending = store.getPendingTransactions().length;
+    if (stillPending) parts.push(`${stillPending} still awaiting bank`);
     return parts.join(' · ');
   }
   const parts = ['No new transactions imported'];
@@ -942,10 +950,13 @@ function openImportDialog() {
               showToast(formatImportToast(stats), type, 6000);
               if (stats.count > 0 || stats.matchedPending > 0) {
                 window.appRefresh();
+                const stillPending = store.getPendingTransactions().length;
                 if (stats.billMatches > 0) {
                   setTimeout(() => openBillMatches(store.getReviewInbox()), 400);
                 } else if (store.getReviewInbox().uncategorized.length > 0) {
                   setTimeout(() => openReviewInbox(store.getReviewInbox()), 400);
+                } else if (stillPending > 0 && stats.matchedPending > 0) {
+                  setTimeout(() => openPendingReview(), 500);
                 }
               }
             } catch (err) {

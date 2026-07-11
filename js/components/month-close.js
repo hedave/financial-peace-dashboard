@@ -1,10 +1,11 @@
 import { el, formatCurrency, getMonthLabel } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
-import { openReviewInbox, openBillMatches } from './review-inbox.js';
+import { openReviewInbox, openBillMatches, openPendingReview } from './review-inbox.js';
 
 export function openMonthCloseWizard() {
   const status = store.getMonthCloseStatus();
+  let modal;
 
   const stepsEl = el('div', { className: 'month-close-steps' },
     ...status.steps.map((step, idx) => {
@@ -13,25 +14,25 @@ export function openMonthCloseWizard() {
         action = el('button', {
           type: 'button',
           className: 'btn btn-sm btn-secondary month-close-action',
-          onClick: () => openReviewInbox(),
+          onClick: () => { modal?.close(); openReviewInbox(); },
         }, 'Review');
       } else if (!step.done && step.id === 'bills') {
         action = el('button', {
           type: 'button',
           className: 'btn btn-sm btn-secondary month-close-action',
-          onClick: () => openBillMatches(),
+          onClick: () => { modal?.close(); openBillMatches(); },
         }, 'Match');
       } else if (!step.done && step.id === 'allocate') {
         action = el('button', {
           type: 'button',
           className: 'btn btn-sm btn-secondary month-close-action',
-          onClick: () => { window.appNavigate('budget'); },
+          onClick: () => { modal?.close(); window.appNavigate('budget', { filter: 'attention' }); },
         }, 'Budget');
       } else if (!step.done && step.id === 'surplus') {
         action = el('button', {
           type: 'button',
           className: 'btn btn-sm btn-secondary month-close-action',
-          onClick: () => { window.appNavigate('debt'); },
+          onClick: () => { modal?.close(); window.appNavigate('debt'); },
         }, 'Snowball');
       }
 
@@ -53,7 +54,25 @@ export function openMonthCloseWizard() {
     }),
   );
 
-  const modal = showModal({
+  const pendingN = store.getPendingTransactions().length;
+  if (pendingN > 0) {
+    stepsEl.appendChild(el('div', { className: 'month-close-step' },
+      el('div', { className: 'month-close-step-main' },
+        el('span', { className: 'month-close-check' }, '⏳'),
+        el('div', { className: 'month-close-step-text' },
+          el('strong', {}, 'Pending bank logs'),
+          el('span', { className: 'month-close-count' }, `(${pendingN})`),
+        ),
+      ),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary month-close-action',
+        onClick: () => { modal?.close(); openPendingReview(); },
+      }, 'Review'),
+    ));
+  }
+
+  modal = showModal({
     title: `Close ${getMonthLabel(status.month)}`,
     body: el('div', {},
       status.alreadyClosed

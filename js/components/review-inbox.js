@@ -37,6 +37,9 @@ export function renderReviewBanner(inbox) {
   if (inbox.duplicates?.length) {
     parts.push(`${inbox.duplicates.length} possible duplicate${inbox.duplicates.length === 1 ? '' : 's'}`);
   }
+  if (inbox.pending?.length) {
+    parts.push(`${inbox.pending.length} awaiting bank`);
+  }
 
   return el('div', { className: 'banner banner-action review-banner' },
     el('div', { className: 'banner-icon' }, '📥'),
@@ -49,6 +52,10 @@ export function renderReviewBanner(inbox) {
         className: 'btn btn-primary btn-sm',
         onClick: () => openReviewInbox(inbox),
       }, 'Review') : null,
+      inbox.pending?.length ? el('button', {
+        className: 'btn btn-secondary btn-sm',
+        onClick: () => openPendingReview(inbox),
+      }, 'Pending') : null,
       inbox.billMatches.length ? el('button', {
         className: 'btn btn-accent btn-sm',
         onClick: () => openBillMatches(inbox),
@@ -59,6 +66,87 @@ export function renderReviewBanner(inbox) {
       }, 'Duplicates') : null,
     ),
   );
+}
+
+export function openPendingReview(inbox = store.getReviewInbox()) {
+  const pending = inbox.pending || store.getPendingTransactions();
+  if (!pending.length) {
+    showToast('No pending bank transactions', 'info');
+    return;
+  }
+
+  const list = el('div', { className: 'review-list' });
+  let modal;
+
+  function paint() {
+    const items = store.getPendingTransactions();
+    list.innerHTML = '';
+    if (!items.length) {
+      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'All caught up — nothing awaiting the bank.'));
+      return;
+    }
+    items.forEach(t => {
+      list.appendChild(el('div', { className: 'review-item' },
+        el('div', {},
+          el('strong', {}, formatDate(t.date)),
+          el('div', {}, t.description || '—'),
+          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' },
+            `${TX_TYPE_LABELS[t.type] || t.type} · ${formatCurrency(t.amount)}`,
+          ),
+        ),
+        el('div', { className: 'btn-group' },
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-primary',
+            onClick: () => {
+              store.updateTransaction(t.id, { clearingStatus: 'cleared' });
+              showToast('Marked cleared — checking updated', 'success');
+              paint();
+              window.appRefresh();
+            },
+          }, 'Mark cleared'),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-danger',
+            onClick: () => {
+              confirmDialog('Delete pending log?', 'Remove this entry without waiting for CSV?', () => {
+                store.update(s => {
+                  s.transactions = s.transactions.filter(x => x.id !== t.id);
+                });
+                showToast('Deleted');
+                paint();
+                window.appRefresh();
+              });
+            },
+          }, 'Delete'),
+        ),
+      ));
+    });
+  }
+
+  paint();
+
+  modal = showModal({
+    title: 'Awaiting bank (pending)',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'These were logged manually and do not change checking until they match a CSV import — or you mark them cleared.',
+      ),
+      list,
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          modal.close();
+          window.appNavigate('transactions', { typeFilter: 'pending' });
+        },
+      }, 'Open Transactions'),
+    ],
+  });
+  modal.modal.classList.add('modal-wide');
 }
 
 export function openDuplicateReview() {
