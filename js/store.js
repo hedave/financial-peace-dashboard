@@ -664,6 +664,22 @@ class Store {
     return clusterDuplicateTransactions(txs);
   }
 
+  /** User confirmed these are legitimate (not double-posts). Stops review warnings. */
+  markTransactionsUnique(ids) {
+    const idSet = new Set((ids || []).filter(Boolean));
+    if (!idSet.size) return 0;
+    let n = 0;
+    this.update(s => {
+      s.transactions.forEach(t => {
+        if (idSet.has(t.id)) {
+          t.duplicateOk = true;
+          n++;
+        }
+      });
+    });
+    return n;
+  }
+
   getReviewInbox(month = getCurrentMonth()) {
     const uncategorized = this.getUncategorizedTransactions(month);
     const billMatches = this.getPendingBillMatches(month);

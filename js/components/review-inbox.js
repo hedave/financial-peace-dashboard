@@ -174,10 +174,29 @@ export function openDuplicateReview() {
     groups.forEach(items => {
       list.appendChild(el('div', { className: 'duplicate-review-group' },
         el('div', { className: 'duplicate-review-group-header' },
-          el('strong', {}, duplicateGroupDateLabel(items)),
-          ' · ',
-          formatCurrency(items[0].amount),
-          el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
+          el('div', {},
+            el('strong', {}, duplicateGroupDateLabel(items)),
+            ' · ',
+            formatCurrency(items[0].amount),
+            el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
+          ),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-primary',
+            title: 'Confirm all of these are real purchases (not double-posts)',
+            onClick: () => {
+              store.markTransactionsUnique(items.map(t => t.id));
+              showToast(
+                items.length === 2
+                  ? 'Marked both as unique — warning cleared'
+                  : `Marked ${items.length} as unique — warning cleared`,
+                'success',
+              );
+              paint();
+              window.appRefresh();
+              if (!store.getDuplicateTransactionGroups().length) modal?.close();
+            },
+          }, items.length === 2 ? 'Both unique' : 'All unique'),
         ),
         ...items.map(t => el('div', { className: 'review-item duplicate-review-item' },
           el('div', {},
@@ -198,6 +217,18 @@ export function openDuplicateReview() {
                 });
               },
             }, 'Edit'),
+            el('button', {
+              type: 'button',
+              className: 'btn btn-sm btn-accent',
+              title: 'This one is a real purchase — stop flagging it',
+              onClick: () => {
+                store.markTransactionsUnique([t.id]);
+                showToast('Marked unique', 'success');
+                paint();
+                window.appRefresh();
+                if (!store.getDuplicateTransactionGroups().length) modal?.close();
+              },
+            }, 'Keep'),
             el('button', {
               type: 'button',
               className: 'btn btn-sm btn-danger',
@@ -225,7 +256,7 @@ export function openDuplicateReview() {
     title: 'Possible Duplicate Transactions',
     body: el('div', {},
       el('p', { className: 'tx-form-hint' },
-        'These share the same amount and look like the same merchant. Delete any extras you are sure are wrong — leave legitimate repeat purchases.',
+        'Same amount and similar merchant. Delete true double-posts, or mark as unique when both are real (e.g. two kids, same purchase).',
       ),
       list,
     ),

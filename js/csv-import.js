@@ -434,7 +434,12 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
 }
 
 export function clusterDuplicateTransactions(transactions, options = {}) {
-  const txs = (transactions || []).filter(t => t?.id && Math.abs(Number(t.amount) || 0) > 0);
+  // User confirmed unique (e.g. two real PlayStation purchases) — never cluster again
+  const txs = (transactions || []).filter(t =>
+    t?.id
+    && Math.abs(Number(t.amount) || 0) > 0
+    && !t.duplicateOk
+  );
   const buckets = new Map();
 
   txs.forEach(tx => {

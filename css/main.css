@@ -523,12 +523,13 @@ body {
   font-size: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .duplicate-review-count {
-  margin-left: auto;
+  margin-left: 0.35rem;
   font-size: 0.75rem;
   color: var(--text-muted);
 }
