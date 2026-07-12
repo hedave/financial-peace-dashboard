@@ -195,7 +195,7 @@ export function renderTransactions(container, arg) {
       el('div', { className: 'banner-icon' }, '⚠️'),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'Possible duplicate transactions'),
-        el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} look like duplicates — same amount and similar merchant. Review and delete any extras.`)
+        el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} look similar (same amount / merchant nearby). They were still imported if on different days — review only if one is a true double-post.`)
       ),
       el('button', {
         className: 'btn btn-secondary btn-sm',
@@ -930,7 +930,7 @@ const BANK_IMPORT_TIPS = {
       'Accounts → account menu → Download account activity → CSV.',
       'Chase files usually have Transaction Date, Description, and Amount.',
       'Credit card exports may reverse the sign of charges — check a known purchase after import.',
-      'Duplicates within 7 days (same amount + similar merchant) are skipped automatically.',
+      'Same purchase on a different day is imported (repeat buys). Only same-day re-imports are skipped.',
     ],
   },
   bankofamerica: {
@@ -946,7 +946,7 @@ const BANK_IMPORT_TIPS = {
     tips: [
       'Account activity → Download → CSV.',
       'Typically Date, Amount, Description — should import cleanly.',
-      'Large date ranges are fine; duplicates with existing log entries are skipped.',
+      'Large date ranges are fine; exact same-day rows already in your log are skipped.',
     ],
   },
 };

@@ -334,16 +334,49 @@ export function areLikelyDuplicatePair(a, b, {
   if (!amtA || amtA !== amtB) return false;
 
   const dayDiff = daysBetween(a.date, b.date);
+  // Same calendar day + same amount: likely re-import or double-post
   if (dayDiff === 0) return true;
   if (dayDiff > dateWindowDays) return false;
 
+  // Cross-day same amount + similar merchant: flag for review only
+  // (two kids buying the same $12.83 game a few days apart is legitimate)
   return areDescriptionsSimilar(a.description, b.description, crossDaySimilarity);
 }
 
+/** Soft match for Review UI / banners — includes cross-day similar merchants. */
 export function isLikelyDuplicateTransaction(existing, tx, options = {}) {
   if (isDuplicateTransaction(existing, tx) || isAmountDateDuplicate(existing, tx)) return true;
   const candidate = { ...tx, type: tx.type };
   return existing.some(t => areLikelyDuplicatePair(t, candidate, options));
+}
+
+/**
+ * Hard match for CSV import skip only.
+ * Same purchase on a different day (common: family, subscriptions, rebuys)
+ * must NOT be blocked — only exact rows or same-day amount+type.
+ */
+export function isImportDuplicateTransaction(existing, tx) {
+  if (isDuplicateTransaction(existing, tx)) return true;
+
+  const amt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
+  if (!amt) return false;
+  const day = String(tx.date || '').slice(0, 10);
+  const type = tx.type;
+
+  return (existing || []).some(t => {
+    if (t.type !== type) return false;
+    if (Math.round(Math.abs(Number(t.amount) || 0) * 100) !== amt) return false;
+    if (String(t.date || '').slice(0, 10) !== day) return false;
+    // Same day + same amount: treat as re-import of the same bank row
+    // unless descriptions clearly differ (two different purchases same day)
+    const na = normalizeMerchantDescription(t.description);
+    const nb = normalizeMerchantDescription(tx.description);
+    if (!na || !nb) return true;
+    if (na === nb) return true;
+    // Distinct merchants same day same $ — allow both
+    if (descriptionSimilarity(t.description, tx.description) < 0.35) return false;
+    return true;
+  });
 }
 
 export function isTransactionPending(tx) {

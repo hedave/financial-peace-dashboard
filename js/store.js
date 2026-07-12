@@ -10,7 +10,7 @@ import {
 } from './utils.js';
 import {
   normalizeImportRow, resolveCategoryId,
-  isLikelyDuplicateTransaction,
+  isImportDuplicateTransaction,
   clusterDuplicateTransactions,
   findBestPendingMatch,
   isTransactionPending,
@@ -1418,9 +1418,10 @@ class Store {
           return;
         }
 
-        // Skip if already present among cleared (or any non-pending) txs
+        // Skip only strong duplicates (exact row or same-day same amount).
+        // Cross-day same merchant/amount (e.g. two kids, same game) still imports.
         const nonPending = s.transactions.filter(t => !isTransactionPending(t));
-        if (isLikelyDuplicateTransaction(nonPending, candidate)) {
+        if (isImportDuplicateTransaction(nonPending, candidate)) {
           stats.duplicates++;
           return;
         }
