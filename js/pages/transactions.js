@@ -1036,17 +1036,7 @@ function openImportDialog() {
 
 function deleteTransaction(id) {
   confirmDialog('Delete Transaction', 'Remove this transaction and reverse its balance impact?', () => {
-    store.update(s => {
-      const t = s.transactions.find(x => x.id === id);
-      if (t) {
-        const status = t.clearingStatus === 'pending' ? 'pending' : 'cleared';
-        s.balances.checking -= store.getCheckingDelta(t.type, t.amount, status);
-        if (t.type === 'debt_payment' && t.debtId) {
-          store.adjustDebtForPayment(s, t.debtId, -Math.abs(Number(t.amount) || 0));
-        }
-        s.transactions = s.transactions.filter(x => x.id !== id);
-      }
-    });
+    store.deleteTransaction(id);
     window.appRefresh();
   });
 }

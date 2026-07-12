@@ -24,6 +24,20 @@ function buildCategorySelect(state, id = 'bulk-cat') {
   return select;
 }
 
+function confirmDeleteTransaction(t, { onDone, label = 'this transaction' } = {}) {
+  confirmDialog(
+    'Delete transaction?',
+    `Remove ${label}? Checking balance is updated if this was already cleared.`,
+    () => {
+      if (store.deleteTransaction(t.id)) {
+        showToast('Transaction deleted');
+        onDone?.();
+        window.appRefresh();
+      }
+    },
+  );
+}
+
 export function renderReviewBanner(inbox) {
   if (!inbox.totalCount) return null;
 
@@ -108,16 +122,13 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
           el('button', {
             type: 'button',
             className: 'btn btn-sm btn-danger',
-            onClick: () => {
-              confirmDialog('Delete pending log?', 'Remove this entry without waiting for CSV?', () => {
-                store.update(s => {
-                  s.transactions = s.transactions.filter(x => x.id !== t.id);
-                });
-                showToast('Deleted');
+            onClick: () => confirmDeleteTransaction(t, {
+              label: 'this pending log',
+              onDone: () => {
                 paint();
-                window.appRefresh();
-              });
-            },
+                if (!store.getPendingTransactions().length) modal?.close();
+              },
+            }),
           }, 'Delete'),
         ),
       ));
@@ -150,26 +161,122 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
 }
 
 export function openDuplicateReview() {
-  const groups = store.getDuplicateTransactionGroups();
-  if (!groups.length) {
+  const list = el('div', { className: 'review-list duplicate-review-list' });
+  let modal;
+
+  function paint() {
+    const groups = store.getDuplicateTransactionGroups();
+    list.innerHTML = '';
+    if (!groups.length) {
+      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'No possible duplicates left.'));
+      return;
+    }
+    groups.forEach(items => {
+      list.appendChild(el('div', { className: 'duplicate-review-group' },
+        el('div', { className: 'duplicate-review-group-header' },
+          el('strong', {}, duplicateGroupDateLabel(items)),
+          ' · ',
+          formatCurrency(items[0].amount),
+          el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
+        ),
+        ...items.map(t => el('div', { className: 'review-item duplicate-review-item' },
+          el('div', {},
+            el('div', { className: 'review-item-main' }, t.description || '—'),
+            el('div', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.15rem' },
+              `${formatDate(t.date)} · ${TX_TYPE_LABELS[t.type] || t.type || '—'}`,
+              store.isPending?.(t) ? ' · Pending' : '',
+            ),
+          ),
+          el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
+          el('div', { className: 'btn-group' },
+            el('button', {
+              type: 'button',
+              className: 'btn btn-sm btn-secondary',
+              onClick: () => {
+                import('../pages/transactions.js').then(m => {
+                  m.openTransactionForm({ transaction: t });
+                });
+              },
+            }, 'Edit'),
+            el('button', {
+              type: 'button',
+              className: 'btn btn-sm btn-danger',
+              onClick: () => confirmDeleteTransaction(t, {
+                label: 'this entry (keep the other if it is the real one)',
+                onDone: () => {
+                  paint();
+                  if (!store.getDuplicateTransactionGroups().length) modal?.close();
+                },
+              }),
+            }, 'Delete'),
+          ),
+        )),
+      ));
+    });
+  }
+
+  paint();
+  if (!list.children.length) {
     showToast('No duplicate transactions found', 'info');
     return;
   }
 
-  const list = el('div', { className: 'review-list duplicate-review-list' },
-    ...groups.map(items => el('div', { className: 'duplicate-review-group' },
-      el('div', { className: 'duplicate-review-group-header' },
-        el('strong', {}, duplicateGroupDateLabel(items)),
-        ' · ',
-        formatCurrency(items[0].amount),
-        el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
+  modal = showModal({
+    title: 'Possible Duplicate Transactions',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint' },
+        'These share the same amount and look like the same merchant. Delete any extras you are sure are wrong — leave legitimate repeat purchases.',
       ),
-      ...items.map(t => el('div', { className: 'review-item duplicate-review-item' },
-        el('div', {},
-          el('div', { className: 'review-item-main' }, t.description || '—'),
-          el('div', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.15rem' },
-            TX_TYPE_LABELS[t.type] || t.type || '—'
-          ),
+      list,
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          modal.close();
+          window.appNavigate('transactions', { typeFilter: 'duplicates' });
+        },
+      }, 'Open Transactions'),
+    ],
+  });
+  modal.modal.classList.add('modal-wide');
+}
+
+export function openReviewInbox(inbox = store.getReviewInbox()) {
+  const state = store.getState();
+  let txs = inbox.uncategorized || [];
+  if (!txs.length) {
+    showToast('Nothing to review!', 'info');
+    return;
+  }
+
+  const selected = new Set();
+  const catSelect = buildCategorySelect(state);
+  const list = el('div', { className: 'review-list' });
+  let modal;
+
+  function paint() {
+    txs = store.getReviewInbox().uncategorized;
+    selected.clear();
+    list.innerHTML = '';
+    if (!txs.length) {
+      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'Nothing left to categorize.'));
+      return;
+    }
+    txs.slice(0, 50).forEach(t => {
+      const cb = el('input', { type: 'checkbox' });
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(t.id);
+        else selected.delete(t.id);
+      });
+      list.appendChild(el('div', { className: 'review-item' },
+        el('label', { className: 'review-item-check' }, cb),
+        el('div', { className: 'review-item-main', style: 'flex:1;min-width:0' },
+          el('strong', {}, formatDate(t.date)),
+          ' · ',
+          t.description || '—',
         ),
         el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
         el('div', { className: 'btn-group' },
@@ -185,102 +292,26 @@ export function openDuplicateReview() {
           el('button', {
             type: 'button',
             className: 'btn btn-sm btn-danger',
-            onClick: () => {
-              confirmDialog('Delete Transaction', 'Remove this duplicate and reverse its balance impact?', () => {
-                store.update(s => {
-                  const tx = s.transactions.find(x => x.id === t.id);
-                  if (!tx) return;
-                  s.balances.checking -= store.getCheckingDelta(tx.type, tx.amount);
-                  if (tx.type === 'debt_payment' && tx.debtId) {
-                    store.adjustDebtForPayment(s, tx.debtId, -Math.abs(Number(tx.amount) || 0));
-                  }
-                  s.transactions = s.transactions.filter(x => x.id !== t.id);
-                });
-                showToast('Transaction deleted');
-                modal.close();
-                window.appRefresh();
-              });
-            },
+            onClick: () => confirmDeleteTransaction(t, {
+              onDone: () => {
+                paint();
+                if (!store.getReviewInbox().uncategorized.length) modal?.close();
+              },
+            }),
           }, 'Delete'),
         ),
-      )),
-    )),
-  );
-
-  const modal = showModal({
-    title: 'Possible Duplicate Transactions',
-    body: el('div', {},
-      el('p', { className: 'tx-form-hint' },
-        'These entries share the same amount and look like the same merchant — often from overlapping CSV imports. Delete any extras.'
-      ),
-      list,
-    ),
-    footer: [
-      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-primary',
-        onClick: () => {
-          modal.close();
-          window.appNavigate('transactions');
-          setTimeout(() => {
-            const typeEl = document.querySelector('#tx-type-filter');
-            if (typeEl) {
-              typeEl.value = 'duplicates';
-              typeEl.dispatchEvent(new Event('change'));
-            }
-          }, 100);
-        },
-      }, 'Open Transactions'),
-    ],
-  });
-  modal.modal.classList.add('modal-wide');
-}
-
-export function openReviewInbox(inbox = store.getReviewInbox()) {
-  const state = store.getState();
-  const txs = inbox.uncategorized;
-  if (!txs.length) {
-    showToast('Nothing to review!', 'info');
-    return;
+      ));
+    });
   }
 
-  const selected = new Set();
-  const catSelect = buildCategorySelect(state);
+  paint();
 
-  const list = el('div', { className: 'review-list' },
-    ...txs.slice(0, 50).map(t => {
-      const cb = el('input', { type: 'checkbox' });
-      cb.addEventListener('change', () => {
-        if (cb.checked) selected.add(t.id);
-        else selected.delete(t.id);
-      });
-      return el('label', { className: 'review-item' },
-        cb,
-        el('span', { className: 'review-item-main' },
-          el('strong', {}, formatDate(t.date)),
-          ' · ',
-          t.description || '—',
-        ),
-        el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          onClick: (e) => {
-            e.preventDefault();
-            import('../pages/transactions.js').then(m => {
-              m.openTransactionForm({ transaction: t });
-            });
-          },
-        }, 'Edit'),
-      );
-    }),
-  );
-
-  const modal = showModal({
-    title: `Review ${txs.length} Transaction${txs.length === 1 ? '' : 's'}`,
+  modal = showModal({
+    title: 'Review uncategorized',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint' }, 'Select transactions and assign an envelope, or edit individually.'),
+      el('p', { className: 'tx-form-hint' },
+        'Select transactions and assign an envelope, edit individually, or delete mistakes/duplicates.',
+      ),
       el('button', {
         type: 'button',
         className: 'btn btn-sm btn-secondary',
@@ -288,12 +319,11 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
         onClick: () => {
           const n = store.applyRulesToUncategorized();
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
-          modal.close();
+          paint();
           window.appRefresh();
         },
       }, 'Apply saved rules'),
       list,
-      txs.length > 50 ? el('p', { style: 'font-size:0.8rem;color:var(--text-muted)' }, `Showing 50 of ${txs.length}`) : null,
       el('div', { className: 'form-group', style: 'margin-top:1rem' },
         el('label', {}, 'Assign selected to envelope'),
         catSelect,
@@ -301,6 +331,27 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-danger',
+        onClick: () => {
+          if (!selected.size) {
+            showToast('Select at least one transaction to delete', 'info');
+            return;
+          }
+          confirmDialog(
+            'Delete selected?',
+            `Remove ${selected.size} transaction${selected.size === 1 ? '' : 's'} and reverse any checking impact?`,
+            () => {
+              [...selected].forEach(id => store.deleteTransaction(id));
+              showToast('Deleted selected');
+              paint();
+              window.appRefresh();
+              if (!store.getReviewInbox().uncategorized.length) modal.close();
+            },
+          );
+        },
+      }, 'Delete selected'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -315,8 +366,9 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
           }
           store.bulkCategorizeTransactions([...selected], catSelect.value);
           showToast(`Updated ${selected.size} transactions`);
-          modal.close();
+          paint();
           window.appRefresh();
+          if (!store.getReviewInbox().uncategorized.length) modal.close();
         },
       }, 'Assign Selected'),
       el('button', {
@@ -339,9 +391,18 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
     return;
   }
 
-  const list = el('div', { className: 'review-list' },
-    ...matches.map(({ transaction: t, bill }) =>
-      el('div', { className: 'review-item bill-match-item' },
+  const list = el('div', { className: 'review-list' });
+  let modal;
+
+  function paint() {
+    const next = store.getReviewInbox().billMatches;
+    list.innerHTML = '';
+    if (!next.length) {
+      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'No bill matches left.'));
+      return;
+    }
+    next.forEach(({ transaction: t, bill }) => {
+      list.appendChild(el('div', { className: 'review-item bill-match-item' },
         el('div', {},
           el('strong', {}, bill.name),
           bill.autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.35rem' }, 'Auto-pay') : null,
@@ -352,39 +413,46 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
             'Linking marks the bill paid without deducting checking again (CSV already did).'
           ) : null,
         ),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-primary',
-          onClick: () => {
-            store.linkTransactionToBill(t.id, bill.id);
-            showToast(`${bill.name} linked & marked paid`);
-            window.appRefresh();
-          },
-        }, 'Link & Mark Paid'),
-      )
-    ),
-  );
+        el('div', { className: 'btn-group' },
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-primary',
+            onClick: () => {
+              store.linkTransactionToBill(t.id, bill.id);
+              showToast(`Linked to ${bill.name}`);
+              paint();
+              window.appRefresh();
+              if (!store.getReviewInbox().billMatches.length) modal?.close();
+            },
+          }, 'Link'),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-danger',
+            onClick: () => confirmDeleteTransaction(t, {
+              label: 'this transaction',
+              onDone: () => {
+                paint();
+                if (!store.getReviewInbox().billMatches.length) modal?.close();
+              },
+            }),
+          }, 'Delete'),
+        ),
+      ));
+    });
+  }
 
-  const modal = showModal({
-    title: 'Bill Matches',
+  paint();
+
+  modal = showModal({
+    title: 'Possible bill matches',
     body: el('div', {},
-      el('p', { style: 'margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem' },
-        'These bank charges look like unpaid bills. Link them instead of using Mark Paid separately.'
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'Link bank expenses to unpaid bills, or delete if the match is wrong.',
       ),
       list,
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-primary',
-        onClick: () => {
-          const n = store.linkAllBillMatches();
-          showToast(`Linked ${n} bill${n === 1 ? '' : 's'}`);
-          modal.close();
-          window.appRefresh();
-        },
-      }, 'Link All'),
     ],
   });
   modal.modal.classList.add('modal-wide');

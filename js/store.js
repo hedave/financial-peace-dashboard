@@ -1131,6 +1131,23 @@ class Store {
     debt.balance = Math.max(0, (Number(debt.balance) || 0) - paymentDelta);
   }
 
+  /** Remove a transaction and reverse checking / debt impact. */
+  deleteTransaction(id) {
+    let removed = false;
+    this.update(s => {
+      const tx = s.transactions.find(x => x.id === id);
+      if (!tx) return;
+      const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+      this.applyCheckingDelta(s, -this.getCheckingDelta(tx.type, tx.amount, status));
+      if (tx.type === 'debt_payment' && tx.debtId) {
+        this.adjustDebtForPayment(s, tx.debtId, -Math.abs(Number(tx.amount) || 0));
+      }
+      s.transactions = s.transactions.filter(x => x.id !== id);
+      removed = true;
+    });
+    return removed;
+  }
+
   removeCategory(id) {
     this.update(s => {
       const cat = s.categories.find(c => c.id === id);
