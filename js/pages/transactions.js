@@ -3,6 +3,7 @@ import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
 import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
+import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-match-ui.js';
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
 
 let openMode = null;
@@ -833,8 +834,11 @@ export function openTransactionForm({
             }
             store.updateTransaction(transaction.id, updates);
             showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
+            if (txType === 'income') {
+              setTimeout(() => handleBonusReturnMatch(transaction.id), 50);
+            }
           } else {
-            store.addTransaction({
+            const newId = store.addTransaction({
               date: dateIn.value,
               amount: amt,
               type: txType,
@@ -846,6 +850,9 @@ export function openTransactionForm({
             });
             const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
             showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
+            if (txType === 'income' && newId) {
+              setTimeout(() => handleBonusReturnMatch(newId), 50);
+            }
           }
 
           if (rememberRule.checked && txType === 'expense') {
@@ -1009,6 +1016,9 @@ function openImportDialog() {
               showToast(formatImportToast(stats), type, 6000);
               if (stats.count > 0 || stats.matchedPending > 0) {
                 window.appRefresh();
+                if (stats.incomeIdsForReturnMatch?.length) {
+                  setTimeout(() => handleBonusReturnsForIds(stats.incomeIdsForReturnMatch), 200);
+                }
                 const stillPending = store.getPendingTransactions().length;
                 if (stats.billMatches > 0) {
                   setTimeout(() => openBillMatches(store.getReviewInbox()), 400);

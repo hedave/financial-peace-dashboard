@@ -281,19 +281,38 @@ function statusBadge(status, autoPay) {
 function markPaid(bill) {
   const amountIn = el('input', { type: 'number', step: '0.01', value: bill.amount });
   const dateIn = el('input', { type: 'date', value: todayISO() });
+  const alreadyInBank = el('input', { type: 'checkbox', checked: true });
 
   showModal({
     title: `Mark Paid: ${bill.name}`,
     body: el('div', {},
       el('div', { className: 'form-group' }, el('label', {}, 'Amount Paid'), amountIn),
       el('div', { className: 'form-group' }, el('label', {}, 'Payment Date'), dateIn),
+      el('div', { className: 'form-option', style: 'margin-top:0.75rem' },
+        el('div', { className: 'form-option-text' },
+          el('span', { className: 'form-option-label' }, 'Already left my bank (CSV / import)'),
+          el('span', { className: 'form-option-hint' },
+            'On by default — does not reduce checking again. Turn off only for cash / not in your bank log yet.',
+          ),
+        ),
+        el('label', { className: 'toggle-switch' },
+          alreadyInBank,
+          el('span', { className: 'toggle-slider' }),
+        ),
+      ),
     ),
     footer: el('button', {
       className: 'btn btn-primary',
       onClick: function() {
-        store.markBillPaid(bill.id, Number(amountIn.value), dateIn.value);
+        store.markBillPaid(bill.id, Number(amountIn.value), dateIn.value, {
+          alreadyInBank: alreadyInBank.checked,
+        });
         this.closest('.modal-backdrop').remove();
-        showToast(`${bill.name} marked as paid!`);
+        showToast(
+          alreadyInBank.checked
+            ? `${bill.name} marked paid (checking unchanged)`
+            : `${bill.name} marked paid — checking updated`,
+        );
         window.appRefresh();
       }
     }, 'Confirm Payment'),

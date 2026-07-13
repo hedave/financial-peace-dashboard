@@ -109,7 +109,7 @@ export function renderDashboard(container) {
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
     quickAction('📥', 'Review Inbox', () => openReviewInbox(inbox)),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
-    quickAction('✉️', 'Fund Envelope', () => window.appNavigate('budget')),
+    quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),
   ));
 
   container.appendChild(weekAtAGlance(upcoming, paychecks));

@@ -1194,10 +1194,10 @@ class Store {
    */
   addTransaction({
     date, amount, type, categoryId, description, billId, debtId, splits,
-    clearingStatus, postToChecking = false,
+    clearingStatus, postToChecking = false, incomeSourceId = null,
   }) {
     const num = Math.abs(Number(amount));
-    if (!num) return;
+    if (!num) return null;
     const normalizedSplits = this.normalizeSplits(splits);
     const useSplits = normalizedSplits.length > 0 && type === 'expense';
     const wantsPending = type === 'expense' || type === 'income';
@@ -1205,6 +1205,7 @@ class Store {
       || (postToChecking ? 'cleared' : null)
       || (wantsPending ? 'pending' : 'cleared');
 
+    let newId = null;
     this.update(s => {
       const newTx = {
         id: generateId(),
@@ -1216,15 +1217,24 @@ class Store {
         billId: billId || null,
         debtId: debtId || null,
         clearingStatus: status,
+        ...(incomeSourceId ? { incomeSourceId } : {}),
         ...(useSplits ? { splits: normalizedSplits } : {}),
       };
-      if (type === 'income' && status === 'cleared') this.applyImportedIncome(s, newTx);
+      if (type === 'income') {
+        if (status === 'cleared') this.applyImportedIncome(s, newTx);
+        if (!newTx.incomeSourceId) {
+          const src = resolveIncomeSource(newTx.description, s.incomeSources);
+          if (src) newTx.incomeSourceId = src.id;
+        }
+      }
       s.transactions.unshift(newTx);
       this.applyCheckingDelta(s, this.getCheckingDelta(type, num, status));
       if (type === 'debt_payment' && debtId) {
         this.adjustDebtForPayment(s, debtId, num);
       }
+      newId = newTx.id;
     });
+    return newId;
   }
 
   updateTransaction(id, updates) {
@@ -1280,25 +1290,24 @@ class Store {
       if (newType === 'income' && newStatus === 'cleared' && oldStatus === 'pending') {
         this.applyImportedIncome(s, tx);
       }
+      if (newType === 'income' && !tx.incomeSourceId) {
+        const src = resolveIncomeSource(tx.description, s.incomeSources);
+        if (src) tx.incomeSourceId = src.id;
+      }
     });
   }
 
+  /**
+   * Assign dollars a job in an envelope (virtual). Does NOT move bank checking —
+   * money stays in the account; only monthlyBudget / To Allocate change.
+   */
   fundEnvelope(categoryId, amount) {
     const num = Number(amount);
     if (num <= 0) return;
     this.update(s => {
       const cat = s.categories.find(c => c.id === categoryId);
-      if (cat) cat.carryOver = (Number(cat.carryOver) || 0) + num;
-      s.balances.checking = (Number(s.balances.checking) || 0) - num;
-      s.transactions.unshift({
-        id: generateId(),
-        date: todayISO(),
-        amount: num,
-        type: 'transfer',
-        categoryId,
-        description: `Funded envelope: ${cat?.name}`,
-        clearingStatus: 'cleared',
-      });
+      if (!cat) return;
+      cat.monthlyBudget = (Number(cat.monthlyBudget) || 0) + num;
     });
   }
 
@@ -1370,7 +1379,11 @@ class Store {
     });
   }
 
-  markBillPaid(billId, amount, date) {
+  /**
+   * @param {{ alreadyInBank?: boolean }} opts
+   * alreadyInBank (default true): payment already hit checking via CSV — do not deduct again.
+   */
+  markBillPaid(billId, amount, date, { alreadyInBank = true } = {}) {
     const bill = this.state.bills.find(b => b.id === billId);
     if (!bill) return;
     const paid = Number(amount) || Number(bill.amount);
@@ -1379,6 +1392,7 @@ class Store {
       b.status = 'paid';
       b.paidDate = date || todayISO();
       b.paidAmount = paid;
+      const clearingStatus = alreadyInBank ? 'pending' : 'cleared';
       s.transactions.unshift({
         id: generateId(),
         date: date || todayISO(),
@@ -1387,10 +1401,117 @@ class Store {
         categoryId: b.categoryId,
         billId,
         description: `Bill paid: ${b.name}`,
-        clearingStatus: 'cleared',
+        clearingStatus,
       });
-      s.balances.checking = (Number(s.balances.checking) || 0) - paid;
+      // Only reduce checking when money left the bank outside the CSV path (e.g. cash)
+      if (!alreadyInBank) {
+        s.balances.checking = (Number(s.balances.checking) || 0) - paid;
+      }
     });
+  }
+
+  /**
+   * Find prior envelope expenses that could be a return of this income amount.
+   * Returns candidates newest-first; skips expenses already linked to a refund.
+   */
+  findReturnCandidates(incomeTx, { lookbackDays = 60 } = {}) {
+    if (!incomeTx || incomeTx.type !== 'income') return [];
+    const amt = Math.round(Math.abs(Number(incomeTx.amount) || 0) * 100);
+    if (!amt) return [];
+
+    const incomeDate = String(incomeTx.date || todayISO()).slice(0, 10);
+    const start = new Date(incomeDate + 'T12:00:00');
+    start.setDate(start.getDate() - lookbackDays);
+    const startIso = start.toISOString().slice(0, 10);
+
+    const refundedExpenseIds = new Set(
+      (this.state.transactions || [])
+        .filter(t => t.type === 'income' && t.refundOfTxId)
+        .map(t => t.refundOfTxId),
+    );
+
+    const candidates = [];
+    (this.state.transactions || []).forEach(t => {
+      if (t.type !== 'expense' && t.type !== 'debt_payment') return;
+      if (t.id === incomeTx.id) return;
+      if (refundedExpenseIds.has(t.id)) return;
+      const d = String(t.date || '').slice(0, 10);
+      if (d > incomeDate || d < startIso) return;
+
+      if (this.isSplitTransaction(t)) {
+        (t.splits || []).forEach((sp, idx) => {
+          if (!sp.categoryId) return;
+          if (Math.round(Math.abs(Number(sp.amount) || 0) * 100) !== amt) return;
+          candidates.push({
+            expense: t,
+            categoryId: sp.categoryId,
+            amount: Math.abs(Number(sp.amount)) || 0,
+            splitIndex: idx,
+          });
+        });
+        return;
+      }
+      if (!t.categoryId) return;
+      if (Math.round(Math.abs(Number(t.amount) || 0) * 100) !== amt) return;
+      candidates.push({
+        expense: t,
+        categoryId: t.categoryId,
+        amount: Math.abs(Number(t.amount)) || 0,
+        splitIndex: null,
+      });
+    });
+
+    return candidates.sort((a, b) =>
+      (b.expense.date || '').localeCompare(a.expense.date || '')
+      || String(b.expense.id).localeCompare(String(a.expense.id)),
+    );
+  }
+
+  /**
+   * Restore envelope availability after a return (bonus income).
+   * Adds to carryOver so remaining goes back up without erasing the original purchase.
+   */
+  applyReturnToEnvelope(incomeTxId, expenseTxId, categoryId, amount) {
+    const num = Math.abs(Number(amount)) || 0;
+    if (!incomeTxId || !expenseTxId || !categoryId || !num) return null;
+
+    let result = null;
+    this.update(s => {
+      const income = s.transactions.find(t => t.id === incomeTxId);
+      const expense = s.transactions.find(t => t.id === expenseTxId);
+      const cat = s.categories.find(c => c.id === categoryId);
+      if (!income || !expense || !cat) return;
+      if (income.refundOfTxId) return;
+
+      income.refundOfTxId = expenseTxId;
+      expense.refundedByTxId = incomeTxId;
+      cat.carryOver = (Number(cat.carryOver) || 0) + num;
+      result = { categoryId, categoryName: cat.name, amount: num };
+    });
+    return result;
+  }
+
+  /**
+   * After bonus income is recorded, try to match a return to an envelope expense.
+   * @returns {{ auto: object } | { candidates: array } | null }
+   */
+  tryMatchBonusReturn(incomeTxId) {
+    const income = this.state.transactions.find(t => t.id === incomeTxId);
+    if (!income || income.type !== 'income') return null;
+
+    const bonus = this.getBonusIncomeSource();
+    const isBonus = bonus && income.incomeSourceId === bonus.id;
+    if (!isBonus) return null;
+    if (income.refundOfTxId) return null;
+
+    const candidates = this.findReturnCandidates(income);
+    if (!candidates.length) return null;
+    if (candidates.length === 1) {
+      const c = candidates[0];
+      const applied = this.applyReturnToEnvelope(income.id, c.expense.id, c.categoryId, c.amount);
+      return applied ? { auto: applied, expense: c.expense } : null;
+    }
+    return { candidates };
   }
 
   importTransactions(rows, { includePending = true } = {}) {
@@ -1398,6 +1519,7 @@ class Store {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
       matchedPending: 0, parsed: rows.length,
+      incomeIdsForReturnMatch: [],
     };
     this.update(s => {
       rows.forEach(row => {
@@ -1441,6 +1563,7 @@ class Store {
             this.applyImportedIncome(s, pendingMatch);
             stats.incomeLinked++;
             stats.income++;
+            stats.incomeIdsForReturnMatch.push(pendingMatch.id);
           } else if (pendingMatch.type === 'expense') {
             stats.expense++;
             if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
@@ -1498,6 +1621,7 @@ class Store {
         } else {
           s.balances.checking += tx.amount;
           stats.income++;
+          stats.incomeIdsForReturnMatch.push(newTx.id);
         }
         stats.count++;
       });

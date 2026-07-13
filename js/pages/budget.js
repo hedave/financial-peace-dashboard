@@ -107,7 +107,7 @@ export function renderBudget(container, arg) {
     type: 'button',
     className: 'page-tools-item',
     onClick: () => { toolsMenu.removeAttribute('open'); fundAllEnvelopes(); },
-  }, 'Fund All from Checking'));
+  }, 'Assign To Allocate evenly'));
   if (hasSnapshot) {
     toolsList.appendChild(el('button', {
       type: 'button',
@@ -132,7 +132,7 @@ export function renderBudget(container, arg) {
   container.appendChild(el('div', { className: 'btn-group section budget-actions' },
     el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
     el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
-    el('button', { className: 'btn btn-secondary budget-action-secondary', onClick: fundAllEnvelopes }, 'Fund All from Checking'),
+    el('button', { className: 'btn btn-secondary budget-action-secondary', onClick: fundAllEnvelopes }, 'Assign To Allocate evenly'),
     hasSnapshot ? el('button', {
       className: 'btn btn-secondary budget-action-secondary',
       onClick: () => {
@@ -299,7 +299,7 @@ function envelopeCard(cat) {
     el('button', {
       className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
       onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
-    }, 'Fund Envelope')
+    }, 'Allocate')
   );
 
   return card;
@@ -418,44 +418,73 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
 }
 
 function fundEnvelope(cat) {
-  const input = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
+  const toAllocate = store.getToAllocate();
+  const input = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: 0,
+    value: toAllocate > 0 ? String(Math.round(Math.min(toAllocate, 50) * 100) / 100) : '0',
+  });
   showModal({
-    title: `Fund: ${cat.name}`,
-    body: el('div', { className: 'form-group' },
-      el('label', {}, 'Amount from checking'),
-      input
+    title: `Allocate: ${cat.name}`,
+    body: el('div', {},
+      el('p', {
+        className: 'tx-form-hint',
+        style: 'margin-bottom:1rem',
+      },
+        'This gives dollars a job in this envelope. Money stays in your bank checking — only the budget assignment changes.',
+      ),
+      el('p', {
+        style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+      }, `To Allocate right now: ${formatCurrency(toAllocate)}`),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'Amount to assign'),
+        input,
+      ),
     ),
     footer: el('button', {
       className: 'btn btn-primary',
       onClick: function() {
-        store.fundEnvelope(cat.id, Number(input.value));
+        const amt = Number(input.value);
+        if (!(amt > 0)) {
+          showToast('Enter an amount greater than zero', 'info');
+          return;
+        }
+        store.fundEnvelope(cat.id, amt);
         this.closest('.modal-backdrop').remove();
-        showToast(`Funded ${cat.name}!`);
+        showToast(`Assigned ${formatCurrency(amt)} to ${cat.name}`);
         window.appRefresh();
       }
-    }, 'Fund'),
+    }, 'Assign'),
   });
 }
 
 function fundAllEnvelopes() {
   const unallocated = store.getUnallocatedFunds();
   if (unallocated <= 0) {
-    showToast('No unallocated funds to distribute', 'info');
+    showToast('Nothing left to allocate — To Allocate is already $0 or negative', 'info');
     return;
   }
-  confirmDialog('Fund All Envelopes', `Distribute ${formatCurrency(unallocated)} evenly across all categories?`, () => {
-    const cats = store.getState().categories;
-    const each = unallocated / cats.length;
-    store.update(s => {
-      cats.forEach(c => {
-        const cat = s.categories.find(x => x.id === c.id);
-        if (cat) cat.carryOver = (Number(cat.carryOver) || 0) + each;
+  const cats = store.getState().categories.filter(c => !c.parentId);
+  if (!cats.length) {
+    showToast('Add envelopes first', 'info');
+    return;
+  }
+  confirmDialog(
+    'Assign To Allocate evenly',
+    `Split ${formatCurrency(unallocated)} across ${cats.length} envelopes as monthly budget? Checking balance will not change.`,
+    () => {
+      const each = unallocated / cats.length;
+      store.update(s => {
+        cats.forEach(c => {
+          const cat = s.categories.find(x => x.id === c.id);
+          if (cat) cat.monthlyBudget = (Number(cat.monthlyBudget) || 0) + each;
+        });
       });
-      s.balances.checking -= unallocated;
-    });
-    showToast('Envelopes funded!');
-    window.appRefresh();
-  });
+      showToast('To Allocate assigned across envelopes');
+      window.appRefresh();
+    },
+  );
 }
 
 function sinkingFundToggle(checked) {
