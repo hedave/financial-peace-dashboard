@@ -1,6 +1,7 @@
 import { el, formatCurrency, formatDate } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from './modal.js';
+import { guessMerchantPattern } from '../category-rules.js';
 
 function duplicateGroupDateLabel(items) {
   const dates = [...new Set(items.map(t => t.date))].sort();
@@ -285,6 +286,8 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
 
   const selected = new Set();
   const catSelect = buildCategorySelect(state);
+  const alwaysUse = el('input', { type: 'checkbox' });
+  alwaysUse.checked = true;
   const list = el('div', { className: 'review-list' });
   let modal;
 
@@ -316,7 +319,7 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
             className: 'btn btn-sm btn-secondary',
             onClick: () => {
               import('../pages/transactions.js').then(m => {
-                m.openTransactionForm({ transaction: t });
+                m.openTransactionForm({ transaction: t, rememberDefault: true });
               });
             },
           }, 'Edit'),
@@ -359,6 +362,18 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
         el('label', {}, 'Assign selected to envelope'),
         catSelect,
       ),
+      el('div', { className: 'form-option remember-rule', style: 'margin-top:0.75rem' },
+        el('div', { className: 'form-option-text' },
+          el('span', { className: 'form-option-label' }, 'Always use this envelope'),
+          el('span', { className: 'form-option-hint' },
+            'Save merchant rules so future CSV/PDF imports auto-categorize the same way',
+          ),
+        ),
+        el('label', { className: 'toggle-switch' },
+          alwaysUse,
+          el('span', { className: 'toggle-slider' }),
+        ),
+      ),
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
@@ -395,8 +410,28 @@ export function openReviewInbox(inbox = store.getReviewInbox()) {
             showToast('Choose an envelope', 'info');
             return;
           }
-          store.bulkCategorizeTransactions([...selected], catSelect.value);
-          showToast(`Updated ${selected.size} transactions`);
+          const ids = [...selected];
+          const categoryId = catSelect.value;
+          store.bulkCategorizeTransactions(ids, categoryId);
+          let rulesSaved = 0;
+          if (alwaysUse.checked) {
+            const seen = new Set();
+            ids.forEach(id => {
+              const tx = store.getState().transactions.find(t => t.id === id);
+              if (!tx) return;
+              const pattern = guessMerchantPattern(tx.description);
+              if (!pattern || seen.has(pattern)) return;
+              seen.add(pattern);
+              store.addCategoryRule({ pattern, type: 'category', categoryId });
+              rulesSaved++;
+            });
+          }
+          showToast(
+            rulesSaved
+              ? `Updated ${ids.length} · saved ${rulesSaved} always-use rule${rulesSaved === 1 ? '' : 's'}`
+              : `Updated ${ids.length} transactions`,
+            rulesSaved ? 'success' : undefined,
+          );
           paint();
           window.appRefresh();
           if (!store.getReviewInbox().uncategorized.length) modal.close();

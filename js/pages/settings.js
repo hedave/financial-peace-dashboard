@@ -202,6 +202,24 @@ export async function renderSettings(container) {
           input.click();
         }
       }, 'Restore Backup'),
+      (() => {
+        const n = store.countFundedEnvelopeTransfers();
+        if (!n) return null;
+        return el('button', {
+          className: 'btn btn-secondary',
+          onClick: () => {
+            confirmDialog(
+              'Clean up old Fund transfers?',
+              `Found ${n} “Funded envelope: …” transfer(s) from the old Fund button that reduced checking incorrectly. Delete them and put that money back into checking?`,
+              () => {
+                const removed = store.cleanupFundedEnvelopeTransfers();
+                showToast(`Removed ${removed} transfer${removed === 1 ? '' : 's'} — checking restored`, 'success');
+                window.appRefresh();
+              },
+            );
+          },
+        }, `Clean up old Fund transfers (${n})`);
+      })(),
       el('button', {
         className: 'btn btn-danger',
         onClick: () => {

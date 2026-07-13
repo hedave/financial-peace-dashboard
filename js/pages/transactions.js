@@ -5,6 +5,8 @@ import { createSplitEditor } from '../components/split-editor.js';
 import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
 import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-match-ui.js';
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
+import { parseBankPdfFile, rowsToImportObjects } from '../pdf-import.js';
+import { guessMerchantPattern } from '../category-rules.js';
 
 let openMode = null;
 
@@ -118,13 +120,6 @@ function transactionMatchesSearch(tx, query) {
   }
 
   return false;
-}
-
-function guessMerchantPattern(description) {
-  const text = String(description || '').trim();
-  if (!text) return '';
-  const words = text.split(/\s+/).filter(w => w.length >= 4);
-  return (words[0] || text).toLowerCase().slice(0, 48);
 }
 
 function buildCategorySelect(state, { value = '', includeUncategorized = true } = {}) {
@@ -605,6 +600,7 @@ export function openTransactionForm({
   focusCategory = false,
   splitMode = false,
   categoryId: presetCategoryId = null,
+  rememberDefault = false,
 } = {}) {
   const state = store.getState();
   const isEdit = !!transaction;
@@ -714,10 +710,14 @@ export function openTransactionForm({
     if (splitToggle.checked) splitEditor.setTotalAmount(Number(amountIn.value) || 0);
   });
   const rememberRule = el('input', { type: 'checkbox' });
+  // Default on when reviewing imports / uncategorized — fewer missed merchant rules
+  const shouldDefaultRemember = rememberDefault
+    || !!(transaction && (transaction.importCategory || !transaction.categoryId));
+  if (shouldDefaultRemember) rememberRule.checked = true;
   const rememberGroup = el('div', { className: 'form-option remember-rule', style: 'display:none' },
     el('div', { className: 'form-option-text' },
-      el('span', { className: 'form-option-label' }, 'Remember for future imports'),
-      el('span', { className: 'form-option-hint' }, 'Auto-categorize when this merchant appears in CSV imports'),
+      el('span', { className: 'form-option-label' }, 'Always use this envelope'),
+      el('span', { className: 'form-option-hint' }, 'Auto-categorize this merchant on future CSV/PDF imports'),
     ),
     el('label', { className: 'toggle-switch' },
       rememberRule,
@@ -925,10 +925,10 @@ const BANK_IMPORT_TIPS = {
   usaa: {
     label: 'USAA',
     tips: [
-      'Online banking → Account → Manage account → Export (CSV).',
-      'USAA often uses a signed Amount column (negative = purchase).',
-      'Include pending rows only if you want unposted card activity (or leave the checkbox on).',
-      'After import, assign envelopes for uncategorized rows; use “Remember for future imports”.',
+      'CSV: Online banking → Account → Export (CSV). Signed Amount column (negative = purchase).',
+      'PDF (phone-friendly): download transaction history PDF from the USAA app/site when CSV is unavailable.',
+      'PDF is parsed only on your device — account/routing numbers are stripped and never uploaded.',
+      'After import, assign envelopes; use “Remember for future imports” for recurring merchants.',
     ],
   },
   chase: {
@@ -958,15 +958,41 @@ const BANK_IMPORT_TIPS = {
   },
 };
 
+function finishImport(stats, modal) {
+  modal.close();
+  const type = (stats.count > 0 || stats.matchedPending > 0) ? 'success' : 'info';
+  showToast(formatImportToast(stats), type, 6000);
+  if (stats.count > 0 || stats.matchedPending > 0) {
+    window.appRefresh();
+    if (stats.incomeIdsForReturnMatch?.length) {
+      setTimeout(() => handleBonusReturnsForIds(stats.incomeIdsForReturnMatch), 200);
+    }
+    const stillPending = store.getPendingTransactions().length;
+    if (stats.billMatches > 0) {
+      setTimeout(() => openBillMatches(store.getReviewInbox()), 400);
+    } else if (store.getReviewInbox().uncategorized.length > 0) {
+      setTimeout(() => openReviewInbox(store.getReviewInbox()), 400);
+    } else if (stillPending > 0 && stats.matchedPending > 0) {
+      setTimeout(() => openPendingReview(), 500);
+    }
+  }
+}
+
 function openImportDialog() {
-  const fileIn = el('input', { type: 'file', accept: '.csv,.CSV,text/csv' });
-  const includePendingIn = el('input', { type: 'checkbox', checked: true, id: 'import-pending' });
+  const fileIn = el('input', {
+    type: 'file',
+    accept: '.csv,.CSV,text/csv,.pdf,.PDF,application/pdf',
+  });
+  // Default off — pending rows on phone PDFs are noisy; turn on if you want them
+  const includePendingIn = el('input', { type: 'checkbox', checked: false, id: 'import-pending' });
   const bankSelect = el('select', { id: 'import-bank' },
     ...Object.entries(BANK_IMPORT_TIPS).map(([id, info]) =>
       el('option', { value: id }, info.label),
     ),
   );
+  bankSelect.value = 'usaa';
   const tipsEl = el('div', { className: 'import-bank-tips' });
+  const previewEl = el('div', { className: 'import-file-preview', style: 'margin-top:0.75rem;font-size:0.85rem' });
 
   function paintTips() {
     const info = BANK_IMPORT_TIPS[bankSelect.value] || BANK_IMPORT_TIPS.generic;
@@ -978,6 +1004,68 @@ function openImportDialog() {
   bankSelect.addEventListener('change', paintTips);
   paintTips();
 
+  fileIn.addEventListener('change', async () => {
+    previewEl.innerHTML = '';
+    const file = fileIn.files[0];
+    if (!file) return;
+    const name = (file.name || '').toLowerCase();
+    if (!name.endsWith('.pdf')) {
+      // CSV: leave pending checkbox as user set it
+      previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' },
+        `CSV ready: ${file.name}`,
+      ));
+      return;
+    }
+    // PDF exports are often full of pending — default exclude unless user opts in
+    includePendingIn.checked = false;
+    previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' }, 'Reading PDF on this device…'));
+    try {
+      const parsed = await parseBankPdfFile(file);
+      const pendingN = parsed.filter(r => r.pending).length;
+      const objects = rowsToImportObjects(parsed, { includePending: includePendingIn.checked });
+      previewEl.innerHTML = '';
+      previewEl.appendChild(el('p', { style: 'margin:0 0 0.35rem;font-weight:600;color:var(--text)' },
+        `PDF preview: ${objects.length} transaction${objects.length === 1 ? '' : 's'}`,
+        pendingN ? ` (${pendingN} pending in file)` : '',
+      ));
+      if (!objects.length) {
+        previewEl.appendChild(el('p', { style: 'margin:0;color:var(--warning)' },
+          'No transactions found. Use a USAA transaction-history PDF with selectable text (not a photo scan).',
+        ));
+        return;
+      }
+      const list = el('div', { className: 'import-preview-list' });
+      objects.slice(0, 8).forEach(r => {
+        list.appendChild(el('div', { className: 'import-preview-row' },
+          el('span', {}, r.Date),
+          el('span', { className: 'import-preview-desc' }, r.Description),
+          el('span', {}, r.Amount),
+        ));
+      });
+      previewEl.appendChild(list);
+      if (objects.length > 8) {
+        previewEl.appendChild(el('p', {
+          style: 'margin:0.35rem 0 0;color:var(--text-muted);font-size:0.8rem',
+        }, `…and ${objects.length - 8} more`));
+      }
+      previewEl.appendChild(el('p', {
+        style: 'margin:0.5rem 0 0;font-size:0.75rem;color:var(--text-muted)',
+      }, 'Parsed only on this device. Account numbers are stripped and never uploaded.'));
+    } catch (err) {
+      console.error(err);
+      previewEl.innerHTML = '';
+      previewEl.appendChild(el('p', { style: 'margin:0;color:var(--destructive)' },
+        'Could not read that PDF. Try CSV if available, or a different export.',
+      ));
+    }
+  });
+
+  includePendingIn.addEventListener('change', () => {
+    if (fileIn.files[0]?.name?.toLowerCase().endsWith('.pdf')) {
+      fileIn.dispatchEvent(new Event('change'));
+    }
+  });
+
   const preview = el('div', { style: 'margin-top:1rem;font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
     el('div', { className: 'form-group' },
       el('label', {}, 'I bank with…'),
@@ -988,56 +1076,69 @@ function openImportDialog() {
     el('label', { style: 'display:flex;align-items:center;gap:0.5rem;color:var(--text)' },
       includePendingIn, ' Include pending/unposted bank rows'
     ),
+    previewEl,
   );
 
   const modal = showModal({
-    title: 'Import Transactions from CSV',
-    body: el('div', {}, fileIn, preview),
+    title: 'Import Transactions (CSV or PDF)',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+        'Choose a bank CSV or a USAA transaction PDF. Files stay on your device.',
+      ),
+      fileIn,
+      preview,
+    ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Cancel'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
-        onClick: () => {
+        onClick: async () => {
           const file = fileIn.files[0];
           if (!file) {
-            showToast('Choose a CSV file first', 'info');
+            showToast('Choose a CSV or PDF file first', 'info');
             return;
           }
-          const reader = new FileReader();
-          reader.onload = e => {
-            try {
-              const rows = parseCSV(e.target.result);
-              const stats = store.importTransactions(rows, {
+          const name = (file.name || '').toLowerCase();
+          try {
+            if (name.endsWith('.pdf')) {
+              const parsed = await parseBankPdfFile(file);
+              const objects = rowsToImportObjects(parsed, {
                 includePending: includePendingIn.checked,
               });
-              modal.close();
-              const type = (stats.count > 0 || stats.matchedPending > 0) ? 'success' : 'info';
-              showToast(formatImportToast(stats), type, 6000);
-              if (stats.count > 0 || stats.matchedPending > 0) {
-                window.appRefresh();
-                if (stats.incomeIdsForReturnMatch?.length) {
-                  setTimeout(() => handleBonusReturnsForIds(stats.incomeIdsForReturnMatch), 200);
-                }
-                const stillPending = store.getPendingTransactions().length;
-                if (stats.billMatches > 0) {
-                  setTimeout(() => openBillMatches(store.getReviewInbox()), 400);
-                } else if (store.getReviewInbox().uncategorized.length > 0) {
-                  setTimeout(() => openReviewInbox(store.getReviewInbox()), 400);
-                } else if (stillPending > 0 && stats.matchedPending > 0) {
-                  setTimeout(() => openPendingReview(), 500);
-                }
+              if (!objects.length) {
+                showToast('No transactions found in that PDF', 'info');
+                return;
               }
-            } catch (err) {
-              console.error('CSV import failed', err);
-              const msg = err?.message?.includes('storage')
-                ? err.message
-                : 'Import failed. Please try again.';
-              showToast(msg, 'info');
+              const stats = store.importTransactions(objects, {
+                includePending: includePendingIn.checked,
+              });
+              finishImport(stats, modal);
+              return;
             }
-          };
-          reader.onerror = () => showToast('Could not read that file', 'info');
-          reader.readAsText(file);
+
+            const reader = new FileReader();
+            reader.onload = e => {
+              try {
+                const rows = parseCSV(e.target.result);
+                const stats = store.importTransactions(rows, {
+                  includePending: includePendingIn.checked,
+                });
+                finishImport(stats, modal);
+              } catch (err) {
+                console.error('CSV import failed', err);
+                const msg = err?.message?.includes('storage')
+                  ? err.message
+                  : 'Import failed. Please try again.';
+                showToast(msg, 'info');
+              }
+            };
+            reader.onerror = () => showToast('Could not read that file', 'info');
+            reader.readAsText(file);
+          } catch (err) {
+            console.error('Import failed', err);
+            showToast(err?.message || 'Import failed. Please try again.', 'info');
+          }
         },
       }, 'Import'),
     ],

@@ -14,6 +14,7 @@ import {
   clusterDuplicateTransactions,
   findBestPendingMatch,
   isTransactionPending,
+  descriptionSimilarity,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
 import { findBillForTransaction } from './bill-matcher.js';
@@ -49,6 +50,12 @@ import { findReconciliationCandidates } from './reconcile-match.js';
 
 const STORAGE_KEY = 'financial-peace-dashboard';
 
+function isFundedEnvelopeTransfer(tx) {
+  return tx
+    && tx.type === 'transfer'
+    && /^Funded envelope:/i.test(String(tx.description || ''));
+}
+
 function ensureDefaultCategories(state) {
   state.categories = (state.categories || []).filter(
     c => c && typeof c === 'object' && typeof c.name === 'string' && c.name.trim()
@@ -57,9 +64,11 @@ function ensureDefaultCategories(state) {
     isSinkingFund: false,
     monthlyBudget: 0,
     carryOver: 0,
+    goalAmount: 0,
     ...c,
     id: c.id || generateId(),
     name: c.name.trim(),
+    goalAmount: Number(c.goalAmount) > 0 ? Number(c.goalAmount) : 0,
   }));
 
   const sinkingNames = new Set(SINKING_FUND_DEFAULTS.map(c => c.name.toLowerCase()));
@@ -78,6 +87,7 @@ function ensureDefaultCategories(state) {
       isSinkingFund: sinkingNames.has(def.name.toLowerCase()),
       monthlyBudget: 0,
       carryOver: 0,
+      goalAmount: 0,
     });
     existing.add(def.name.toLowerCase());
   });
@@ -103,6 +113,39 @@ function normalizeState(state) {
   if (!Array.isArray(state.celebrations)) state.celebrations = [];
   if (typeof state.notes !== 'string') state.notes = '';
   if (state.notesUpdatedAt !== null && typeof state.notesUpdatedAt !== 'string') state.notesUpdatedAt = null;
+  if (!Array.isArray(state.noteBoards)) state.noteBoards = [];
+  // Migrate legacy single notes blob into first sticky on a default board
+  if ((!state.noteBoards.length) && state.notes && String(state.notes).trim()) {
+    state.noteBoards = [{
+      id: generateId(),
+      title: 'General',
+      stickies: [{
+        id: generateId(),
+        title: 'Notes',
+        text: state.notes,
+        color: 'yellow',
+        updatedAt: state.notesUpdatedAt || new Date().toISOString(),
+      }],
+    }];
+  }
+  if (!state.noteBoards.length) {
+    state.noteBoards = [{
+      id: generateId(),
+      title: 'General',
+      stickies: [],
+    }];
+  }
+  state.noteBoards.forEach(board => {
+    if (!board.id) board.id = generateId();
+    if (!board.title) board.title = 'Board';
+    if (!Array.isArray(board.stickies)) board.stickies = [];
+    board.stickies.forEach(n => {
+      if (!n.id) n.id = generateId();
+      if (typeof n.text !== 'string') n.text = '';
+      if (typeof n.title !== 'string') n.title = '';
+      if (!n.color) n.color = 'yellow';
+    });
+  });
   if (!Array.isArray(state.removedDefaultCategories)) state.removedDefaultCategories = [];
   if (!Array.isArray(state.categoryRules)) state.categoryRules = [];
   if (!state.monthBudgetSnapshots || typeof state.monthBudgetSnapshots !== 'object') {
@@ -303,7 +346,7 @@ class Store {
     }
   }
 
-  // --- Notes ---
+  // --- Notes (legacy single blob + sticky boards) ---
   getNotes() {
     return this.state.notes || '';
   }
@@ -322,6 +365,90 @@ class Store {
     this.state.notes = '';
     this.state.notesUpdatedAt = null;
     this.save();
+  }
+
+  getNoteBoards() {
+    return this.state.noteBoards || [];
+  }
+
+  addNoteBoard(title = 'New page') {
+    const board = {
+      id: generateId(),
+      title: String(title || 'New page').trim() || 'New page',
+      stickies: [],
+    };
+    this.update(s => {
+      if (!Array.isArray(s.noteBoards)) s.noteBoards = [];
+      s.noteBoards.push(board);
+    });
+    return board.id;
+  }
+
+  renameNoteBoard(boardId, title) {
+    this.update(s => {
+      const b = (s.noteBoards || []).find(x => x.id === boardId);
+      if (b) b.title = String(title || 'Page').trim() || 'Page';
+    });
+  }
+
+  deleteNoteBoard(boardId) {
+    this.update(s => {
+      s.noteBoards = (s.noteBoards || []).filter(b => b.id !== boardId);
+      if (!s.noteBoards.length) {
+        s.noteBoards = [{ id: generateId(), title: 'General', stickies: [] }];
+      }
+    });
+  }
+
+  addStickyNote(boardId, { title = '', text = '', color = 'yellow' } = {}) {
+    const note = {
+      id: generateId(),
+      title: String(title || ''),
+      text: String(text || ''),
+      color: color || 'yellow',
+      updatedAt: new Date().toISOString(),
+    };
+    this.update(s => {
+      const b = (s.noteBoards || []).find(x => x.id === boardId);
+      if (!b) return;
+      if (!Array.isArray(b.stickies)) b.stickies = [];
+      b.stickies.unshift(note);
+    });
+    return note.id;
+  }
+
+  /** Silent sticky update for typing (avoids full app re-render). */
+  patchStickyNote(boardId, noteId, patch = {}) {
+    const b = (this.state.noteBoards || []).find(x => x.id === boardId);
+    const n = b?.stickies?.find(x => x.id === noteId);
+    if (!n) return;
+    if (patch.title !== undefined) n.title = String(patch.title);
+    if (patch.text !== undefined) n.text = String(patch.text);
+    if (patch.color !== undefined) n.color = patch.color;
+    n.updatedAt = new Date().toISOString();
+    this.syncLegacyNotesFromStickies();
+    this.saveSilently();
+  }
+
+  deleteStickyNote(boardId, noteId) {
+    this.update(s => {
+      const b = (s.noteBoards || []).find(x => x.id === boardId);
+      if (!b || !Array.isArray(b.stickies)) return;
+      b.stickies = b.stickies.filter(n => n.id !== noteId);
+    });
+  }
+
+  syncLegacyNotesFromStickies() {
+    const boards = this.state.noteBoards || [];
+    const texts = [];
+    boards.forEach(b => {
+      (b.stickies || []).forEach(n => {
+        const body = [n.title, n.text].filter(Boolean).join('\n');
+        if (body.trim()) texts.push(body.trim());
+      });
+    });
+    this.state.notes = texts.join('\n\n———\n\n');
+    this.state.notesUpdatedAt = new Date().toISOString();
   }
 
   // --- Month rollover ---
@@ -720,6 +847,51 @@ class Store {
     }[health] || '';
   }
 
+  /** Soft cap (regular envelope) or savings goal (sinking fund). 0 = none. */
+  getCategoryGoal(categoryId) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    return cat ? Math.max(0, Number(cat.goalAmount) || 0) : 0;
+  }
+
+  /** True when budgeted amount is over the soft cap/goal. */
+  isOverSoftCap(categoryId) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return false;
+    const goal = Number(cat.goalAmount) || 0;
+    if (goal <= 0) return false;
+    return (Number(cat.monthlyBudget) || 0) > goal + 0.005;
+  }
+
+  /**
+   * Progress toward soft cap / sinking goal.
+   * funded = monthlyBudget (assigned this month plan).
+   * For sinking funds, also show pool (budget + carry) as "saved".
+   */
+  getGoalProgress(categoryId) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return null;
+    const goal = Number(cat.goalAmount) || 0;
+    if (goal <= 0) return null;
+    const budgeted = Number(cat.monthlyBudget) || 0;
+    const carry = Number(cat.carryOver) || 0;
+    const pool = budgeted + carry;
+    const over = budgeted > goal + 0.005;
+    const pct = Math.min(100, Math.round((pool / goal) * 100));
+    return {
+      goal,
+      budgeted,
+      pool,
+      over,
+      pct,
+      isSinking: !!cat.isSinkingFund,
+    };
+  }
+
+  getEnvelopesOverSoftCap() {
+    return (this.state.categories || [])
+      .filter(c => !c.parentId && this.isOverSoftCap(c.id));
+  }
+
   addCategoryRule({ pattern, type = 'category', categoryId = null, categoryIds = [] }) {
     const key = String(pattern || '').toLowerCase().trim();
     if (!key) return null;
@@ -949,6 +1121,7 @@ class Store {
   getMonthCloseStatus(month = getCurrentMonth()) {
     const inbox = this.getReviewInbox(month);
     const alreadyClosed = (this.state.monthCloseLog || []).some(e => e.month === month);
+    const overCap = this.getEnvelopesOverSoftCap();
     return {
       month,
       alreadyClosed,
@@ -956,10 +1129,12 @@ class Store {
       billMatches: inbox.billMatches.length,
       toAllocate: this.getToAllocate(),
       surplus: this.getSurplusForSnowball(month),
+      overCapCount: overCap.length,
       steps: [
         { id: 'review', label: 'Review uncategorized transactions', done: inbox.uncategorized.length === 0, count: inbox.uncategorized.length },
         { id: 'bills', label: 'Link bills to bank transactions', done: inbox.billMatches.length === 0, count: inbox.billMatches.length },
         { id: 'allocate', label: 'Zero-based budget (To Allocate = $0)', done: Math.abs(this.getToAllocate()) < 0.01, count: this.getToAllocate() },
+        { id: 'caps', label: 'Review envelopes over soft cap / goal', done: overCap.length === 0, count: overCap.length },
         { id: 'surplus', label: 'Allocate surplus to debt snowball', done: this.getSurplusForSnowball(month) <= 0 || !this.getActiveDebts().length, count: this.getSurplusForSnowball(month) },
       ],
     };
@@ -1511,7 +1686,47 @@ class Store {
       const applied = this.applyReturnToEnvelope(income.id, c.expense.id, c.categoryId, c.amount);
       return applied ? { auto: applied, expense: c.expense } : null;
     }
-    return { candidates };
+
+    // Prefer stronger description match (e.g. Amazon return ↔ Amazon purchase)
+    const scored = candidates.map(c => ({
+      ...c,
+      sim: descriptionSimilarity(income.description, c.expense.description),
+    })).sort((a, b) => b.sim - a.sim || (b.expense.date || '').localeCompare(a.expense.date || ''));
+
+    if (scored[0].sim >= 0.4 && scored[0].sim - (scored[1]?.sim || 0) >= 0.12) {
+      const c = scored[0];
+      const applied = this.applyReturnToEnvelope(income.id, c.expense.id, c.categoryId, c.amount);
+      return applied ? { auto: applied, expense: c.expense } : null;
+    }
+
+    return { candidates: scored };
+  }
+
+  /** Count old "Funded envelope: …" transfer rows that wrongly reduced checking. */
+  countFundedEnvelopeTransfers() {
+    return (this.state.transactions || []).filter(isFundedEnvelopeTransfer).length;
+  }
+
+  /**
+   * Delete fake fund-envelope transfers and reverse their checking impact.
+   * (Old bug: allocate treated as cash withdrawal.)
+   */
+  cleanupFundedEnvelopeTransfers() {
+    let n = 0;
+    this.update(s => {
+      const keep = [];
+      s.transactions.forEach(tx => {
+        if (isFundedEnvelopeTransfer(tx)) {
+          const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+          this.applyCheckingDelta(s, -this.getCheckingDelta(tx.type, tx.amount, status));
+          n++;
+        } else {
+          keep.push(tx);
+        }
+      });
+      s.transactions = keep;
+    });
+    return n;
   }
 
   importTransactions(rows, { includePending = true } = {}) {

@@ -28,6 +28,12 @@ export function openMonthCloseWizard() {
           className: 'btn btn-sm btn-secondary month-close-action',
           onClick: () => { modal?.close(); window.appNavigate('budget', { filter: 'attention' }); },
         }, 'Budget');
+      } else if (!step.done && step.id === 'caps') {
+        action = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary month-close-action',
+          onClick: () => { modal?.close(); window.appNavigate('budget', { filter: 'attention' }); },
+        }, 'Review');
       } else if (!step.done && step.id === 'surplus') {
         action = el('button', {
           type: 'button',

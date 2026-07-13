@@ -4,6 +4,21 @@ export function normalizePattern(pattern) {
   return String(pattern || '').toLowerCase().trim();
 }
 
+/** Extract a stable merchant token for "always use this envelope" rules. */
+export function guessMerchantPattern(description) {
+  let text = String(description || '').trim();
+  if (!text) return '';
+  // Drop common bank noise prefixes
+  text = text
+    .replace(/^(pos|debit|credit|purchase|withdrawal|ach|web|check|chk|visa|mc|amex)\s+/i, '')
+    .replace(/\s+#\d+\b/g, ' ')
+    .replace(/\s+\d{4,}\s*$/g, ' ')
+    .trim();
+  const words = text.split(/\s+/).filter(w => w.replace(/[^a-zA-Z]/g, '').length >= 3);
+  const token = (words[0] || text).toLowerCase().replace(/[^a-z0-9*&'-]/gi, '');
+  return token.slice(0, 48);
+}
+
 export function descriptionMatchesPattern(description, pattern) {
   const p = normalizePattern(pattern);
   if (!p) return false;

@@ -189,7 +189,8 @@ export function renderBudget(container, arg) {
   function needsAttention(cat) {
     const health = store.getEnvelopeHealth(cat.id);
     const remaining = store.getCategoryRemaining(cat.id);
-    return health === 'over' || health === 'depleted' || health === 'warning' || remaining < 0;
+    return health === 'over' || health === 'depleted' || health === 'warning'
+      || remaining < 0 || store.isOverSoftCap(cat.id);
   }
 
   function renderGrid() {
@@ -234,6 +235,32 @@ function linkedItems(cat) {
   );
 }
 
+function goalBlock(cat) {
+  const progress = store.getGoalProgress(cat.id);
+  if (!progress) return null;
+  const label = progress.isSinking ? 'Savings goal' : 'Soft cap';
+  const over = progress.over;
+  return el('div', { className: `envelope-goal${over ? ' over-cap' : ''}` },
+    el('div', { className: 'envelope-goal-head' },
+      el('span', {}, label),
+      el('strong', {},
+        over
+          ? `${formatCurrency(progress.budgeted)} / ${formatCurrency(progress.goal)} over`
+          : `${formatCurrency(progress.pool)} / ${formatCurrency(progress.goal)}`,
+      ),
+    ),
+    el('div', { className: 'progress-bar envelope-goal-bar' },
+      el('div', {
+        className: 'progress-fill',
+        style: `width:${progress.pct}%;${over ? 'background:var(--negative)' : 'background:var(--accent)'}`,
+      }),
+    ),
+    over
+      ? el('span', { className: 'envelope-health-badge health-over' }, progress.isSinking ? 'Over goal' : 'Over cap')
+      : el('span', { className: 'envelope-goal-pct' }, `${progress.pct}% toward ${progress.isSinking ? 'goal' : 'cap'}`),
+  );
+}
+
 function envelopeCard(cat) {
   const spent = store.getCategorySpent(cat.id);
   const remaining = store.getCategoryRemaining(cat.id);
@@ -243,9 +270,10 @@ function envelopeCard(cat) {
   const health = store.getEnvelopeHealth(cat.id);
   const healthLabel = store.getEnvelopeHealthLabel(health);
   const txCount = store.getCategoryTransactions(cat.id).length;
+  const overCap = store.isOverSoftCap(cat.id);
 
   const card = el('div', {
-    className: `envelope-card envelope-${health} envelope-card-clickable`,
+    className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable`,
     title: 'Click to see transactions for this envelope',
     onClick: (e) => {
       if (e.target.closest('button, a, input, select, textarea, label, summary')) return;
@@ -258,6 +286,7 @@ function envelopeCard(cat) {
         el('span', { className: 'envelope-name' }, cat.name),
         cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
         healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
+        overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
       ),
       el('div', { className: 'btn-group' },
         el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
@@ -291,6 +320,7 @@ function envelopeCard(cat) {
         style: `width:${budgeted > 0 ? Math.min(100, (spent / (budgeted + carry)) * 100) : 0}%;${isOver ? 'background:var(--negative)' : ''}`
       })
     ),
+    goalBlock(cat),
     linkedItems(cat),
     el('button', {
       className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
@@ -417,8 +447,16 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
   modal.modal.classList.add('modal-wide');
 }
 
+function doFundEnvelope(cat, amt) {
+  store.fundEnvelope(cat.id, amt);
+  showToast(`Assigned ${formatCurrency(amt)} to ${cat.name}`);
+  window.appRefresh();
+}
+
 function fundEnvelope(cat) {
   const toAllocate = store.getToAllocate();
+  const goal = store.getCategoryGoal(cat.id);
+  const budgeted = Number(cat.monthlyBudget) || 0;
   const input = el('input', {
     type: 'number',
     step: '0.01',
@@ -437,6 +475,11 @@ function fundEnvelope(cat) {
       el('p', {
         style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
       }, `To Allocate right now: ${formatCurrency(toAllocate)}`),
+      goal > 0
+        ? el('p', {
+          style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+        }, `${cat.isSinkingFund ? 'Goal' : 'Soft cap'}: ${formatCurrency(goal)} · currently budgeted ${formatCurrency(budgeted)}`)
+        : null,
       el('div', { className: 'form-group' },
         el('label', {}, 'Amount to assign'),
         input,
@@ -450,10 +493,21 @@ function fundEnvelope(cat) {
           showToast('Enter an amount greater than zero', 'info');
           return;
         }
-        store.fundEnvelope(cat.id, amt);
-        this.closest('.modal-backdrop').remove();
-        showToast(`Assigned ${formatCurrency(amt)} to ${cat.name}`);
-        window.appRefresh();
+        const backdrop = this.closest('.modal-backdrop');
+        const nextBudget = budgeted + amt;
+        const assign = () => {
+          backdrop?.remove();
+          doFundEnvelope(cat, amt);
+        };
+        if (goal > 0 && nextBudget > goal + 0.005) {
+          confirmDialog(
+            cat.isSinkingFund ? 'Over savings goal' : 'Over soft cap',
+            `This puts ${cat.name} at ${formatCurrency(nextBudget)} (cap/goal ${formatCurrency(goal)}). Assign anyway?`,
+            assign,
+          );
+          return;
+        }
+        assign();
       }
     }, 'Assign'),
   });
@@ -503,11 +557,43 @@ function sinkingFundToggle(checked) {
   return { row, input };
 }
 
+function goalField(isSinking, value = 0) {
+  const input = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: 0,
+    value: value > 0 ? String(value) : '',
+    placeholder: 'Optional',
+  });
+  const row = el('div', { className: 'form-group' },
+    el('label', {}, isSinking ? 'Savings goal (optional)' : 'Soft cap (optional)'),
+    input,
+    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+      isSinking
+        ? 'Target to save toward (e.g. Christmas $800). Warns if you assign more than the goal.'
+        : 'Max you want budgeted here. Soft warning only — you can still override.',
+    ),
+  );
+  return { row, input };
+}
+
 function addCategory(isSinking) {
   const nameIn = el('input', { type: 'text', placeholder: 'Category name' });
   const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
   const iconIn = el('input', { type: 'text', placeholder: 'Icon (emoji)', value: isSinking ? '🎯' : '📁' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(isSinking);
+  const { row: goalRow, input: goalIn } = goalField(isSinking, 0);
+
+  sinkingIn.addEventListener('change', () => {
+    const label = goalRow.querySelector('label');
+    const hint = goalRow.querySelector('.tx-form-hint');
+    if (label) label.textContent = sinkingIn.checked ? 'Savings goal (optional)' : 'Soft cap (optional)';
+    if (hint) {
+      hint.textContent = sinkingIn.checked
+        ? 'Target to save toward (e.g. Christmas $800). Warns if you assign more than the goal.'
+        : 'Max you want budgeted here. Soft warning only — you can still override.';
+    }
+  });
 
   showModal({
     title: 'Add Envelope',
@@ -517,6 +603,7 @@ function addCategory(isSinking) {
         el('div', { className: 'form-group' }, el('label', {}, 'Icon'), iconIn),
         el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
       ),
+      goalRow,
       sinkingRow,
     ),
     footer: el('button', {
@@ -532,6 +619,7 @@ function addCategory(isSinking) {
             isSinkingFund: sinkingIn.checked,
             monthlyBudget: Number(budgetIn.value),
             carryOver: 0,
+            goalAmount: Number(goalIn.value) > 0 ? Number(goalIn.value) : 0,
           });
         });
         this.closest('.modal-backdrop').remove();
@@ -547,6 +635,18 @@ function editCategory(cat) {
   const budgetIn = el('input', { type: 'number', step: '0.01', value: cat.monthlyBudget });
   const iconIn = el('input', { type: 'text', value: cat.icon || '' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(cat.isSinkingFund);
+  const { row: goalRow, input: goalIn } = goalField(cat.isSinkingFund, Number(cat.goalAmount) || 0);
+
+  sinkingIn.addEventListener('change', () => {
+    const label = goalRow.querySelector('label');
+    const hint = goalRow.querySelector('.tx-form-hint');
+    if (label) label.textContent = sinkingIn.checked ? 'Savings goal (optional)' : 'Soft cap (optional)';
+    if (hint) {
+      hint.textContent = sinkingIn.checked
+        ? 'Target to save toward (e.g. Christmas $800). Warns if you assign more than the goal.'
+        : 'Max you want budgeted here. Soft warning only — you can still override.';
+    }
+  });
 
   showModal({
     title: 'Edit Envelope',
@@ -556,22 +656,38 @@ function editCategory(cat) {
         el('div', { className: 'form-group' }, el('label', {}, 'Icon'), iconIn),
         el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
       ),
+      goalRow,
       sinkingRow,
     ),
     footer: el('button', {
       className: 'btn btn-primary',
       onClick: function() {
-        store.update(s => {
-          const c = s.categories.find(x => x.id === cat.id);
-          if (c) {
-            c.name = nameIn.value;
-            c.icon = iconIn.value;
-            c.monthlyBudget = Number(budgetIn.value);
-            c.isSinkingFund = sinkingIn.checked;
-          }
-        });
-        this.closest('.modal-backdrop').remove();
-        window.appRefresh();
+        const nextBudget = Number(budgetIn.value) || 0;
+        const nextGoal = Number(goalIn.value) > 0 ? Number(goalIn.value) : 0;
+        const backdrop = this.closest('.modal-backdrop');
+        const save = () => {
+          store.update(s => {
+            const c = s.categories.find(x => x.id === cat.id);
+            if (c) {
+              c.name = nameIn.value;
+              c.icon = iconIn.value;
+              c.monthlyBudget = nextBudget;
+              c.isSinkingFund = sinkingIn.checked;
+              c.goalAmount = nextGoal;
+            }
+          });
+          backdrop?.remove();
+          window.appRefresh();
+        };
+        if (nextGoal > 0 && nextBudget > nextGoal + 0.005) {
+          confirmDialog(
+            sinkingIn.checked ? 'Over savings goal' : 'Over soft cap',
+            `Budgeted ${formatCurrency(nextBudget)} is above ${formatCurrency(nextGoal)}. Save anyway?`,
+            save,
+          );
+          return;
+        }
+        save();
       }
     }, 'Save'),
   });

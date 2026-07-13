@@ -72,7 +72,8 @@ export function renderDashboard(container) {
   const reviewBanner = renderReviewBanner(inbox);
   if (reviewBanner) container.appendChild(reviewBanner);
 
-  if (pendingCount > 0 || inbox.uncategorized.length > 0) {
+  const overCapEnvelopes = store.getEnvelopesOverSoftCap();
+  if (pendingCount > 0 || inbox.uncategorized.length > 0 || overCapEnvelopes.length > 0) {
     container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' },
       pendingCount > 0 ? el('button', {
         type: 'button',
@@ -84,6 +85,29 @@ export function renderDashboard(container) {
         className: 'chip chip-warn',
         onClick: () => openReviewInbox(inbox),
       }, `🏷️ ${inbox.uncategorized.length} need categories`) : null,
+      overCapEnvelopes.length > 0 ? el('button', {
+        type: 'button',
+        className: 'chip chip-warn',
+        onClick: () => window.appNavigate('budget', { filter: 'attention' }),
+      }, `🎯 ${overCapEnvelopes.length} over cap/goal`) : null,
+    ));
+  }
+
+  const dayOfMonth = new Date().getDate();
+  if (dayOfMonth <= 7) {
+    container.appendChild(el('div', { className: 'banner banner-action section' },
+      el('div', { className: 'banner-icon' }, '📅'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, 'New month checklist'),
+        el('p', {},
+          'Envelope budgets stay until you change them. Review kids’ envelopes, To Allocate, and optionally copy last month’s plan from Budget tools.',
+        ),
+      ),
+      el('button', {
+        className: 'btn btn-secondary btn-sm',
+        style: 'margin-left:auto;align-self:center',
+        onClick: () => window.appNavigate('budget'),
+      }, 'Open Budget'),
     ));
   }
 

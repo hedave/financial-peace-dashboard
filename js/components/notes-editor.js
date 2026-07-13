@@ -18,6 +18,7 @@ export function createNotesEditor({ rows = 16, placeholder = 'Reminders, plans, 
     className: 'notes-editor',
     rows: String(rows),
     placeholder,
+    spellcheck: 'true',
   });
   textarea.value = store.getNotes();
 
@@ -27,17 +28,30 @@ export function createNotesEditor({ rows = 16, placeholder = 'Reminders, plans, 
   function persist() {
     store.setNotes(textarea.value);
     statusEl.textContent = formatNotesStatus(store.getNotesUpdatedAt());
+    statusEl.classList.remove('notes-status-saving');
+    statusEl.classList.add('notes-status-saved');
   }
 
   textarea.addEventListener('input', () => {
     clearTimeout(debounceTimer);
     statusEl.textContent = 'Saving…';
-    debounceTimer = setTimeout(persist, 600);
+    statusEl.classList.add('notes-status-saving');
+    statusEl.classList.remove('notes-status-saved');
+    debounceTimer = setTimeout(persist, 450);
   });
 
   textarea.addEventListener('blur', () => {
     clearTimeout(debounceTimer);
     persist();
+  });
+
+  // Ctrl/Cmd+S force save feedback
+  textarea.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      clearTimeout(debounceTimer);
+      persist();
+    }
   });
 
   return {

@@ -61,6 +61,8 @@ export function createDefaultState() {
     isSinkingFund: false,
     monthlyBudget: 0,
     carryOver: 0,
+    /** Soft cap (regular) or savings goal (sinking). 0 = none. */
+    goalAmount: 0,
   }));
 
   SINKING_FUND_DEFAULTS.forEach(c => {
@@ -72,6 +74,7 @@ export function createDefaultState() {
       isSinkingFund: true,
       monthlyBudget: 0,
       carryOver: 0,
+      goalAmount: 0,
     });
   });
 
@@ -120,6 +123,8 @@ export function createDefaultState() {
     celebrations: [],
     notes: '',
     notesUpdatedAt: null,
+    /** Sticky-note boards: [{ id, title, stickies: [{ id, title, text, color, updatedAt }] }] */
+    noteBoards: [],
     removedDefaultCategories: [],
     categoryRules: [],
     monthBudgetSnapshots: {},

@@ -4,6 +4,10 @@ js/config.js
 # Personal budget backups (keep your own copies outside the repo)
 backups/
 
+# Bank statements (never commit — may contain account/routing numbers)
+*.pdf
+*.PDF
+
 # OS / editor
 .DS_Store
 Thumbs.db

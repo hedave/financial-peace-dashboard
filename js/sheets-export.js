@@ -42,6 +42,7 @@ function buildEnvelopesCSV(state) {
     Icon: c.icon || '',
     MonthlyBudget: Number(c.monthlyBudget) || 0,
     CarryOver: Number(c.carryOver) || 0,
+    GoalOrCap: Number(c.goalAmount) || 0,
     Spent: store.getCategorySpent(c.id),
     Remaining: store.getCategoryRemaining(c.id),
     SinkingFund: c.isSinkingFund ? 'Yes' : 'No',
@@ -49,7 +50,7 @@ function buildEnvelopesCSV(state) {
     LinkedBills: store.getBillsForCategory(c.id).map(b => b.name).join('; '),
   }));
   return toCSV(rows, [
-    'Name', 'Icon', 'MonthlyBudget', 'CarryOver', 'Spent', 'Remaining',
+    'Name', 'Icon', 'MonthlyBudget', 'CarryOver', 'GoalOrCap', 'Spent', 'Remaining',
     'SinkingFund', 'LinkedDebts', 'LinkedBills',
   ]);
 }
