@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260713a';
+const APP_BUILD = '20260714a';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match
