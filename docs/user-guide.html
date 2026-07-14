@@ -884,13 +884,17 @@ newCarryOver = oldCarryOver + remaining</code></pre>
         <ul>
           <li>Track due dates, amounts, optional linked envelope, auto-pay flag.</li>
           <li><strong>Recurring</strong> (default on): when you mark paid or link a bank match, the app records <strong>last paid</strong>, moves <strong>due date +1 month</strong>, and sets the bill back to <strong>unpaid</strong> for the next cycle.</li>
-          <li><strong>One-time</strong> (Recurring off): stays in Paid after payment.</li>
+          <li><strong>One-time</strong> (Recurring off): stays paid until you delete it.</li>
+          <li><strong>Auto-pay</strong>: strong bank import match (amount + name) completes the cycle automatically.</li>
+          <li><strong>Paid this month</strong> lists what cleared in the current month (even after recurring rolls forward).</li>
           <li><strong>Mark paid</strong> can avoid double-hitting checking when the payment already appeared in CSV.</li>
-          <li>Review inbox can <strong>link</strong> a bank transaction to an unpaid bill.</li>
+          <li>Review inbox can <strong>link</strong> a bank transaction to an unpaid bill (non–auto-pay).</li>
           <li>Month rollover also repairs older data stuck as paid forever.</li>
           <li>Unpaid overdue bills stay overdue so a missed cycle is still visible.</li>
         </ul>
         <p>Payment history lives on <strong>linked transactions</strong>, not a separate bill ledger.</p>
+        <h3>Dave Ramsey mode (Settings)</h3>
+        <p>Soft only — never hard-blocks. Dashboard warns while To Allocate ≠ $0; logging an expense that would put an envelope under $0 asks for confirm.</p>
       </section>
 
       <!-- 13 -->

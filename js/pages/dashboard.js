@@ -73,6 +73,29 @@ export function renderDashboard(container) {
   if (reviewBanner) container.appendChild(reviewBanner);
 
   const overCapEnvelopes = store.getEnvelopesOverSoftCap();
+  const toAllocate = store.getToAllocate();
+  const daveMode = store.isDaveRamseyMode();
+  const toAllocateOff = Math.abs(toAllocate) >= 0.01;
+
+  if (daveMode && toAllocateOff) {
+    container.appendChild(el('div', { className: 'banner banner-warning section' },
+      el('div', { className: 'banner-icon' }, '📊'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, toAllocate > 0
+          ? `${formatCurrency(toAllocate)} still needs a job`
+          : `Over-assigned by ${formatCurrency(Math.abs(toAllocate))}`),
+        el('p', {}, toAllocate > 0
+          ? 'Dave Ramsey mode: give every dollar a job until To Allocate is $0.'
+          : 'Dave Ramsey mode: you budgeted more than planned income — trim envelopes or fix the pay calendar.'),
+      ),
+      el('button', {
+        className: 'btn btn-secondary btn-sm',
+        style: 'margin-left:auto;align-self:center',
+        onClick: () => window.appNavigate('budget'),
+      }, 'Open Budget'),
+    ));
+  }
+
   if (pendingCount > 0 || inbox.uncategorized.length > 0 || overCapEnvelopes.length > 0) {
     container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' },
       pendingCount > 0 ? el('button', {

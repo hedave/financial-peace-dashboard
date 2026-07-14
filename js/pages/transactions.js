@@ -818,61 +818,85 @@ export function openTransactionForm({
             ? (postToChecking.checked ? 'cleared' : 'pending')
             : 'cleared';
 
-          if (isEdit) {
-            const updates = {
-              date: dateIn.value,
-              amount: amt,
-              type: txType,
-              description: descIn.value.trim(),
-              clearingStatus,
-            };
-            if (useSplit) {
-              updates.splits = splits;
-            } else {
-              updates.categoryId = categoryId;
-              updates.splits = [];
-            }
-            store.updateTransaction(transaction.id, updates);
-            showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
-            if (txType === 'income') {
-              setTimeout(() => handleBonusReturnMatch(transaction.id), 50);
-            }
-          } else {
-            const newId = store.addTransaction({
-              date: dateIn.value,
-              amount: amt,
-              type: txType,
-              categoryId,
-              description: descIn.value.trim(),
-              debtId,
-              splits,
-              clearingStatus,
-            });
-            const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
-            showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
-            if (txType === 'income' && newId) {
-              setTimeout(() => handleBonusReturnMatch(newId), 50);
-            }
-          }
-
-          if (rememberRule.checked && txType === 'expense') {
-            const pattern = guessMerchantPattern(descIn.value);
-            if (pattern) {
+          const saveTx = () => {
+            if (isEdit) {
+              const updates = {
+                date: dateIn.value,
+                amount: amt,
+                type: txType,
+                description: descIn.value.trim(),
+                clearingStatus,
+              };
               if (useSplit) {
-                store.addCategoryRule({
-                  pattern,
-                  type: 'split',
-                  categoryIds: splits.map(s => s.categoryId).filter(Boolean),
-                });
-              } else if (categoryId) {
-                store.addCategoryRule({ pattern, type: 'category', categoryId });
+                updates.splits = splits;
+              } else {
+                updates.categoryId = categoryId;
+                updates.splits = [];
               }
-              showToast(`Rule saved for "${pattern}"`, 'success', 4000);
+              store.updateTransaction(transaction.id, updates);
+              showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
+              if (txType === 'income') {
+                setTimeout(() => handleBonusReturnMatch(transaction.id), 50);
+              }
+            } else {
+              const newId = store.addTransaction({
+                date: dateIn.value,
+                amount: amt,
+                type: txType,
+                categoryId,
+                description: descIn.value.trim(),
+                debtId,
+                splits,
+                clearingStatus,
+              });
+              const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
+              showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
+              if (txType === 'income' && newId) {
+                setTimeout(() => handleBonusReturnMatch(newId), 50);
+              }
+            }
+
+            if (rememberRule.checked && txType === 'expense') {
+              const pattern = guessMerchantPattern(descIn.value);
+              if (pattern) {
+                if (useSplit) {
+                  store.addCategoryRule({
+                    pattern,
+                    type: 'split',
+                    categoryIds: splits.map(s => s.categoryId).filter(Boolean),
+                  });
+                } else if (categoryId) {
+                  store.addCategoryRule({ pattern, type: 'category', categoryId });
+                }
+                showToast(`Rule saved for "${pattern}"`, 'success', 4000);
+              }
+            }
+
+            modal.close();
+            window.appRefresh();
+          };
+
+          // Dave Ramsey soft warning: overspending an envelope
+          if (txType === 'expense' && store.isDaveRamseyMode()) {
+            const over = store.wouldOverspendEnvelope(
+              categoryId,
+              amt,
+              {
+                excludeTxId: isEdit ? transaction.id : null,
+                splits: useSplit ? splits : null,
+              },
+            );
+            if (over) {
+              confirmDialog(
+                'Envelope over budget',
+                `${over.categoryName} has ${formatCurrency(over.remaining)} left. This ${formatCurrency(over.amount)} would put it ${formatCurrency(over.overBy)} over. Log it anyway?`,
+                saveTx,
+              );
+              return;
             }
           }
 
-          modal.close();
-          window.appRefresh();
+          saveTx();
         },
       }, isEdit ? 'Save Changes' : 'Add Transaction'),
     ],
@@ -895,7 +919,11 @@ function formatImportToast(stats) {
     if (stats.categorized) parts.push(`${stats.categorized} categorized`);
     if (stats.ruleApplied) parts.push(`${stats.ruleApplied} from rules`);
     if (stats.incomeLinked) parts.push(`${stats.incomeLinked} income matched`);
-    if (stats.billMatches) parts.push(`${stats.billMatches} bill matches`);
+    if (stats.autoPayBills) parts.push(`${stats.autoPayBills} auto-pay bills`);
+    if (stats.billMatches && !stats.autoPayBills) parts.push(`${stats.billMatches} bill matches`);
+    else if (stats.billMatches && stats.autoPayBills && stats.billMatches > stats.autoPayBills) {
+      parts.push(`${stats.billMatches - stats.autoPayBills} bill matches to review`);
+    }
     if (stats.duplicates) parts.push(`${stats.duplicates} duplicates skipped`);
     if (stats.skipped) parts.push(`${stats.skipped} rows skipped`);
     const stillPending = store.getPendingTransactions().length;

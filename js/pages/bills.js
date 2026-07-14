@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState, getCurrentMonth, getMonthLabel } from '../utils.js';
 // Recurring bills: after pay, store advances due date +1 month and sets unpaid again.
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
@@ -14,18 +14,20 @@ function sortByDueDate(a, b) {
 
 export function renderBills(container) {
   const state = store.getState();
+  const month = getCurrentMonth();
   const allBills = state.bills || [];
   const upcoming = allBills
     .filter(b => b.status !== 'paid')
     .sort(sortByDueDate);
-  const paid = allBills
-    .filter(b => b.status === 'paid')
+  const paidThisMonth = store.getBillsPaidInMonth(month);
+  const paidOneTime = allBills
+    .filter(b => b.status === 'paid' && b.recurring === false)
     .sort((a, b) => (b.paidDate || '').localeCompare(a.paidDate || ''));
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Bills & Payments'),
-    el('p', {}, 'Recurring bills reset to unpaid next cycle (due date moves forward). One-time bills stay paid.')
+    el('p', {}, 'Recurring bills reset to unpaid next cycle. Auto-pay bills complete on strong bank matches.')
   ));
 
   container.appendChild(el('div', { className: 'btn-group section' },
@@ -46,35 +48,54 @@ export function renderBills(container) {
         ),
   ));
 
-  if (paid.length) {
+  container.appendChild(el('div', { className: 'section' },
+    el('div', { className: 'section-title' }, `Paid this month — ${getMonthLabel(month)} (${paidThisMonth.length})`),
+    paidThisMonth.length
+      ? billsTable(paidThisMonth, state, 'paidThisMonth')
+      : el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+          'No bills marked paid this month yet. Recurring payments show here even after the next cycle is scheduled.',
+        ),
+  ));
+
+  if (paidOneTime.length) {
     container.appendChild(el('div', { className: 'section' },
-      el('div', { className: 'section-title' }, `Paid Bills (${paid.length})`),
-      billsTable(paid, state, 'paid'),
+      el('div', { className: 'section-title' }, `One-time paid (${paidOneTime.length})`),
+      billsTable(paidOneTime, state, 'paid'),
     ));
   }
 }
 
-function billDisplay(bill, state, paid) {
+function billDisplay(bill, state, mode) {
+  const paid = mode === 'paid' || mode === 'paidThisMonth';
   const cat = (state.categories || []).find(c => c.id === bill.categoryId);
   const days = bill.dueDate ? daysUntil(bill.dueDate) : NaN;
   let status = bill.status || 'pending';
-  if (!paid) {
+  if (mode === 'paidThisMonth') {
+    status = 'paid';
+  } else if (!paid) {
     if (days < 0) status = 'overdue';
     else if (days <= 7) status = 'due_soon';
   } else {
     status = 'paid';
   }
-  const amount = paid && bill.paidAmount != null ? bill.paidAmount : bill.amount;
+  const amount = mode === 'paidThisMonth'
+    ? (bill.lastPaidAmount != null ? bill.lastPaidAmount : (bill.paidAmount != null ? bill.paidAmount : bill.amount))
+    : (paid && bill.paidAmount != null ? bill.paidAmount : bill.amount);
   const dateLabel = paid ? 'Paid' : 'Due';
-  const dateVal = formatDate(paid ? bill.paidDate : bill.dueDate);
+  const dateVal = mode === 'paidThisMonth'
+    ? formatDate(bill.lastPaidDate || bill.paidDate)
+    : formatDate(paid ? bill.paidDate : bill.dueDate);
   const lastPaid = !paid && bill.lastPaidDate
     ? `Last paid ${formatDate(bill.lastPaidDate)}${bill.lastPaidAmount != null ? ` · ${formatCurrency(bill.lastPaidAmount)}` : ''}`
     : null;
-  return { cat, status, amount, dateLabel, dateVal, lastPaid };
+  const nextDue = mode === 'paidThisMonth' && bill.recurring !== false && bill.dueDate
+    ? `Next due ${formatDate(bill.dueDate)}`
+    : null;
+  return { cat, status, amount, dateLabel, dateVal, lastPaid, nextDue };
 }
 
 function billsTable(bills, state, variant) {
-  const isPaid = variant === 'paid';
+  const isPaid = variant === 'paid' || variant === 'paidThisMonth';
   const wrap = el('div', { className: 'bills-list' });
 
   // Desktop table
@@ -90,7 +111,7 @@ function billsTable(bills, state, variant) {
           el('th', {}, 'Actions'),
         )),
         el('tbody', {},
-          ...bills.map(b => billRow(b, state, { paid: isPaid }))
+          ...bills.map(b => billRow(b, state, { mode: variant }))
         )
       )
     )
@@ -98,7 +119,7 @@ function billsTable(bills, state, variant) {
 
   // Mobile cards
   wrap.appendChild(el('div', { className: 'bill-mobile-list' },
-    ...bills.map(b => billCard(b, state, { paid: isPaid }))
+    ...bills.map(b => billCard(b, state, { mode: variant }))
   ));
 
   return wrap;
@@ -147,8 +168,10 @@ function billMoreMenu(bill) {
   return menu;
 }
 
-function billRow(bill, state, { paid = false } = {}) {
-  const { cat, status, amount, dateVal, lastPaid } = billDisplay(bill, state, paid);
+function billRow(bill, state, { mode = 'upcoming' } = {}) {
+  const paid = mode === 'paid' || mode === 'paidThisMonth';
+  const { cat, status, amount, dateVal, lastPaid, nextDue } = billDisplay(bill, state, mode);
+  const hideMarkPaid = paid || mode === 'paidThisMonth';
 
   return el('tr', {
     className: paid ? 'bill-paid-row bill-row-clickable' : 'bill-row-clickable',
@@ -167,6 +190,9 @@ function billRow(bill, state, { paid = false } = {}) {
       lastPaid
         ? el('div', { style: 'font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem' }, lastPaid)
         : null,
+      nextDue
+        ? el('div', { style: 'font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem' }, nextDue)
+        : null,
       bill.recurring !== false && !paid
         ? el('div', { style: 'font-size:0.68rem;color:var(--text-muted)' }, 'Recurring')
         : null,
@@ -177,7 +203,7 @@ function billRow(bill, state, { paid = false } = {}) {
     el('td', {}, statusBadge(status, bill.autoPay)),
     el('td', {},
       el('div', { className: 'btn-group' },
-        paid ? null : el('button', {
+        hideMarkPaid || bill.status === 'paid' ? null : el('button', {
           className: 'btn btn-sm btn-primary',
           onClick: (e) => { e.stopPropagation(); markPaid(bill); },
         }, 'Mark Paid'),
@@ -194,16 +220,19 @@ function billRow(bill, state, { paid = false } = {}) {
   );
 }
 
-function billCard(bill, state, { paid = false } = {}) {
-  const { cat, status, amount, dateLabel, dateVal, lastPaid } = billDisplay(bill, state, paid);
+function billCard(bill, state, { mode = 'upcoming' } = {}) {
+  const paid = mode === 'paid' || mode === 'paidThisMonth';
+  const { cat, status, amount, dateLabel, dateVal, lastPaid, nextDue } = billDisplay(bill, state, mode);
   const tone = paid ? 'paid' : (status === 'overdue' ? 'overdue' : status === 'due_soon' ? 'due' : 'ok');
   const linked = store.getBillTransactions(bill.id).length;
+  const hideMarkPaid = paid || mode === 'paidThisMonth' || bill.status === 'paid';
   const metaBits = [
     `${dateLabel} ${dateVal || '—'}`,
     cat?.name || null,
     linked ? `${linked} linked tx` : null,
     bill.recurring !== false && !paid ? 'Recurring' : null,
     lastPaid || null,
+    nextDue || null,
   ].filter(Boolean);
 
   return el('article', {
@@ -225,7 +254,7 @@ function billCard(bill, state, { paid = false } = {}) {
       )
     ),
     el('div', { className: 'tx-card-actions' },
-      paid ? null : el('button', {
+      hideMarkPaid ? null : el('button', {
         className: 'btn btn-sm btn-primary',
         onClick: (e) => { e.stopPropagation(); markPaid(bill); },
       }, 'Mark Paid'),
@@ -410,7 +439,7 @@ function openBillForm(bill = null) {
         el('label', { style: 'display:flex;align-items:center;gap:0.5rem' }, autoPayIn, ' Auto-pay'),
       ),
       el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem;margin-bottom:0' },
-        'Recurring bills come back unpaid after you mark them paid, with the due date moved forward one month. Turn off Recurring for one-time bills.',
+        'Recurring: after pay, due date moves +1 month and the bill is unpaid again. Auto-pay: strong CSV/PDF matches (amount + name) complete the cycle automatically.',
       ),
     ),
     footer: [

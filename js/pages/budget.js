@@ -88,7 +88,11 @@ export function renderBudget(container, arg) {
           `Includes ${formatCurrency(bonusLogged)} bonus income this month`
         )
         : null,
-      unallocated === 0 ? el('p', { style: 'font-size:0.75rem;color:var(--positive)' }, '✓ Zero-based budget!') : null
+      unallocated === 0 ? el('p', { style: 'font-size:0.75rem;color:var(--positive)' }, '✓ Zero-based budget!') : null,
+      unallocated !== 0 && store.isDaveRamseyMode()
+        ? el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+          unallocated > 0 ? 'Ramsey mode: assign the rest until $0' : 'Ramsey mode: over-assigned vs income')
+        : null,
     )
   ));
 

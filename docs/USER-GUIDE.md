@@ -440,13 +440,23 @@ On future imports (and “Apply saved rules”), if description contains the pat
 
 - Track due dates, amounts, optional linked envelope, auto-pay flag.
 - **Recurring** (default **on**): when you mark paid (or link a bank match), the app records **last paid**, moves **due date forward one month**, and sets the bill back to **unpaid** for the next cycle.
-- **One-time** (`Recurring` off): stays in Paid after payment.
+- **One-time** (`Recurring` off): stays paid until you delete it.
+- **Auto-pay**: on a **strong** bank import match (amount + name in description), the bill cycle completes automatically (same as Mark Paid for that cycle).
+- **Paid this month** section lists bills paid in the current calendar month (including recurring ones that already rolled to the next due date).
 - **Mark paid** can avoid double-hitting checking when the payment already appeared in CSV (`already in bank` behavior).
-- Review inbox can **link** a bank transaction to an unpaid bill.
+- Review inbox can **link** a bank transaction to an unpaid bill (non–auto-pay).
 - Month rollover also fixes older data that was stuck as paid forever (safety net).
 - Unpaid overdue bills stay overdue (a missed cycle is still visible).
 
 Payment history lives on **linked transactions**, not a separate bill ledger.
+
+### Dave Ramsey mode (Settings)
+
+Soft only — never hard-blocks:
+
+- Dashboard warns while **To Allocate ≠ $0**.
+- Logging an expense that would put an envelope **under $0 remaining** asks you to confirm.
+- Budget page hints when To Allocate is off zero.
 
 ---
 

@@ -40,9 +40,16 @@ export async function renderSettings(container) {
       store.update(s => { s.settings.reduceMotion = val; });
       applyTheme(store.getState().settings);
     }),
-    toggleRow('Dave Ramsey Mode (strict zero-based)', state.settings.daveRamseyMode, val => {
+    toggleRow('Dave Ramsey Mode (soft zero-based)', state.settings.daveRamseyMode, val => {
       store.update(s => { s.settings.daveRamseyMode = val; });
+      showToast(val
+        ? 'On: warns when To Allocate ≠ $0 and before overspending an envelope'
+        : 'Dave Ramsey soft warnings off');
     }),
+    el('p', {
+      className: 'tx-form-hint',
+      style: 'margin-top:0.5rem;margin-bottom:0',
+    }, 'Soft only — never blocks spending. Dashboard nags until every dollar has a job; logging an over-budget expense asks for confirm.'),
   ));
 
   const daysSinceBackup = daysSince(state.settings.lastBackupAt);

@@ -17,7 +17,7 @@ import {
   descriptionSimilarity,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
-import { findBillForTransaction } from './bill-matcher.js';
+import { findBillForTransaction, findAutoPayBillForTransaction } from './bill-matcher.js';
 import {
   normalizePaySchedule,
   getScheduledChecksForMonth,
@@ -1034,6 +1034,85 @@ class Store {
     });
   }
 
+  /**
+   * Strong auto-pay match: link tx → bill and advance recurring cycle.
+   * Safe to call inside an existing update() with state `s`, or alone.
+   * @returns {boolean}
+   */
+  applyAutoPayBillIfMatched(tx, s = this.state, stats = null) {
+    if (!tx || tx.type !== 'expense' || tx.billId) return false;
+    const bill = findAutoPayBillForTransaction(tx, s.bills || []);
+    if (!bill || bill.status === 'paid') return false;
+    tx.billId = bill.id;
+    if (!tx.categoryId && bill.categoryId) tx.categoryId = bill.categoryId;
+    const paidAmt = Math.abs(Number(tx.amount)) || Number(bill.amount) || 0;
+    const paidDate = tx.date || todayISO();
+    completeBillPaymentCycle(bill, paidDate, paidAmt);
+    if (stats) {
+      stats.billMatches = (stats.billMatches || 0) + 1;
+      stats.autoPayBills = (stats.autoPayBills || 0) + 1;
+    }
+    return true;
+  }
+
+  isDaveRamseyMode() {
+    return !!this.state.settings?.daveRamseyMode;
+  }
+
+  /**
+   * Soft check: would this expense amount put the envelope under $0 remaining?
+   * @param {string|null} categoryId
+   * @param {number} amount
+   * @param {{ excludeTxId?: string, splits?: array }} [opts]
+   */
+  wouldOverspendEnvelope(categoryId, amount, opts = {}) {
+    if (!categoryId && !opts.splits?.length) return null;
+    if (opts.splits?.length) {
+      for (const sp of opts.splits) {
+        if (!sp.categoryId) continue;
+        const hit = this.wouldOverspendEnvelope(sp.categoryId, sp.amount, { excludeTxId: opts.excludeTxId });
+        if (hit) return hit;
+      }
+      return null;
+    }
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return null;
+    let remaining = this.getCategoryRemaining(categoryId);
+    if (opts.excludeTxId) {
+      const old = this.state.transactions.find(t => t.id === opts.excludeTxId);
+      if (old) {
+        if (this.isSplitTransaction(old)) {
+          const sp = (old.splits || []).find(x => x.categoryId === categoryId);
+          if (sp) remaining += Math.abs(Number(sp.amount)) || 0;
+        } else if (old.categoryId === categoryId) {
+          remaining += Math.abs(Number(old.amount)) || 0;
+        }
+      }
+    }
+    const spend = Math.abs(Number(amount)) || 0;
+    if (remaining - spend >= -0.005) return null;
+    return {
+      categoryId,
+      categoryName: cat.name,
+      remaining,
+      amount: spend,
+      overBy: Math.round((spend - remaining) * 100) / 100,
+    };
+  }
+
+  getBillsPaidInMonth(month = getCurrentMonth()) {
+    return (this.state.bills || [])
+      .filter(b => {
+        const d = b.lastPaidDate || (b.status === 'paid' ? b.paidDate : null);
+        return d && String(d).startsWith(month);
+      })
+      .sort((a, b) => {
+        const da = a.lastPaidDate || a.paidDate || '';
+        const db = b.lastPaidDate || b.paidDate || '';
+        return db.localeCompare(da);
+      });
+  }
+
   linkAllBillMatches(month = getCurrentMonth()) {
     const matches = this.getPendingBillMatches(month);
     matches.forEach(({ transaction, bill }) => {
@@ -1800,7 +1879,7 @@ class Store {
   importTransactions(rows, { includePending = true } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
-      billMatches: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
+      billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
       matchedPending: 0, parsed: rows.length,
       incomeIdsForReturnMatch: [],
     };
@@ -1850,7 +1929,9 @@ class Store {
           } else if (pendingMatch.type === 'expense') {
             stats.expense++;
             if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
-            if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
+            if (!this.applyAutoPayBillIfMatched(pendingMatch, s, stats)) {
+              if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
+            }
           }
           stats.matchedPending++;
           stats.count++;
@@ -1900,7 +1981,9 @@ class Store {
           s.balances.checking -= tx.amount;
           stats.expense++;
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
-          if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
+          if (!this.applyAutoPayBillIfMatched(newTx, s, stats)) {
+            if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
+          }
         } else {
           s.balances.checking += tx.amount;
           stats.income++;
