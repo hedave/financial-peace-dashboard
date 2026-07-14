@@ -63,9 +63,9 @@ export function renderReviewBanner(inbox) {
       el('p', {}, parts.join(' · '))
     ),
     el('div', { className: 'btn-group', style: 'margin-left:auto' },
-      inbox.uncategorized.length ? el('button', {
+      inbox.totalCount ? el('button', {
         className: 'btn btn-primary btn-sm',
-        onClick: () => openReviewInbox(inbox),
+        onClick: () => openReviewInbox(),
       }, 'Review') : null,
       inbox.pending?.length ? el('button', {
         className: 'btn btn-secondary btn-sm',
@@ -276,11 +276,98 @@ export function openDuplicateReview() {
   modal.modal.classList.add('modal-wide');
 }
 
-export function openReviewInbox(inbox = store.getReviewInbox()) {
-  const state = store.getState();
-  let txs = inbox.uncategorized || [];
-  if (!txs.length) {
+/**
+ * Entry point for "Review (N)" — totalCount includes uncategorized, bill matches,
+ * duplicates, and pending. Route to the only queue, or show a chooser when mixed.
+ */
+export function openReviewInbox(_inbox) {
+  const inbox = store.getReviewInbox();
+  if (!inbox.totalCount) {
     showToast('Nothing to review!', 'info');
+    return;
+  }
+
+  const queues = [];
+  if (inbox.uncategorized.length) {
+    queues.push({
+      id: 'uncategorized',
+      label: 'Need categories',
+      count: inbox.uncategorized.length,
+      open: () => openUncategorizedReview(),
+    });
+  }
+  if (inbox.pending?.length) {
+    queues.push({
+      id: 'pending',
+      label: 'Awaiting bank',
+      count: inbox.pending.length,
+      open: () => openPendingReview(),
+    });
+  }
+  if (inbox.billMatches.length) {
+    queues.push({
+      id: 'bills',
+      label: 'Bill matches',
+      count: inbox.billMatches.length,
+      open: () => openBillMatches(),
+    });
+  }
+  if (inbox.duplicates?.length) {
+    queues.push({
+      id: 'duplicates',
+      label: 'Possible duplicates',
+      count: inbox.duplicates.length,
+      open: () => openDuplicateReview(),
+    });
+  }
+
+  if (!queues.length) {
+    showToast('Nothing to review!', 'info');
+    return;
+  }
+
+  // Single queue → open it directly (no extra click)
+  if (queues.length === 1) {
+    queues[0].open();
+    return;
+  }
+
+  // Prefer uncategorized if present (most common import follow-up)
+  // but still offer the hub so other counts aren't a dead end
+  let hub;
+  hub = showModal({
+    title: `Review inbox (${inbox.totalCount})`,
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'Choose what to work through. The Review count includes all of these queues.',
+      ),
+      el('div', { className: 'review-hub-list' },
+        ...queues.map(q => el('button', {
+          type: 'button',
+          className: 'btn btn-secondary review-hub-item',
+          style: 'width:100%;justify-content:space-between;display:flex;margin-bottom:0.5rem',
+          onClick: () => {
+            hub.close();
+            q.open();
+          },
+        },
+          el('span', {}, q.label),
+          el('span', { className: 'badge badge-due' }, String(q.count)),
+        )),
+      ),
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => hub.close() }, 'Close'),
+    ],
+  });
+}
+
+/** Uncategorized expenses only (assign envelopes / always-use rules). */
+export function openUncategorizedReview() {
+  const state = store.getState();
+  let txs = store.getReviewInbox().uncategorized || [];
+  if (!txs.length) {
+    showToast('No uncategorized transactions', 'info');
     return;
   }
 

@@ -106,7 +106,7 @@ export function renderDashboard(container) {
       inbox.uncategorized.length > 0 ? el('button', {
         type: 'button',
         className: 'chip chip-warn',
-        onClick: () => openReviewInbox(inbox),
+        onClick: () => openReviewInbox(),
       }, `🏷️ ${inbox.uncategorized.length} need categories`) : null,
       overCapEnvelopes.length > 0 ? el('button', {
         type: 'button',
@@ -154,7 +154,7 @@ export function renderDashboard(container) {
 
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
-    quickAction('📥', 'Review Inbox', () => openReviewInbox(inbox)),
+    quickAction('📥', 'Review Inbox', () => openReviewInbox()),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),
   ));

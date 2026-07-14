@@ -220,13 +220,13 @@ export function renderTransactions(container, arg) {
   if (inbox.totalCount > 0) {
     txToolsList.appendChild(el('button', {
       type: 'button', className: 'page-tools-item',
-      onClick: () => { txTools.removeAttribute('open'); openReviewInbox(inbox); },
+      onClick: () => { txTools.removeAttribute('open'); openReviewInbox(); },
     }, `Review (${inbox.totalCount})`));
   }
   if (duplicateCount > 0) {
     txToolsList.appendChild(el('button', {
       type: 'button', className: 'page-tools-item',
-      onClick: () => { txTools.removeAttribute('open'); openDuplicateReview(inbox); },
+      onClick: () => { txTools.removeAttribute('open'); openDuplicateReview(); },
     }, `Duplicates (${duplicateCount})`));
   }
   txTools.appendChild(txToolsList);
@@ -238,11 +238,11 @@ export function renderTransactions(container, arg) {
     el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: openImportDialog }, 'Import CSV'),
     inbox.totalCount > 0 ? el('button', {
       className: 'btn btn-accent tx-action-secondary',
-      onClick: () => openReviewInbox(inbox),
+      onClick: () => openReviewInbox(),
     }, `Review (${inbox.totalCount})`) : null,
     duplicateCount > 0 ? el('button', {
       className: 'btn btn-secondary tx-action-secondary',
-      onClick: () => openDuplicateReview(inbox),
+      onClick: () => openDuplicateReview(),
     }, `Duplicates (${duplicateCount})`) : null,
     txTools,
   ));
