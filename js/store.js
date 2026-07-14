@@ -2008,10 +2008,18 @@ class Store {
   }
 
   getUpcomingBills(days = 14) {
+    const month = getCurrentMonth();
     return this.state.bills
       .filter(b => b.status !== 'paid')
+      // Dashboard glance: this month + overdue, not far-future next cycles
+      .filter(b => {
+        const due = String(b.dueDate || '').slice(0, 10);
+        if (!due) return true;
+        const dueM = due.slice(0, 7);
+        return dueM <= month;
+      })
       .map(b => ({ ...b, daysLeft: daysUntil(b.dueDate) }))
-      .filter(b => b.daysLeft <= days)
+      .filter(b => Number.isFinite(b.daysLeft) && b.daysLeft <= days)
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }
 

@@ -4,6 +4,9 @@ import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
 
+/** Remember last bills tab within the session */
+let billsTab = 'thisMonth';
+
 function sortByDueDate(a, b) {
   if (!a.dueDate && !b.dueDate) return a.name.localeCompare(b.name);
   if (!a.dueDate) return 1;
@@ -12,22 +15,50 @@ function sortByDueDate(a, b) {
   return byDate !== 0 ? byDate : a.name.localeCompare(b.name);
 }
 
+/** Due date month key YYYY-MM, or null if missing */
+function billDueMonth(bill) {
+  const d = String(bill?.dueDate || '').slice(0, 10);
+  return d.length >= 7 ? d.slice(0, 7) : null;
+}
+
+/**
+ * This month board: unpaid bills due in the current calendar month, overdue
+ * (past months), or with no due date. Future-month dues stay on Later.
+ */
+function isThisMonthBoard(bill, month) {
+  if (bill.status === 'paid') return false;
+  const dueM = billDueMonth(bill);
+  if (!dueM) return true;
+  return dueM <= month;
+}
+
+function isLaterBoard(bill, month) {
+  if (bill.status === 'paid') return false;
+  const dueM = billDueMonth(bill);
+  return !!(dueM && dueM > month);
+}
+
 export function renderBills(container) {
   const state = store.getState();
   const month = getCurrentMonth();
   const allBills = state.bills || [];
-  const upcoming = allBills
-    .filter(b => b.status !== 'paid')
-    .sort(sortByDueDate);
+  const unpaid = allBills.filter(b => b.status !== 'paid');
+  const thisMonthBills = unpaid.filter(b => isThisMonthBoard(b, month)).sort(sortByDueDate);
+  const laterBills = unpaid.filter(b => isLaterBoard(b, month)).sort(sortByDueDate);
+  const overdueCount = thisMonthBills.filter(b => b.dueDate && daysUntil(b.dueDate) < 0).length;
   const paidThisMonth = store.getBillsPaidInMonth(month);
   const paidOneTime = allBills
     .filter(b => b.status === 'paid' && b.recurring === false)
     .sort((a, b) => (b.paidDate || '').localeCompare(a.paidDate || ''));
 
+  if (!['thisMonth', 'later', 'paid'].includes(billsTab)) billsTab = 'thisMonth';
+
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Bills & Payments'),
-    el('p', {}, 'Recurring bills reset to unpaid next cycle. Auto-pay bills complete on strong bank matches.')
+    el('p', {},
+      `${getMonthLabel(month)} — this month’s dues here; after you pay, next cycle waits under Later until the 1st.`,
+    ),
   ));
 
   container.appendChild(el('div', { className: 'btn-group section' },
@@ -39,30 +70,91 @@ export function renderBills(container) {
     return;
   }
 
-  container.appendChild(el('div', { className: 'section' },
-    el('div', { className: 'section-title' }, `Upcoming Bills (${upcoming.length})`),
-    upcoming.length
-      ? billsTable(upcoming, state, 'upcoming')
-      : el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
-          '✅ All caught up — no bills due right now.'
-        ),
-  ));
+  const panel = el('div', { className: 'bills-tab-panel section' });
 
-  container.appendChild(el('div', { className: 'section' },
-    el('div', { className: 'section-title' }, `Paid this month — ${getMonthLabel(month)} (${paidThisMonth.length})`),
-    paidThisMonth.length
-      ? billsTable(paidThisMonth, state, 'paidThisMonth')
-      : el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
-          'No bills marked paid this month yet. Recurring payments show here even after the next cycle is scheduled.',
-        ),
-  ));
-
-  if (paidOneTime.length) {
-    container.appendChild(el('div', { className: 'section' },
-      el('div', { className: 'section-title' }, `One-time paid (${paidOneTime.length})`),
-      billsTable(paidOneTime, state, 'paid'),
-    ));
+  function setTab(id) {
+    billsTab = id;
+    renderTabs();
+    renderPanel();
   }
+
+  const tabBar = el('div', { className: 'chip-bar bills-tabs' });
+  function renderTabs() {
+    tabBar.innerHTML = '';
+    const tabs = [
+      {
+        id: 'thisMonth',
+        label: overdueCount
+          ? `This month (${thisMonthBills.length}) · ${overdueCount} overdue`
+          : `This month (${thisMonthBills.length})`,
+      },
+      { id: 'later', label: `Later (${laterBills.length})` },
+      { id: 'paid', label: `Paid ${getMonthLabel(month).split(' ')[0]} (${paidThisMonth.length})` },
+    ];
+    tabs.forEach(t => {
+      tabBar.appendChild(el('button', {
+        type: 'button',
+        className: `chip${billsTab === t.id ? ' active' : ''}`,
+        onClick: () => setTab(t.id),
+      }, t.label));
+    });
+  }
+
+  function renderPanel() {
+    panel.innerHTML = '';
+    if (billsTab === 'thisMonth') {
+      panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+        'Due this calendar month, plus anything still unpaid from earlier (overdue). Future dues are under Later.',
+      ));
+      if (!thisMonthBills.length) {
+        panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+          laterBills.length
+            ? `✅ Nothing left for ${getMonthLabel(month)}. ${laterBills.length} bill${laterBills.length === 1 ? '' : 's'} waiting under Later (they move here on the 1st).`
+            : '✅ All caught up — no bills due this month.',
+        ));
+      } else {
+        panel.appendChild(billsTable(thisMonthBills, state, 'upcoming'));
+      }
+      return;
+    }
+
+    if (billsTab === 'later') {
+      panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+        'Due after this month (e.g. next cycle after you mark paid). On the 1st they automatically show under This month — no extra step.',
+      ));
+      if (!laterBills.length) {
+        panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+          'No future-dated bills yet. Pay a recurring bill and its next due date will appear here.',
+        ));
+      } else {
+        panel.appendChild(billsTable(laterBills, state, 'upcoming'));
+      }
+      return;
+    }
+
+    // Paid tab
+    panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+      `Payments recorded in ${getMonthLabel(month)}. Recurring bills also list their next due date.`,
+    ));
+    if (paidThisMonth.length) {
+      panel.appendChild(billsTable(paidThisMonth, state, 'paidThisMonth'));
+    } else {
+      panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+        'No bills marked paid this month yet.',
+      ));
+    }
+    if (paidOneTime.length) {
+      panel.appendChild(el('div', { className: 'section-title', style: 'margin-top:1.25rem' },
+        `One-time paid (${paidOneTime.length})`,
+      ));
+      panel.appendChild(billsTable(paidOneTime, state, 'paid'));
+    }
+  }
+
+  renderTabs();
+  renderPanel();
+  container.appendChild(tabBar);
+  container.appendChild(panel);
 }
 
 function billDisplay(bill, state, mode) {
