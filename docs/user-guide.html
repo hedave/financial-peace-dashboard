@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Financial Peace Dashboard — User Guide</title>
+  <style>
+    :root {
+      --bg: #f4f7f5;
+      --bg-card: #ffffff;
+      --bg-sidebar: #0f3d34;
+      --bg-sidebar-hover: #145246;
+      --text: #1a2e28;
+      --text-muted: #5a7268;
+      --text-on-dark: #e8f2ee;
+      --text-on-dark-muted: #a8c4b8;
+      --primary: #145246;
+      --accent: #c4a35a;
+      --border: #d5e3dc;
+      --code-bg: #e8f0ec;
+      --callout: #eef6f2;
+      --callout-border: #145246;
+      --warn-bg: #fff8e8;
+      --warn-border: #c4a35a;
+      --shadow: 0 1px 3px rgba(15, 61, 52, 0.08);
+      --radius: 12px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --mono: "Cascadia Code", "Consolas", "Courier New", monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1613;
+        --bg-card: #15241e;
+        --text: #e8f2ee;
+        --text-muted: #9bb5a8;
+        --border: #2a4038;
+        --code-bg: #1a2e28;
+        --callout: #1a2e28;
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 1.25rem; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 1.02rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(240px, 280px) 1fr;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--bg-sidebar);
+      color: var(--text-on-dark);
+      padding: 1.25rem 0 2rem;
+    }
+    .sidebar-brand {
+      padding: 0 1.25rem 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 0.75rem;
+    }
+    .sidebar-brand h1 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #fff;
+    }
+    .sidebar-brand p {
+      margin: 0.35rem 0 0;
+      font-size: 0.75rem;
+      color: var(--text-on-dark-muted);
+      line-height: 1.4;
+    }
+    .sidebar nav a {
+      display: block;
+      padding: 0.4rem 1.25rem;
+      color: var(--text-on-dark-muted);
+      text-decoration: none;
+      font-size: 0.82rem;
+      border-left: 3px solid transparent;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .sidebar nav a:hover,
+    .sidebar nav a:focus-visible {
+      background: var(--bg-sidebar-hover);
+      color: #fff;
+      outline: none;
+    }
+    .sidebar nav a.active {
+      color: #fff;
+      border-left-color: var(--accent);
+      background: rgba(196, 163, 90, 0.12);
+    }
+    .sidebar nav .toc-group {
+      margin-top: 0.65rem;
+      padding: 0.35rem 1.25rem 0.15rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+    }
+
+    /* Main */
+    .main {
+      max-width: 48rem;
+      margin: 0 auto;
+      padding: 2rem 1.75rem 4rem;
+    }
+    .hero {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem 1.75rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 2rem;
+    }
+    .hero h1 {
+      margin: 0 0 0.5rem;
+      font-size: 1.75rem;
+      color: var(--primary);
+      line-height: 1.25;
+    }
+    @media (prefers-color-scheme: dark) {
+      .hero h1 { color: #7dcea0; }
+    }
+    .hero .lede {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      background: var(--callout);
+      color: var(--primary);
+      border: 1px solid var(--border);
+    }
+    @media (prefers-color-scheme: dark) {
+      .badge { color: #a8dcc0; }
+    }
+
+    section {
+      margin-bottom: 2.75rem;
+      scroll-margin-top: 1.25rem;
+    }
+    section > h2 {
+      margin: 0 0 1rem;
+      font-size: 1.4rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--primary);
+      color: var(--text);
+    }
+    h3 {
+      margin: 1.5rem 0 0.65rem;
+      font-size: 1.1rem;
+    }
+    p { margin: 0.65rem 0; }
+    ul, ol { margin: 0.5rem 0 0.75rem; padding-left: 1.35rem; }
+    li { margin: 0.3rem 0; }
+    li::marker { color: var(--primary); }
+    strong { font-weight: 700; }
+    a.inline {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    @media (prefers-color-scheme: dark) {
+      a.inline { color: #7dcea0; }
+    }
+
+    /* Tables */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 0.85rem 0 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg-card);
+      box-shadow: var(--shadow);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    th, td {
+      padding: 0.65rem 0.85rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      background: var(--callout);
+      font-weight: 700;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(20, 82, 70, 0.04); }
+
+    /* Code / formulas */
+    pre, .formula {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      margin: 0.75rem 0;
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+    pre code { background: none; padding: 0; }
+
+    /* Callouts */
+    .callout {
+      background: var(--callout);
+      border-left: 4px solid var(--callout-border);
+      border-radius: 0 10px 10px 0;
+      padding: 0.85rem 1rem;
+      margin: 1rem 0;
+    }
+    .callout.warn {
+      background: var(--warn-bg);
+      border-left-color: var(--warn-border);
+    }
+    .callout p:first-child { margin-top: 0; }
+    .callout p:last-child { margin-bottom: 0; }
+
+    .example-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.1rem 1.25rem;
+      margin: 1.25rem 0;
+      box-shadow: var(--shadow);
+    }
+    .example-card h3 {
+      margin-top: 0;
+      color: var(--primary);
+    }
+    @media (prefers-color-scheme: dark) {
+      .example-card h3 { color: #7dcea0; }
+    }
+
+    .checklist li { margin: 0.45rem 0; }
+
+    .back-top {
+      position: fixed;
+      right: 1.25rem;
+      bottom: 1.25rem;
+      z-index: 20;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding: 0.65rem 1rem;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(15, 61, 52, 0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .back-top.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .back-top:hover { filter: brightness(1.08); }
+
+    .footer-note {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .mobile-toc-toggle {
+      display: none;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      width: 100%;
+      background: var(--bg-sidebar);
+      color: #fff;
+      border: none;
+      padding: 0.85rem 1rem;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .mobile-toc-toggle { display: block; }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: min(300px, 88vw);
+        z-index: 40;
+        transform: translateX(-105%);
+        transition: transform 0.2s ease;
+        box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.45);
+        z-index: 35;
+      }
+      .sidebar-backdrop.show { display: block; }
+      .main { padding: 1.25rem 1rem 4rem; }
+      .hero h1 { font-size: 1.4rem; }
+    }
+  </style>
+</head>
+<body>
+  <button type="button" class="mobile-toc-toggle" id="toc-toggle" aria-expanded="false">☰ Contents</button>
+  <div class="sidebar-backdrop" id="toc-backdrop" hidden></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar" aria-label="Table of contents">
+      <div class="sidebar-brand">
+        <h1>User Guide</h1>
+        <p>Financial Peace Dashboard<br />Local reference · click any section</p>
+      </div>
+      <nav id="toc">
+        <div class="toc-group">Basics</div>
+        <a href="#what">1. What this app is</a>
+        <a href="#model">2. Core money model</a>
+        <a href="#screens">3. Main screens</a>
+        <a href="#envelopes">4. Envelopes</a>
+        <a href="#caps">5. Soft caps &amp; goals</a>
+
+        <div class="toc-group">Months</div>
+        <a href="#rollover">6. New month (automatic)</a>
+        <a href="#checklist">7. New month checklist</a>
+        <a href="#examples">8. Worked examples</a>
+
+        <div class="toc-group">Day to day</div>
+        <a href="#transactions">9. Transactions</a>
+        <a href="#import">10. Bank import</a>
+        <a href="#rules">11. Always-use rules</a>
+        <a href="#bills">12. Bills</a>
+        <a href="#debt">13. Debt snowball</a>
+        <a href="#income">14. Income &amp; pay</a>
+        <a href="#returns">15. Returns / refunds</a>
+        <a href="#notes">16. Sticky notes</a>
+
+        <div class="toc-group">Devices &amp; help</div>
+        <a href="#sync">17. Sync &amp; backups</a>
+        <a href="#phone">18. Phone / PWA</a>
+        <a href="#glossary">19. Glossary</a>
+        <a href="#troubleshoot">20. Troubleshooting</a>
+        <a href="#cheat">Appendix — Cheat sheet</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="hero" id="top">
+        <h1>Financial Peace Dashboard</h1>
+        <p class="lede">
+          A practical guide for you and your spouse — written for
+          <strong>how the app actually works</strong>, not marketing copy.
+          Local-only page (not part of the live web app menu).
+        </p>
+        <div class="badge-row">
+          <span class="badge">Zero-based</span>
+          <span class="badge">Debt snowball</span>
+          <span class="badge">Envelope budgeting</span>
+          <span class="badge">Guide · 2026-07-13</span>
+        </div>
+      </header>
+
+      <!-- 1 -->
+      <section id="what">
+        <h2>1. What this app is</h2>
+        <p>
+          <strong>Financial Peace Dashboard</strong> is a household budgeting app inspired by
+          Dave Ramsey’s <strong>zero-based budgeting</strong> and <strong>debt snowball</strong>:
+        </p>
+        <ul>
+          <li>Every dollar of planned income should get a job (an envelope).</li>
+          <li>Checking balance is the real bank number you maintain (or sync via imports).</li>
+          <li>Envelopes are <strong>virtual</strong> — they track <em>where money is allowed to go</em>, not separate bank accounts.</li>
+          <li>Debts are ordered smallest balance first (snowball).</li>
+        </ul>
+        <p>
+          It runs in the browser (and as a phone home-screen app). Data lives in
+          <strong>localStorage</strong> on each device, and optionally in
+          <strong>Supabase cloud sync</strong> so PC and phone stay aligned.
+        </p>
+      </section>
+
+      <!-- 2 -->
+      <section id="model">
+        <h2>2. Core money model</h2>
+        <p>Think of three layers:</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Layer</th><th>What it is</th><th>Example</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Bank checking</strong></td><td>Real money at the bank</td><td>$3,240.18</td></tr>
+              <tr><td><strong>Planned income</strong></td><td>What you expect this month from the pay calendar (+ bonus logged)</td><td>$6,000</td></tr>
+              <tr><td><strong>Envelopes</strong></td><td>Jobs for those dollars</td><td>Groceries $900, Gas $400, …</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Checking vs envelopes</h3>
+        <ul>
+          <li><strong>Checking</strong> goes up/down when cleared income/expenses hit the books (or when you edit the balance).</li>
+          <li><strong>Envelopes</strong> go up when you <strong>Allocate</strong> (assign budget) and down when you <strong>spend</strong> from that category.</li>
+          <li><strong>Allocate does not move bank money.</strong> It only changes the budget plan (“To Allocate” and each envelope’s budgeted amount).</li>
+        </ul>
+
+        <h3>The magic formula for one envelope</h3>
+        <pre><code>Remaining = Monthly budget + Carry-over − Spent this month</code></pre>
+        <ul>
+          <li><strong>Monthly budget</strong> — how much you assigned to this envelope for the plan (can change mid-month with Allocate).</li>
+          <li><strong>Carry-over</strong> — leftovers (or overspend) rolled from prior months, plus some special restores (e.g. returns).</li>
+          <li><strong>Spent</strong> — expenses (and split portions) tagged to this envelope in the current month.</li>
+        </ul>
+
+        <h3>“To Allocate” (zero-based leftover)</h3>
+        <pre><code>To Allocate = Planned monthly income (+ bonus logged) − sum of all envelopes’ Monthly budgets</code></pre>
+        <ul>
+          <li><strong>$0</strong> = every planned dollar has a job (goal in Ramsey mode).</li>
+          <li><strong>Positive</strong> = you still need to give dollars jobs (or send surplus to snowball).</li>
+          <li><strong>Negative</strong> = you budgeted more than planned income (over-assigned on paper).</li>
+        </ul>
+        <div class="callout">
+          <p>
+            <strong>Carry-over is not part of To Allocate.</strong>
+            Leftover in envelopes is already “owned” by those envelopes; To Allocate only cares about income vs monthly budget assignments.
+          </p>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section id="screens">
+        <h2>3. Main screens</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Screen</th><th>Use it for</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Dashboard</strong></td><td>Snapshot, review chips, snowball target, top spending, bills due, sync, month-close</td></tr>
+              <tr><td><strong>Budget</strong></td><td>Envelopes, allocate, soft caps/goals, attention filter</td></tr>
+              <tr><td><strong>Transactions</strong></td><td>Log/edit, import CSV/PDF, filters, pending, duplicates</td></tr>
+              <tr><td><strong>Bills</strong></td><td>Recurring bills, mark paid, link to bank activity</td></tr>
+              <tr><td><strong>Debt</strong></td><td>Snowball list, payments, payoff celebrations</td></tr>
+              <tr><td><strong>Income</strong></td><td>Pay sources, schedules, match terms</td></tr>
+              <tr><td><strong>Notes</strong></td><td>Sticky boards (multi-page stickies)</td></tr>
+              <tr><td><strong>Reports</strong></td><td>History / comparisons (snapshots help here)</td></tr>
+              <tr><td><strong>Settings</strong></td><td>Theme, password, cloud sync, rules, backup import/export</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>On phones, use the <strong>bottom nav</strong> for the main daily destinations.</p>
+      </section>
+
+      <!-- 4 -->
+      <section id="envelopes">
+        <h2>4. Envelopes (budget categories)</h2>
+        <h3>Types</h3>
+        <ol>
+          <li><strong>Regular envelopes</strong> — monthly spending (Groceries, Gas, Eating Out, …).</li>
+          <li><strong>Sinking funds</strong> — save over time for irregular costs (Christmas, Car Maintenance, Vacation). Same math; marked with a “Sinking Fund” tag.</li>
+        </ol>
+
+        <h3>What you can do on an envelope card</h3>
+        <ul>
+          <li><strong>Tap the card</strong> → activity list (this month / 30 days / all time).</li>
+          <li><strong>Allocate</strong> → assign more of To Allocate into this envelope’s monthly budget.</li>
+          <li><strong>Edit (✏️)</strong> → name, icon, monthly budget, soft cap/goal, sinking toggle.</li>
+          <li><strong>Delete</strong> → removes category; transactions unlink (they don’t vanish).</li>
+        </ul>
+
+        <h3>“Assign To Allocate evenly”</h3>
+        <p>Budget tools → splits the current To Allocate amount across all top-level envelopes equally by increasing each monthly budget. Checking does not change.</p>
+
+        <h3>Copy last month’s budget</h3>
+        <p>If a <strong>snapshot</strong> exists for last month (from rollover or month-close):</p>
+        <ul>
+          <li>Budget tools → <strong>Copy Last Month</strong> replaces <strong>current monthly budget numbers</strong> with last month’s snapshot.</li>
+          <li>It does <strong>not</strong> wipe carry-over.</li>
+          <li>It does <strong>not</strong> copy transactions.</li>
+        </ul>
+
+        <h3>Linked items</h3>
+        <p>Envelopes can show linked <strong>debts</strong> and <strong>bills</strong> so you see min payments / due amounts near the plan.</p>
+      </section>
+
+      <!-- 5 -->
+      <section id="caps">
+        <h2>5. Soft caps &amp; sinking-fund goals</h2>
+        <p>Optional field on each envelope:</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Envelope type</th><th>Field meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Regular</td><td><strong>Soft cap</strong> — max you <em>want</em> budgeted here</td></tr>
+              <tr><td>Sinking fund</td><td><strong>Savings goal</strong> — target to save toward (e.g. Christmas $800)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <p>
+            <strong>Soft only:</strong> the app <strong>warns</strong> if Allocate/edit would put monthly budget over the cap/goal.
+            You can always confirm and continue. Nothing hard-blocks real spending.
+          </p>
+        </div>
+        <p>On the card you’ll see progress (e.g. <code>$320 / $800 · 40%</code>). Over-cap envelopes show in:</p>
+        <ul>
+          <li>Budget → <strong>Needs attention</strong></li>
+          <li>Dashboard chips</li>
+          <li>Month-close checklist</li>
+        </ul>
+      </section>
+
+      <!-- 6 -->
+      <section id="rollover">
+        <h2>6. New month: what happens automatically</h2>
+        <p>
+          When the calendar rolls to a new month, the <strong>first time you open the app</strong> that month
+          it runs <strong>month rollover</strong>.
+        </p>
+
+        <h3>What rolls over</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Item</th><th>Rolls?</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Envelope remaining</strong></td><td>Yes → <strong>carry-over</strong></td><td>Leftover (or overspend) is <em>added</em> into that envelope’s carry-over</td></tr>
+              <tr><td><strong>Monthly budget amounts</strong></td><td><strong>Stay as-is</strong></td><td>Not zeroed; last month’s assignment numbers remain until you change them</td></tr>
+              <tr><td><strong>Budget snapshot of previous month</strong></td><td>Yes</td><td>Saved so you can <strong>Copy Last Month</strong> and for reports</td></tr>
+              <tr><td><strong>Transactions</strong></td><td>Stay forever</td><td>Filtered by date; old months still visible in history</td></tr>
+              <tr><td><strong>Pending transactions</strong></td><td>Stay</td><td>Still awaiting bank until matched or marked cleared</td></tr>
+              <tr><td><strong>Bills status</strong></td><td>Stay as paid/unpaid</td><td>You manage bill cycles; paid flags don’t auto-reset by themselves</td></tr>
+              <tr><td><strong>Debts / snowball order</strong></td><td>Stay</td><td>Balances only change when you pay</td></tr>
+              <tr><td><strong>Category rules</strong></td><td>Stay</td><td>Merchant → envelope forever until deleted</td></tr>
+              <tr><td><strong>Sticky notes</strong></td><td>Stay</td><td>Boards are not monthly</td></tr>
+              <tr><td><strong>Checking / EF balances</strong></td><td>Stay</td><td>Not recalculated by month rollover</td></tr>
+              <tr><td><strong>Income schedules</strong></td><td>Stay</td><td>Planned income recalculates from the pay calendar for the new month</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>The rollover formula (per envelope)</h3>
+        <p>For the <strong>previous</strong> month:</p>
+        <pre><code>remaining = monthlyBudget + carryOver − spent(previous month)
+newCarryOver = oldCarryOver + remaining</code></pre>
+        <p>Then the app marks the current calendar month as processed.</p>
+
+        <div class="callout">
+          <p><strong>Important implications:</strong></p>
+          <ol>
+            <li>Money left in Groceries becomes <strong>carry-over</strong>, so it is still available next month <strong>on top of</strong> the same monthly budget number still sitting on the envelope.</li>
+            <li>If you overspent, remaining is <strong>negative</strong>, so carry-over drops (you “owe” that envelope).</li>
+            <li><strong>Monthly budget is not automatically set to match new income.</strong> If income changes, adjust budgets or use Copy Last Month + edits.</li>
+          </ol>
+        </div>
+
+        <h3>What does <em>not</em> auto-happen</h3>
+        <ul>
+          <li>Does not re-zero To Allocate for you (depends on new month income vs existing budgets).</li>
+          <li>Does not mark bills unpaid for the new cycle (handle on Bills page).</li>
+          <li>Does not import bank data.</li>
+          <li>Does not close the month for you (month-close is optional but recommended).</li>
+        </ul>
+      </section>
+
+      <!-- 7 -->
+      <section id="checklist">
+        <h2>7. New month checklist (recommended)</h2>
+        <p>Do this in the first few days of the month (Dashboard may show a “New month checklist” banner early in the month).</p>
+
+        <h3>Step-by-step</h3>
+        <ol class="checklist">
+          <li><strong>Open the app</strong> so rollover can run (carry-over applied once).</li>
+          <li><strong>Sync</strong> (if using cloud) so both devices share the same state.</li>
+          <li><strong>Import last statement</strong> (CSV or PDF) if you haven’t already — clear pending, catch missing spend.</li>
+          <li>
+            <strong>Review inbox</strong>
+            <ul>
+              <li>Uncategorized → assign envelopes; leave <strong>Always use this envelope</strong> on for recurring merchants.</li>
+              <li>Pending → wait for bank match or mark cleared carefully.</li>
+              <li>Duplicates → delete true doubles; <strong>Both unique</strong> for two real same-amount purchases.</li>
+              <li>Bill matches → link when appropriate.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Check To Allocate</strong> on Budget
+            <ul>
+              <li>Positive: allocate to envelopes or plan snowball.</li>
+              <li>Negative: reduce some monthly budgets or fix income schedule.</li>
+            </ul>
+          </li>
+          <li><strong>Review kids / seasonal envelopes</strong> and <strong>soft caps / goals</strong>.</li>
+          <li>Optionally <strong>Copy Last Month</strong> if you want last month’s <em>budget numbers</em> as a starting point (only if a snapshot exists).</li>
+          <li><strong>Bills</strong> — set up or reset what’s due this month; mark paid as they clear.</li>
+          <li><strong>Debt</strong> — confirm snowball target; send surplus when ready.</li>
+          <li><strong>Month-close checklist</strong> (Dashboard) when the month is truly done — saves snapshot, walks review steps.</li>
+        </ol>
+
+        <h3>End-of-month close vs auto rollover</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th></th><th>Month-close (manual)</th><th>Rollover (automatic)</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>When</strong></td><td>You click through checklist / Close</td><td>First open in a new calendar month</td></tr>
+              <tr><td><strong>Snapshot</strong></td><td>Saves budget amounts for that month</td><td>Also snapshots previous month if needed</td></tr>
+              <tr><td><strong>Carry-over</strong></td><td>Not applied here</td><td>Applied here</td></tr>
+              <tr><td><strong>Purpose</strong></td><td>“We finished July cleanly”</td><td>“It’s August now — roll leftovers”</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>You can close a month and still get rollover later; they complement each other.</p>
+      </section>
+
+      <!-- 8 -->
+      <section id="examples">
+        <h2>8. Worked examples</h2>
+
+        <article class="example-card" id="example-a">
+          <h3>Example A — Clean leftover (most common)</h3>
+          <p><strong>July setup — Groceries</strong></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Monthly budget</td><td>$800</td></tr>
+                <tr><td>Carry-over (start of July)</td><td>$0</td></tr>
+                <tr><td>Spent in July</td><td>$720</td></tr>
+                <tr><td><strong>Remaining end of July</strong></td><td><strong>$80</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>First open in August (rollover):</strong></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Monthly budget</td><td>still <strong>$800</strong> (unchanged)</td></tr>
+                <tr><td>Carry-over</td><td><strong>$80</strong></td></tr>
+                <tr><td>Spent in August so far</td><td>$0</td></tr>
+                <tr><td><strong>Available in August</strong></td><td><strong>$880</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>To Allocate uses planned August income minus the <strong>$800</strong> (and other envelopes’ budgets), not the $80 leftover.</p>
+        </article>
+
+        <article class="example-card" id="example-b">
+          <h3>Example B — Overspent envelope</h3>
+          <p><strong>July — Eating Out</strong></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Monthly budget</td><td>$200</td></tr>
+                <tr><td>Carry-over</td><td>$0</td></tr>
+                <tr><td>Spent</td><td>$260</td></tr>
+                <tr><td><strong>Remaining</strong></td><td><strong>−$60</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>August after rollover:</strong></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Monthly budget</td><td>$200</td></tr>
+                <tr><td>Carry-over</td><td><strong>−$60</strong></td></tr>
+                <tr><td>Available until you fix it</td><td><strong>$140</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>You’re effectively paying last month’s overspend out of this month’s assignment. Options: spend less, allocate more, or accept the tighter envelope.</p>
+        </article>
+
+        <article class="example-card" id="example-c">
+          <h3>Example C — Sinking fund goal</h3>
+          <p><strong>Christmas sinking fund</strong></p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Soft goal</td><td>$800</td></tr>
+                <tr><td>Monthly budget (you assign $100/mo)</td><td>$100</td></tr>
+                <tr><td>Carry-over after several months</td><td>$300</td></tr>
+                <tr><td>Progress bar “pool”</td><td>budget + carry ≈ toward goal</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>You assign $100 each month; leftovers stack in carry-over. Soft goal warns if you try to budget <em>more than $800</em> into monthly budget (not when carry alone is high). Use the progress display to see how close you are.</p>
+        </article>
+
+        <article class="example-card" id="example-d">
+          <h3>Example D — New month income change</h3>
+          <p>
+            <strong>July income:</strong> $6,000 · <strong>July budgets:</strong> $6,000 → To Allocate $0<br />
+            <strong>August income:</strong> $5,500 · <strong>Budgets still:</strong> $6,000
+          </p>
+          <p>→ To Allocate = <strong>−$500</strong></p>
+          <p>You did nothing wrong; the plan is over-assigned. Fix by lowering some monthly budgets, or update the pay calendar if income was wrong.</p>
+        </article>
+
+        <article class="example-card" id="example-e">
+          <h3>Example E — Allocate mid-month (does not touch checking)</h3>
+          <p>Checking: $2,000 · To Allocate: $150 · Groceries budgeted: $800</p>
+          <p>You <strong>Allocate $150</strong> to Groceries:</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th></th><th>Before</th><th>After</th></tr></thead>
+              <tbody>
+                <tr><td>Checking</td><td>$2,000</td><td><strong>$2,000</strong> (same)</td></tr>
+                <tr><td>Groceries monthly budget</td><td>$800</td><td><strong>$950</strong></td></tr>
+                <tr><td>To Allocate</td><td>$150</td><td><strong>$0</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The bank only moves when a <strong>cleared</strong> expense/income posts (or you edit balances).</p>
+        </article>
+
+        <article class="example-card" id="example-f">
+          <h3>Example F — Pending then CSV match</h3>
+          <ol>
+            <li>Tuesday: log <strong>$54.20</strong> Target as expense, envelope Household, <strong>Post to checking = off</strong> (pending). Envelope spent counts; checking unchanged.</li>
+            <li>Friday: import bank CSV with the same Target charge. App matches pending → marks <strong>cleared</strong>, updates checking once, no duplicate row.</li>
+          </ol>
+          <p>If no match ever appears, you can <strong>Mark cleared</strong> manually (then checking moves) or delete the pending log if it was a mistake.</p>
+        </article>
+
+        <article class="example-card" id="example-g">
+          <h3>Example G — Soft cap warning</h3>
+          <p>Gas soft cap: <strong>$300</strong> · Currently budgeted: <strong>$280</strong> · You try to Allocate <strong>$50</strong> → would become <strong>$330</strong>.</p>
+          <p>App asks: <em>Over soft cap — assign anyway?</em></p>
+          <ul>
+            <li>Cancel → nothing changes.</li>
+            <li>Confirm → budget becomes $330 (allowed).</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- 9 -->
+      <section id="transactions">
+        <h2>9. Transactions, pending vs cleared</h2>
+        <h3>Types</h3>
+        <ul>
+          <li><strong>Expense</strong> — spending (usually needs an envelope).</li>
+          <li><strong>Income</strong> — paychecks / deposits / bonus.</li>
+          <li><strong>Debt payment</strong> — pays down a debt and can hit checking.</li>
+          <li><strong>Transfer</strong> — movement (special cases).</li>
+          <li><strong>Celebration</strong> — payoff markers (not normal cash flow).</li>
+        </ul>
+
+        <h3>Pending vs cleared</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Status</th><th>Checking</th><th>Typical use</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Pending</strong></td><td>No change</td><td>Manual log before the bank shows it; or bill paid that already hit CSV</td></tr>
+              <tr><td><strong>Cleared</strong></td><td>Updates checking</td><td>Bank-confirmed or “post to checking now”</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>Default for new manual expense/income:</strong> pending (safer — won’t double-count when CSV arrives).</p>
+        <p>Toggle <strong>Post to checking now</strong> when cash/check left the account outside import.</p>
+
+        <h3>Splits</h3>
+        <p>One purchase can split across envelopes (e.g. Walmart = Groceries + Household). Split lines must sum to the total.</p>
+
+        <h3>Review inbox</h3>
+        <ul>
+          <li><strong>Need categories</strong> — expenses without an envelope.</li>
+          <li><strong>Awaiting bank</strong> — pending logs.</li>
+          <li><strong>Possible duplicates</strong> — same-ish amount/merchant; not always wrong.</li>
+          <li><strong>Bill matches</strong> — bank line looks like an unpaid bill.</li>
+        </ul>
+      </section>
+
+      <!-- 10 -->
+      <section id="import">
+        <h2>10. Bank import (CSV &amp; PDF)</h2>
+        <h3>CSV</h3>
+        <p>Transactions page → import bank CSV (USAA / common layouts supported). The app:</p>
+        <ul>
+          <li>Parses dates, amounts, descriptions.</li>
+          <li>Skips true duplicates already in the log.</li>
+          <li>Matches <strong>pending</strong> manual logs when possible.</li>
+          <li>Applies <strong>category rules</strong> and bank-category heuristics.</li>
+          <li>Flags bill matches and soft duplicate groups for review.</li>
+        </ul>
+
+        <h3>PDF</h3>
+        <p>Client-side PDF import (no upload to a server) for supported statement layouts. Same idea as CSV: get rows into your transaction list, then review.</p>
+        <div class="callout warn">
+          <p><strong>Never commit PDF statements to git</strong> — they can contain account numbers. Local <code>.pdf</code> is gitignored.</p>
+        </div>
+
+        <h3>After every import</h3>
+        <ol>
+          <li>Read the toast summary (imported / pending matched / rules / skipped).</li>
+          <li>Open <strong>Review</strong> for leftovers.</li>
+          <li>Spot-check checking vs bank (reconciliation tools).</li>
+        </ol>
+      </section>
+
+      <!-- 11 -->
+      <section id="rules">
+        <h2>11. Always-use-this-envelope rules</h2>
+        <p>Rules store a <strong>merchant text pattern</strong> → envelope (or split).</p>
+        <h3>How to create</h3>
+        <ol>
+          <li><strong>Review uncategorized</strong> → pick transactions → choose envelope → leave <strong>Always use this envelope</strong> ON → Assign.</li>
+          <li>Or edit a transaction → <strong>Always use this envelope</strong> (defaults on for imports / uncategorized).</li>
+        </ol>
+        <p>Pattern is guessed from the description (noise like POS/DEBIT stripped when possible).</p>
+        <h3>How they apply</h3>
+        <p>On future imports (and “Apply saved rules”), if description contains the pattern, the envelope is set automatically.</p>
+        <h3>Manage</h3>
+        <p><strong>Settings → category rules</strong> — filter, edit pattern, delete one or all.</p>
+      </section>
+
+      <!-- 12 -->
+      <section id="bills">
+        <h2>12. Bills</h2>
+        <ul>
+          <li>Track due dates, amounts, optional linked envelope, auto-pay flag.</li>
+          <li><strong>Mark paid</strong> can avoid double-hitting checking when the payment already appeared in CSV.</li>
+          <li>Review inbox can <strong>link</strong> a bank transaction to an unpaid bill.</li>
+        </ul>
+        <p>Bills are not fully automatic calendar subscriptions; treat the list as your household bill board and update statuses as life happens.</p>
+      </section>
+
+      <!-- 13 -->
+      <section id="debt">
+        <h2>13. Debt snowball</h2>
+        <ul>
+          <li>Debts sorted <strong>smallest balance first</strong> (classic snowball).</li>
+          <li><strong>Minimums</strong> should be covered in the budget (optionally linked to an envelope).</li>
+          <li><strong>Surplus for snowball</strong> comes from leftover To Allocate and/or cash-flow logic on the Dashboard.</li>
+          <li><strong>Allocate surplus</strong> pays the current target, reduces checking, logs a debt payment, and can celebrate payoffs.</li>
+        </ul>
+        <p>When a debt hits $0 it archives; the next smallest becomes the target.</p>
+      </section>
+
+      <!-- 14 -->
+      <section id="income">
+        <h2>14. Income &amp; pay calendar</h2>
+        <h3>Sources</h3>
+        <p>Typically Primary / Secondary / Tertiary jobs plus a <strong>Bonus</strong> source.</p>
+        <p>Each source has:</p>
+        <ul>
+          <li>Pay schedule (specific dates and/or recurring rules).</li>
+          <li>Optional <strong>match terms</strong> so imported deposits link to the right source.</li>
+        </ul>
+        <h3>Planned vs logged</h3>
+        <ul>
+          <li><strong>Planned income</strong> (To Allocate base) = pay-calendar math for the month (non-bonus sources).</li>
+          <li><strong>Bonus logged</strong> = actual bonus income transactions this month (added into allocatable income).</li>
+          <li><strong>Income received</strong> (cash-flow views) = cleared/logged income transactions.</li>
+        </ul>
+        <p>If no paychecks are logged yet, some surplus views fall back to planned income — read the Dashboard note under surplus.</p>
+      </section>
+
+      <!-- 15 -->
+      <section id="returns">
+        <h2>15. Returns / refunds to envelopes</h2>
+        <p>When <strong>bonus</strong> (or return-like) income is logged, the app can try to match a prior expense of the same amount:</p>
+        <ul>
+          <li>On a confident match, it <strong>returns dollars to the envelope</strong> by increasing <strong>carry-over</strong> (so Remaining goes back up without deleting the original purchase).</li>
+          <li>If several candidates exist, you may be asked to pick.</li>
+        </ul>
+        <p>This keeps envelope history honest: you still spent at Amazon; the return restores availability.</p>
+      </section>
+
+      <!-- 16 -->
+      <section id="notes">
+        <h2>16. Sticky notes boards</h2>
+        <p><strong>Notes</strong> page = multi-page sticky boards (not infinite free-canvas Miro):</p>
+        <ul>
+          <li><strong>Tabs</strong> = pages/boards (add, rename, delete).</li>
+          <li><strong>Stickies</strong> = title + body + color; add/delete freely.</li>
+          <li>Sidebar <strong>quick stickies</strong> for glance access.</li>
+          <li>Old single-blob notes (if any) migrate onto the first board as one sticky.</li>
+        </ul>
+        <p>Use boards for: month checklist, agreement notes, shopping lists, snowball motivation, “ask spouse” items.</p>
+      </section>
+
+      <!-- 17 -->
+      <section id="sync">
+        <h2>17. Cloud sync, backups, two devices</h2>
+        <h3>Cloud (Supabase)</h3>
+        <ul>
+          <li>Sign in with the same account on PC and phone.</li>
+          <li><strong>Sync Now</strong> in Settings (and Dashboard pill when configured).</li>
+          <li>One shared budget state in the cloud — avoid editing heavily offline on two devices at once without syncing.</li>
+        </ul>
+        <h3>JSON backup (belt and suspenders)</h3>
+        <p>Settings → <strong>Export Backup</strong> downloads a full state file. Import restores it.</p>
+        <p>Do this:</p>
+        <ul>
+          <li>Before big experiments.</li>
+          <li>Monthly, or when the app nags (~30 days).</li>
+          <li>After major debt payoffs / month close.</li>
+        </ul>
+        <p>Cloud sync is convenient; <strong>local JSON</strong> is recovery if an account or merge ever goes sideways.</p>
+        <h3>Google Sheets export</h3>
+        <p>Optional multi-CSV export for spreadsheet nerds; day-to-day truth still lives in the app.</p>
+      </section>
+
+      <!-- 18 -->
+      <section id="phone">
+        <h2>18. Phone / PWA tips</h2>
+        <ul>
+          <li>Add to Home Screen for app-like use.</li>
+          <li>After a production update, if the UI looks old: open <code>/update.html</code> once to clear stuck service worker caches, or hard-refresh.</li>
+          <li>Bottom nav is the daily driver; full Settings still available from the menu/shell.</li>
+          <li>Large text / reduce motion / dark mode live in Settings.</li>
+        </ul>
+      </section>
+
+      <!-- 19 -->
+      <section id="glossary">
+        <h2>19. Glossary</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Term</th><th>Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Envelope</strong></td><td>Budget category with budget, carry-over, spent, remaining</td></tr>
+              <tr><td><strong>Allocate / Fund</strong></td><td>Assign To Allocate dollars into an envelope’s monthly budget (no bank move)</td></tr>
+              <tr><td><strong>To Allocate</strong></td><td>Income plan minus sum of monthly budgets</td></tr>
+              <tr><td><strong>Carry-over</strong></td><td>Rolled leftover/overspend (and some refund restores)</td></tr>
+              <tr><td><strong>Soft cap / goal</strong></td><td>Optional target; warns, does not hard-block</td></tr>
+              <tr><td><strong>Pending</strong></td><td>Logged but not applied to checking yet</td></tr>
+              <tr><td><strong>Cleared</strong></td><td>Applied to checking</td></tr>
+              <tr><td><strong>Snowball</strong></td><td>Pay smallest debt first with intense focus</td></tr>
+              <tr><td><strong>Sinking fund</strong></td><td>Envelope for irregular future expenses</td></tr>
+              <tr><td><strong>Snapshot</strong></td><td>Saved monthly budget amounts for a past month</td></tr>
+              <tr><td><strong>Rollover</strong></td><td>Automatic new-month process for carry-over + snapshot</td></tr>
+              <tr><td><strong>Month-close</strong></td><td>Manual checklist + snapshot when you finish a month</td></tr>
+              <tr><td><strong>Category rule</strong></td><td>Merchant text → always this envelope</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 20 -->
+      <section id="troubleshoot">
+        <h2>20. Quick troubleshooting</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Symptom</th><th>Likely cause</th><th>What to try</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Checking doesn’t match bank</td><td>Pending not cleared, or double-cleared</td><td>Review pending; recon tools; fix with edit/delete carefully</td></tr>
+              <tr><td>To Allocate hugely negative</td><td>Budgets &gt; planned income</td><td>Fix pay calendar or lower budgets</td></tr>
+              <tr><td>Envelope has huge available</td><td>Carry-over stacked + full monthly budget still set</td><td>Normal after thrifty months; lower budget if you don’t want that much room</td></tr>
+              <tr><td>Import created duplicates</td><td>Weak match / different days</td><td>Use duplicate review; Mark unique if both real</td></tr>
+              <tr><td>Phone shows old UI</td><td>Service worker cache</td><td>Visit <code>/update.html</code> or hard refresh</td></tr>
+              <tr><td>Spouse’s phone missing data</td><td>Not signed in / not synced</td><td>Same cloud login → Sync Now on both</td></tr>
+              <tr><td>Cap won’t stop me</td><td>Soft by design</td><td>Confirm only when intentional; or lower monthly budget</td></tr>
+              <tr><td>Notes feel empty</td><td>New board</td><td>Add board tab + stickies; check sidebar quick list</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Appendix -->
+      <section id="cheat">
+        <h2>Appendix — Mental model cheat sheet</h2>
+        <pre><code>Bank checking  ── real cash (cleared txs + manual balance edits)
+       │
+       │  (CSV/PDF import keeps this honest)
+       │
+Envelopes ── virtual plan
+       │     Remaining = Budget + Carry − Spent
+       │     Allocate changes Budget only
+       │
+To Allocate ── Income plan − Σ Budgets   (want ≈ $0)
+       │
+Surplus ── extra that can attack the snowball</code></pre>
+        <div class="callout">
+          <p>
+            <strong>New month in one sentence:</strong><br />
+            Leftover (or overspend) folds into carry-over; budget numbers stay until you change them;
+            income and spending start fresh for the new calendar month.
+          </p>
+        </div>
+      </section>
+
+      <p class="footer-note">
+        Guide version: 2026-07-13 — sticky boards, PDF import, soft caps/goals, always-use envelope rules.<br />
+        Source markdown also at <code>docs/USER-GUIDE.md</code>. This HTML page is for local reading only.
+      </p>
+    </main>
+  </div>
+
+  <button type="button" class="back-top" id="back-top" title="Back to top">↑ Top</button>
+
+  <script>
+    (function () {
+      const sidebar = document.getElementById('sidebar');
+      const toggle = document.getElementById('toc-toggle');
+      const backdrop = document.getElementById('toc-backdrop');
+      const backTop = document.getElementById('back-top');
+      const links = [...document.querySelectorAll('#toc a')];
+
+      function closeToc() {
+        sidebar.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+        backdrop.hidden = true;
+        backdrop.classList.remove('show');
+      }
+      function openToc() {
+        sidebar.classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+        backdrop.hidden = false;
+        backdrop.classList.add('show');
+      }
+
+      toggle.addEventListener('click', () => {
+        if (sidebar.classList.contains('open')) closeToc();
+        else openToc();
+      });
+      backdrop.addEventListener('click', closeToc);
+      links.forEach(a => a.addEventListener('click', () => {
+        if (window.matchMedia('(max-width: 860px)').matches) closeToc();
+      }));
+
+      backTop.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      window.addEventListener('scroll', () => {
+        backTop.classList.toggle('show', window.scrollY > 400);
+      }, { passive: true });
+
+      // Highlight TOC section in view
+      const sections = links
+        .map(a => document.querySelector(a.getAttribute('href')))
+        .filter(Boolean);
+
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const id = entry.target.id;
+          links.forEach(a => {
+            a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+          });
+        });
+      }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 });
+
+      sections.forEach(s => io.observe(s));
+    })();
+  </script>
+</body>
+</html>
