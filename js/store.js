@@ -879,12 +879,18 @@ class Store {
     const billMatches = this.getPendingBillMatches(month);
     const duplicates = this.getDuplicateTransactions(month);
     const pending = this.getPendingTransactions();
+    // Unique txs — one row can sit in multiple queues (e.g. uncategorized + duplicate)
+    const uniqueIds = new Set();
+    uncategorized.forEach(t => uniqueIds.add(t.id));
+    billMatches.forEach(m => { if (m.transaction?.id) uniqueIds.add(m.transaction.id); });
+    duplicates.forEach(t => uniqueIds.add(t.id));
+    pending.forEach(t => uniqueIds.add(t.id));
     return {
       uncategorized,
       billMatches,
       duplicates,
       pending,
-      totalCount: uncategorized.length + billMatches.length + duplicates.length + pending.length,
+      totalCount: uniqueIds.size,
     };
   }
 
@@ -1037,17 +1043,22 @@ class Store {
   /**
    * Strong auto-pay match: link tx → bill and advance recurring cycle.
    * Safe to call inside an existing update() with state `s`, or alone.
+   * @param {Set<string>} [alreadyPaidBillIds] — bills already completed in this import batch
    * @returns {boolean}
    */
-  applyAutoPayBillIfMatched(tx, s = this.state, stats = null) {
+  applyAutoPayBillIfMatched(tx, s = this.state, stats = null, alreadyPaidBillIds = null) {
     if (!tx || tx.type !== 'expense' || tx.billId) return false;
     const bill = findAutoPayBillForTransaction(tx, s.bills || []);
     if (!bill || bill.status === 'paid') return false;
+    // One auto-pay completion per bill per import — prevents double-advance when
+    // two similar charges appear on the same statement
+    if (alreadyPaidBillIds?.has(bill.id)) return false;
     tx.billId = bill.id;
     if (!tx.categoryId && bill.categoryId) tx.categoryId = bill.categoryId;
     const paidAmt = Math.abs(Number(tx.amount)) || Number(bill.amount) || 0;
     const paidDate = tx.date || todayISO();
     completeBillPaymentCycle(bill, paidDate, paidAmt);
+    alreadyPaidBillIds?.add(bill.id);
     if (stats) {
       stats.billMatches = (stats.billMatches || 0) + 1;
       stats.autoPayBills = (stats.autoPayBills || 0) + 1;
@@ -1883,6 +1894,7 @@ class Store {
       matchedPending: 0, parsed: rows.length,
       incomeIdsForReturnMatch: [],
     };
+    const autoPaidBillIds = new Set();
     this.update(s => {
       rows.forEach(row => {
         const tx = normalizeImportRow(row, { includePending });
@@ -1929,7 +1941,7 @@ class Store {
           } else if (pendingMatch.type === 'expense') {
             stats.expense++;
             if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
-            if (!this.applyAutoPayBillIfMatched(pendingMatch, s, stats)) {
+            if (!this.applyAutoPayBillIfMatched(pendingMatch, s, stats, autoPaidBillIds)) {
               if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
             }
           }
@@ -1981,7 +1993,7 @@ class Store {
           s.balances.checking -= tx.amount;
           stats.expense++;
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
-          if (!this.applyAutoPayBillIfMatched(newTx, s, stats)) {
+          if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
             if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
           }
         } else {

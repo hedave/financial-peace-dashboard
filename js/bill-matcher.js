@@ -21,6 +21,23 @@ function unpaidBills(bills = []) {
 }
 
 /**
+ * True if bill due date is in the same month as the tx, overdue relative to the tx,
+ * or due within ~3 weeks after (paid early). Blocks auto-pay on a cycle already advanced.
+ */
+function billDueNearTransaction(bill, tx) {
+  const due = String(bill?.dueDate || '').slice(0, 10);
+  const day = String(tx?.date || '').slice(0, 10);
+  if (!due || !day) return true;
+  if (due.slice(0, 7) === day.slice(0, 7)) return true;
+  if (due <= day) return true; // overdue / same day
+  // due after payment date — allow if within 21 days (early pay)
+  const t0 = new Date(day + 'T12:00:00').getTime();
+  const t1 = new Date(due + 'T12:00:00').getTime();
+  const days = Math.round((t1 - t0) / 86400000);
+  return days >= 0 && days <= 21;
+}
+
+/**
  * Strong match only: amount + name in description, unique auto-pay bill.
  * Safe to auto-complete the bill cycle on CSV/PDF import.
  * @returns {object|null} bill
@@ -34,6 +51,7 @@ export function findAutoPayBillForTransaction(tx, bills = []) {
     b.autoPay
     && amountsMatch(b.amount, amt)
     && billNameInDescription(b.name, tx.description)
+    && billDueNearTransaction(b, tx)
   );
   if (candidates.length === 1) return candidates[0];
   return null;
