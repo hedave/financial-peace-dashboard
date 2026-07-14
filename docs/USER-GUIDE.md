@@ -166,7 +166,8 @@ When the calendar rolls to a new month, the **first time you open the app** that
 | **Budget snapshot of previous month** | Yes | Saved so you can **Copy Last Month** and for reports |
 | **Transactions** | Stay forever | Filtered by date; old months still visible in history |
 | **Pending transactions** | Stay | Still awaiting bank until matched or marked cleared |
-| **Bills status** | Stay as paid/unpaid | You manage bill cycles; paid flags don’t auto-reset by themselves |
+| **Recurring bills** | Yes → next cycle | Paid recurring bills become **unpaid** again with **due date +1 month** (also when you mark paid). One-time bills stay paid. |
+| **One-time bills** | Stay if paid | No auto-reset |
 | **Debts / snowball order** | Stay | Balances only change when you pay |
 | **Category rules** | Stay | Merchant → envelope forever until deleted |
 | **Sticky notes** | Stay | Boards are not monthly |
@@ -193,9 +194,9 @@ Then the app marks the current calendar month as processed.
 ### What does *not* auto-happen
 
 - Does not re-zero To Allocate for you (depends on new month income vs existing budgets).
-- Does not mark bills unpaid for the new cycle (handle on Bills page).
 - Does not import bank data.
 - Does not close the month for you (month-close is optional but recommended).
+- Does not invent new bill *transactions* (you still mark paid or match CSV); it only rolls the bill’s due/status for recurring items.
 
 ---
 
@@ -438,10 +439,14 @@ On future imports (and “Apply saved rules”), if description contains the pat
 ## 12. Bills
 
 - Track due dates, amounts, optional linked envelope, auto-pay flag.
+- **Recurring** (default **on**): when you mark paid (or link a bank match), the app records **last paid**, moves **due date forward one month**, and sets the bill back to **unpaid** for the next cycle.
+- **One-time** (`Recurring` off): stays in Paid after payment.
 - **Mark paid** can avoid double-hitting checking when the payment already appeared in CSV (`already in bank` behavior).
 - Review inbox can **link** a bank transaction to an unpaid bill.
+- Month rollover also fixes older data that was stuck as paid forever (safety net).
+- Unpaid overdue bills stay overdue (a missed cycle is still visible).
 
-Bills are not fully automatic calendar subscriptions; treat the list as your household bill board and update statuses as life happens.
+Payment history lives on **linked transactions**, not a separate bill ledger.
 
 ---
 
@@ -592,4 +597,4 @@ Surplus ── extra that can attack the snowball
 
 ---
 
-*Guide version: 2026-07-13 — matches app behavior including sticky boards, PDF import, soft caps/goals, and always-use envelope rules.*
+*Guide version: 2026-07-13 — sticky boards, PDF import, soft caps/goals, always-use rules, recurring bill cycle advance.*

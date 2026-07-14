@@ -6,7 +6,7 @@ import {
 } from './defaults.js';
 import {
   getCurrentMonth, isInMonth, todayISO, generateId,
-  getPreviousMonth, getRecentMonths,
+  getPreviousMonth, getRecentMonths, addOneMonthToDate,
 } from './utils.js';
 import {
   normalizeImportRow, resolveCategoryId,
@@ -54,6 +54,66 @@ function isFundedEnvelopeTransfer(tx) {
   return tx
     && tx.type === 'transfer'
     && /^Funded envelope:/i.test(String(tx.description || ''));
+}
+
+function isRecurringBill(bill) {
+  return !!(bill && bill.recurring !== false);
+}
+
+/**
+ * After a payment: record last paid; recurring bills roll to next cycle as unpaid.
+ * Mutates bill in place.
+ */
+function completeBillPaymentCycle(bill, paidDate, paidAmount) {
+  const when = paidDate || todayISO();
+  const amt = Number(paidAmount) || Number(bill.amount) || 0;
+  bill.lastPaidDate = when;
+  bill.lastPaidAmount = amt;
+
+  if (!isRecurringBill(bill)) {
+    bill.status = 'paid';
+    bill.paidDate = when;
+    bill.paidAmount = amt;
+    return;
+  }
+
+  const baseDue = bill.dueDate || when;
+  bill.dueDate = addOneMonthToDate(baseDue);
+  bill.status = 'pending';
+  delete bill.paidDate;
+  delete bill.paidAmount;
+}
+
+/**
+ * Month-start safety net: recurring bills still marked paid (pre-fix data) roll forward.
+ * Unpaid past-due bills stay overdue so a missed cycle remains visible.
+ */
+function rollRecurringBillsForNewMonth(bills, currentMonth) {
+  (bills || []).forEach(bill => {
+    if (!isRecurringBill(bill)) return;
+    if (bill.status !== 'paid') return;
+
+    if (bill.paidDate) {
+      bill.lastPaidDate = bill.paidDate;
+      if (bill.paidAmount != null) bill.lastPaidAmount = bill.paidAmount;
+    }
+    const base = bill.dueDate || bill.lastPaidDate || bill.paidDate || todayISO();
+    bill.dueDate = addOneMonthToDate(base);
+    bill.status = 'pending';
+    delete bill.paidDate;
+    delete bill.paidAmount;
+
+    // Catch up if app wasn't opened for multiple months
+    let guard = 0;
+    while (
+      bill.dueDate
+      && String(bill.dueDate).slice(0, 7) < currentMonth
+      && guard < 36
+    ) {
+      bill.dueDate = addOneMonthToDate(bill.dueDate);
+      guard++;
+    }
+  });
 }
 
 function ensureDefaultCategories(state) {
@@ -105,6 +165,12 @@ function ensureDefaultCategories(state) {
 function normalizeState(state) {
   const defaults = createDefaultState();
   if (!Array.isArray(state.bills)) state.bills = [];
+  (state.bills || []).forEach(b => {
+    if (!b || typeof b !== 'object') return;
+    if (typeof b.recurring !== 'boolean') b.recurring = true;
+  });
+  // Migrate pre-fix paid recurring bills → next cycle (idempotent once pending)
+  rollRecurringBillsForNewMonth(state.bills, getCurrentMonth());
   if (!Array.isArray(state.debts)) state.debts = [];
   if (!Array.isArray(state.transactions)) state.transactions = [];
   if (!Array.isArray(state.categories)) state.categories = [...defaults.categories];
@@ -463,6 +529,7 @@ class Store {
         const remaining = this.getCategoryRemaining(cat.id, prev);
         cat.carryOver = (cat.carryOver || 0) + remaining;
       });
+      rollRecurringBillsForNewMonth(this.state.bills, current);
     }
     this.state.lastMonthProcessed = current;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
@@ -961,9 +1028,9 @@ class Store {
       const bill = s.bills.find(b => b.id === billId);
       if (!tx || !bill || bill.status === 'paid') return;
       tx.billId = billId;
-      bill.status = 'paid';
-      bill.paidDate = tx.date || todayISO();
-      bill.paidAmount = Math.abs(Number(tx.amount)) || Number(bill.amount);
+      const paidAmt = Math.abs(Number(tx.amount)) || Number(bill.amount);
+      const paidDate = tx.date || todayISO();
+      completeBillPaymentCycle(bill, paidDate, paidAmt);
     });
   }
 
@@ -1562,15 +1629,14 @@ class Store {
     const bill = this.state.bills.find(b => b.id === billId);
     if (!bill) return;
     const paid = Number(amount) || Number(bill.amount);
+    const paidDate = date || todayISO();
     this.update(s => {
       const b = s.bills.find(x => x.id === billId);
-      b.status = 'paid';
-      b.paidDate = date || todayISO();
-      b.paidAmount = paid;
+      if (!b) return;
       const clearingStatus = alreadyInBank ? 'pending' : 'cleared';
       s.transactions.unshift({
         id: generateId(),
-        date: date || todayISO(),
+        date: paidDate,
         amount: paid,
         type: 'expense',
         categoryId: b.categoryId,
@@ -1582,6 +1648,8 @@ class Store {
       if (!alreadyInBank) {
         s.balances.checking = (Number(s.balances.checking) || 0) - paid;
       }
+      // Recurring → next cycle unpaid; one-time stays paid
+      completeBillPaymentCycle(b, paidDate, paid);
     });
   }
 

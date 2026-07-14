@@ -586,7 +586,8 @@
               <tr><td><strong>Budget snapshot of previous month</strong></td><td>Yes</td><td>Saved so you can <strong>Copy Last Month</strong> and for reports</td></tr>
               <tr><td><strong>Transactions</strong></td><td>Stay forever</td><td>Filtered by date; old months still visible in history</td></tr>
               <tr><td><strong>Pending transactions</strong></td><td>Stay</td><td>Still awaiting bank until matched or marked cleared</td></tr>
-              <tr><td><strong>Bills status</strong></td><td>Stay as paid/unpaid</td><td>You manage bill cycles; paid flags don’t auto-reset by themselves</td></tr>
+              <tr><td><strong>Recurring bills</strong></td><td>Yes → next cycle</td><td>Become <strong>unpaid</strong> again with <strong>due date +1 month</strong> (also right when you mark paid). One-time bills stay paid.</td></tr>
+              <tr><td><strong>One-time bills</strong></td><td>Stay if paid</td><td>No auto-reset</td></tr>
               <tr><td><strong>Debts / snowball order</strong></td><td>Stay</td><td>Balances only change when you pay</td></tr>
               <tr><td><strong>Category rules</strong></td><td>Stay</td><td>Merchant → envelope forever until deleted</td></tr>
               <tr><td><strong>Sticky notes</strong></td><td>Stay</td><td>Boards are not monthly</td></tr>
@@ -614,9 +615,9 @@ newCarryOver = oldCarryOver + remaining</code></pre>
         <h3>What does <em>not</em> auto-happen</h3>
         <ul>
           <li>Does not re-zero To Allocate for you (depends on new month income vs existing budgets).</li>
-          <li>Does not mark bills unpaid for the new cycle (handle on Bills page).</li>
           <li>Does not import bank data.</li>
           <li>Does not close the month for you (month-close is optional but recommended).</li>
+          <li>Does not invent new bill <em>transactions</em> — only rolls due/status for recurring bills after pay (or stuck paid data on rollover).</li>
         </ul>
       </section>
 
@@ -882,10 +883,14 @@ newCarryOver = oldCarryOver + remaining</code></pre>
         <h2>12. Bills</h2>
         <ul>
           <li>Track due dates, amounts, optional linked envelope, auto-pay flag.</li>
+          <li><strong>Recurring</strong> (default on): when you mark paid or link a bank match, the app records <strong>last paid</strong>, moves <strong>due date +1 month</strong>, and sets the bill back to <strong>unpaid</strong> for the next cycle.</li>
+          <li><strong>One-time</strong> (Recurring off): stays in Paid after payment.</li>
           <li><strong>Mark paid</strong> can avoid double-hitting checking when the payment already appeared in CSV.</li>
           <li>Review inbox can <strong>link</strong> a bank transaction to an unpaid bill.</li>
+          <li>Month rollover also repairs older data stuck as paid forever.</li>
+          <li>Unpaid overdue bills stay overdue so a missed cycle is still visible.</li>
         </ul>
-        <p>Bills are not fully automatic calendar subscriptions; treat the list as your household bill board and update statuses as life happens.</p>
+        <p>Payment history lives on <strong>linked transactions</strong>, not a separate bill ledger.</p>
       </section>
 
       <!-- 13 -->
@@ -1049,7 +1054,7 @@ Surplus ── extra that can attack the snowball</code></pre>
       </section>
 
       <p class="footer-note">
-        Guide version: 2026-07-13 — sticky boards, PDF import, soft caps/goals, always-use envelope rules.<br />
+        Guide version: 2026-07-13 — sticky boards, PDF import, soft caps/goals, always-use rules, recurring bill cycles.<br />
         Source markdown also at <code>docs/USER-GUIDE.md</code>. This HTML page is for local reading only.
       </p>
     </main>

@@ -73,6 +73,27 @@ export function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Advance a YYYY-MM-DD date by one calendar month.
+ * Clamps the day (e.g. Jan 31 → Feb 28/29).
+ */
+export function addOneMonthToDate(isoDate) {
+  const raw = String(isoDate || todayISO()).slice(0, 10);
+  const parts = raw.split('-').map(Number);
+  if (parts.length < 3 || parts.some(n => Number.isNaN(n))) {
+    return addOneMonthToDate(todayISO());
+  }
+  let [y, m, d] = parts;
+  m += 1;
+  if (m > 12) {
+    m = 1;
+    y += 1;
+  }
+  const lastDay = new Date(y, m, 0).getDate();
+  const dom = Math.min(d, lastDay);
+  return `${y}-${String(m).padStart(2, '0')}-${String(dom).padStart(2, '0')}`;
+}
+
 export function daysUntil(dateStr) {
   const today = new Date(todayISO() + 'T12:00:00');
   const target = new Date(dateStr + 'T12:00:00');
