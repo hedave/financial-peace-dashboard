@@ -692,20 +692,29 @@ function goalField(isSinking, value = 0) {
   const input = el('input', {
     type: 'number',
     step: '0.01',
-    min: 0,
-    value: value > 0 ? String(value) : '',
-    placeholder: 'Optional',
+    min: '0',
+    placeholder: 'e.g. 400',
   });
+  // Set value after create — empty string for “no cap” so the field is clearly editable
+  const n = Number(value);
+  input.value = n > 0 ? String(n) : '';
   const row = el('div', { className: 'form-group' },
     el('label', {}, isSinking ? 'Savings goal (optional)' : 'Soft cap (optional)'),
     input,
     el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
       isSinking
-        ? 'Target to save toward (e.g. Christmas $800). Warns if you assign more than the goal.'
-        : 'Max you want budgeted here. Soft warning only — you can still override.',
+        ? 'Target to save toward (e.g. Christmas $800). Soft warning if you assign more than the goal.'
+        : 'Optional max for this envelope (e.g. $400 on Eating Out). Leave blank for no cap. Soft warning only.',
     ),
   );
   return { row, input };
+}
+
+function parseGoalInput(input) {
+  const raw = String(input?.value ?? '').trim();
+  if (!raw) return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function noteField(value = '') {
@@ -771,7 +780,7 @@ function addCategory(isSinking) {
             isSinkingFund: sinkingIn.checked,
             monthlyBudget: Number(budgetIn.value),
             carryOver: 0,
-            goalAmount: Number(goalIn.value) > 0 ? Number(goalIn.value) : 0,
+            goalAmount: parseGoalInput(goalIn),
             note: noteIn.value.trim(),
           });
         });
@@ -785,7 +794,8 @@ function addCategory(isSinking) {
 
 function editCategory(cat) {
   const nameIn = el('input', { type: 'text', value: cat.name });
-  const budgetIn = el('input', { type: 'number', step: '0.01', value: cat.monthlyBudget });
+  const budgetIn = el('input', { type: 'number', step: '0.01', min: '0' });
+  budgetIn.value = String(Number(cat.monthlyBudget) || 0);
   const iconIn = el('input', { type: 'text', value: cat.icon || '' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(cat.isSinkingFund);
   const { row: goalRow, input: goalIn } = goalField(cat.isSinkingFund, Number(cat.goalAmount) || 0);
@@ -797,8 +807,8 @@ function editCategory(cat) {
     if (label) label.textContent = sinkingIn.checked ? 'Savings goal (optional)' : 'Soft cap (optional)';
     if (hint) {
       hint.textContent = sinkingIn.checked
-        ? 'Target to save toward (e.g. Christmas $800). Warns if you assign more than the goal.'
-        : 'Max you want budgeted here. Soft warning only — you can still override.';
+        ? 'Target to save toward (e.g. Christmas $800). Soft warning if you assign more than the goal.'
+        : 'Optional max for this envelope. Leave blank for no cap. Soft warning only.';
     }
   });
 
@@ -818,32 +828,38 @@ function editCategory(cat) {
       className: 'btn btn-primary',
       onClick: function() {
         const nextBudget = Number(budgetIn.value) || 0;
-        const nextGoal = Number(goalIn.value) > 0 ? Number(goalIn.value) : 0;
+        const nextGoal = parseGoalInput(goalIn);
         const backdrop = this.closest('.modal-backdrop');
-        const save = () => {
-          store.update(s => {
-            const c = s.categories.find(x => x.id === cat.id);
-            if (c) {
-              c.name = nameIn.value;
-              c.icon = iconIn.value;
-              c.monthlyBudget = nextBudget;
-              c.isSinkingFund = sinkingIn.checked;
-              c.goalAmount = nextGoal;
-              c.note = noteIn.value.trim();
-            }
-          });
-          backdrop?.remove();
-          window.appRefresh();
-        };
+        // Always save — including soft cap — even if currently over the cap
+        store.update(s => {
+          const c = s.categories.find(x => x.id === cat.id);
+          if (c) {
+            c.name = nameIn.value.trim() || c.name;
+            c.icon = iconIn.value;
+            c.monthlyBudget = nextBudget;
+            c.isSinkingFund = sinkingIn.checked;
+            c.goalAmount = nextGoal;
+            c.note = noteIn.value.trim();
+          }
+        });
+        backdrop?.remove();
         if (nextGoal > 0 && nextBudget > nextGoal + 0.005) {
-          confirmDialog(
-            sinkingIn.checked ? 'Over savings goal' : 'Over soft cap',
-            `Budgeted ${formatCurrency(nextBudget)} is above ${formatCurrency(nextGoal)}. Save anyway?`,
-            save,
+          showToast(
+            `Saved. Note: budgeted ${formatCurrency(nextBudget)} is above the ${sinkingIn.checked ? 'goal' : 'soft cap'} of ${formatCurrency(nextGoal)}.`,
+            'info',
+            5000,
           );
-          return;
+        } else if (nextGoal > 0) {
+          showToast(
+            sinkingIn.checked
+              ? `Saved · goal ${formatCurrency(nextGoal)}`
+              : `Saved · soft cap ${formatCurrency(nextGoal)}`,
+            'success',
+          );
+        } else {
+          showToast('Envelope saved');
         }
-        save();
+        window.appRefresh();
       }
     }, 'Save'),
   });
