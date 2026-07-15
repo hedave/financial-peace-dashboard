@@ -655,22 +655,6 @@ export function openTransactionForm({
   );
   const catSelect = catGroup.querySelector('select');
 
-  // Gift / earmark: income → also fund envelope carry-over
-  const earmarkGift = el('input', { type: 'checkbox' });
-  if (transaction?.earmarkedEnvelope) earmarkGift.checked = true;
-  const earmarkGroup = el('div', { className: 'form-option', style: 'display:none' },
-    el('div', { className: 'form-option-text' },
-      el('span', { className: 'form-option-label' }, 'Gift / earmark to this envelope'),
-      el('span', { className: 'form-option-hint' },
-        'Adds the amount to the envelope’s available balance (carry-over). Use for birthday/Christmas money from family.',
-      ),
-    ),
-    el('label', { className: 'toggle-switch' },
-      earmarkGift,
-      el('span', { className: 'toggle-slider' }),
-    ),
-  );
-
   const debtGroup = el('div', { className: 'form-group', style: 'display:none' },
     el('label', {}, 'Debt'),
     el('select', {},
@@ -726,16 +710,8 @@ export function openTransactionForm({
     const canSplit = currentType === 'expense';
     const useSplit = canSplit && splitToggle.checked;
     splitOption.style.display = canSplit ? '' : 'none';
-    // Income can also pick an envelope when earmarking a gift
-    const showCat = (categoryUsesEnvelope(currentType) && !useSplit)
-      || (currentType === 'income' && !isEdit);
-    catGroup.style.display = showCat ? '' : 'none';
-    if (currentType === 'income') {
-      catGroup.querySelector('label').textContent = 'Envelope (for gift / earmark)';
-    } else {
-      catGroup.querySelector('label').textContent = 'Envelope / Category';
-    }
-    earmarkGroup.style.display = currentType === 'income' && !isEdit ? '' : 'none';
+    catGroup.style.display = categoryUsesEnvelope(currentType) && !useSplit ? '' : 'none';
+    catGroup.querySelector('label').textContent = 'Envelope / Category';
     splitSection.style.display = useSplit ? '' : 'none';
     const showDebt = currentType === 'debt_payment' && !isEdit;
     debtGroup.style.display = showDebt ? '' : 'none';
@@ -821,7 +797,6 @@ export function openTransactionForm({
       ),
       splitOption,
       catGroup,
-      earmarkGroup,
       splitSection,
       memoGroup,
       postCheckingGroup,
@@ -855,18 +830,7 @@ export function openTransactionForm({
             }
           }
 
-          const wantEarmark = txType === 'income' && !isEdit && earmarkGift.checked;
-          let categoryId = null;
-          if (useSplit) {
-            categoryId = null;
-          } else if (categoryUsesEnvelope(txType) || wantEarmark || txType === 'income') {
-            categoryId = catSelect.value || null;
-          }
-          if (wantEarmark && !categoryId) {
-            showToast('Pick an envelope for the gift / earmark', 'info');
-            return;
-          }
-
+          const categoryId = !useSplit && categoryUsesEnvelope(txType) ? (catSelect.value || null) : null;
           const splits = useSplit ? splitEditor.getSplits() : null;
           const clearingStatus = (txType === 'expense' || txType === 'income')
             ? (postToChecking.checked ? 'cleared' : 'pending')
@@ -905,16 +869,10 @@ export function openTransactionForm({
                 debtId,
                 splits,
                 clearingStatus,
-                earmarkToEnvelope: wantEarmark,
               });
               const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
-              const giftNote = wantEarmark ? ' · earmarked to envelope' : '';
-              showToast(
-                useSplit
-                  ? `Split transaction logged!${pendingNote}`
-                  : `Transaction logged!${pendingNote}${giftNote}`,
-              );
-              if (txType === 'income' && newId && !wantEarmark) {
+              showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
+              if (txType === 'income' && newId) {
                 setTimeout(() => handleBonusReturnMatch(newId), 50);
               }
             }

@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState, todayISO } from '../utils.js';
+import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
@@ -330,21 +330,11 @@ function envelopeCard(cat) {
       className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
       onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
     }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
-    el('div', { className: 'btn-group', style: 'width:100%;margin-top:0.5rem;gap:0.35rem' },
-      el('button', {
-        className: 'btn btn-sm btn-primary',
-        style: cat.allowGifts ? 'flex:1' : 'width:100%',
-        onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
-      }, 'Allocate'),
-      cat.allowGifts
-        ? el('button', {
-          className: 'btn btn-sm btn-accent', style: 'flex:1',
-          title: 'Log gift money into this envelope (e.g. birthday from Grandma)',
-          onClick: (e) => { e.stopPropagation(); openGiftToEnvelope(cat); },
-        }, 'Gift $')
-        : null,
-    ),
-    // Note under actions so Allocate / Gift stay primary
+    el('button', {
+      className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
+      onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
+    }, 'Allocate'),
+    // Note under actions (Allocate stays primary)
     cat.note && String(cat.note).trim()
       ? el('div', { className: 'envelope-note' },
         el('span', { className: 'envelope-note-label' }, 'Note'),
@@ -544,16 +534,6 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
           window.appRefresh();
         },
       }, 'Close'),
-      (store.getState().categories.find(c => c.id === cat.id) || cat).allowGifts
-        ? el('button', {
-          type: 'button',
-          className: 'btn btn-accent',
-          onClick: () => {
-            modal.close();
-            openGiftToEnvelope(cat);
-          },
-        }, 'Gift $')
-        : null,
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -686,24 +666,6 @@ function sinkingFundToggle(checked) {
   return { row, input };
 }
 
-function allowGiftsToggle(checked) {
-  const input = el('input', { type: 'checkbox' });
-  if (checked) input.checked = true;
-  const row = el('div', { className: 'form-option' },
-    el('div', { className: 'form-option-text' },
-      el('span', { className: 'form-option-label' }, 'Show Gift $ button'),
-      el('span', { className: 'form-option-hint' },
-        'For kid envelopes / birthday money — leave off for bills and regular categories',
-      ),
-    ),
-    el('label', { className: 'toggle-switch' },
-      input,
-      el('span', { className: 'toggle-slider' }),
-    ),
-  );
-  return { row, input };
-}
-
 function goalField(isSinking, value = 0) {
   const input = el('input', {
     type: 'number',
@@ -743,83 +705,11 @@ function noteField(value = '') {
   return { row, input };
 }
 
-function openGiftToEnvelope(cat) {
-  const amountIn = el('input', { type: 'number', step: '0.01', min: 0, value: '', placeholder: '20.00' });
-  const descIn = el('input', {
-    type: 'text',
-    placeholder: 'e.g. Birthday gift from Grandma',
-    value: '',
-  });
-  const memoIn = el('input', {
-    type: 'text',
-    placeholder: 'Optional detail (age, occasion…)',
-    value: '',
-  });
-  const dateIn = el('input', { type: 'date', value: todayISO() });
-  const postCheck = el('input', { type: 'checkbox' });
-  postCheck.checked = true;
-
-  showModal({
-    title: `Gift $ → ${cat.name}`,
-    body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        'Logs income (optional checking update) and adds the amount to this envelope’s available balance as carry-over — for birthday/Christmas money that shouldn’t raid other envelopes.',
-      ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Description'), descIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Memo (optional)'), memoIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Date'), dateIn),
-      el('div', { className: 'form-option', style: 'margin-top:0.5rem' },
-        el('div', { className: 'form-option-text' },
-          el('span', { className: 'form-option-label' }, 'Post to checking now'),
-          el('span', { className: 'form-option-hint' },
-            'On if cash/check already in the bank. Off if you’ll wait for CSV.',
-          ),
-        ),
-        el('label', { className: 'toggle-switch' },
-          postCheck,
-          el('span', { className: 'toggle-slider' }),
-        ),
-      ),
-    ),
-    footer: el('button', {
-      className: 'btn btn-primary',
-      onClick: function() {
-        const amt = Number(amountIn.value);
-        if (!(amt > 0)) {
-          showToast('Enter an amount greater than zero', 'info');
-          return;
-        }
-        const id = store.addGiftToEnvelope({
-          amount: amt,
-          categoryId: cat.id,
-          description: descIn.value.trim(),
-          memo: memoIn.value.trim(),
-          date: dateIn.value,
-          postToChecking: postCheck.checked,
-        });
-        if (!id) {
-          showToast('Could not save gift', 'info');
-          return;
-        }
-        this.closest('.modal-backdrop').remove();
-        showToast(
-          `${formatCurrency(amt)} earmarked for ${cat.name}`,
-          'success',
-          4000,
-        );
-        window.appRefresh();
-      },
-    }, 'Save gift'),
-  });
-}
-
 function addCategory(isSinking) {
   const nameIn = el('input', { type: 'text', placeholder: 'Category name' });
   const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
   const iconIn = el('input', { type: 'text', placeholder: 'Icon (emoji)', value: isSinking ? '🎯' : '📁' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(isSinking);
-  const { row: giftsRow, input: giftsIn } = allowGiftsToggle(false);
   const { row: goalRow, input: goalIn } = goalField(isSinking, 0);
   const { row: noteRow, input: noteIn } = noteField('');
 
@@ -845,7 +735,6 @@ function addCategory(isSinking) {
       goalRow,
       noteRow,
       sinkingRow,
-      giftsRow,
     ),
     footer: el('button', {
       className: 'btn btn-primary',
@@ -862,7 +751,6 @@ function addCategory(isSinking) {
             carryOver: 0,
             goalAmount: Number(goalIn.value) > 0 ? Number(goalIn.value) : 0,
             note: noteIn.value.trim(),
-            allowGifts: giftsIn.checked,
           });
         });
         this.closest('.modal-backdrop').remove();
@@ -878,7 +766,6 @@ function editCategory(cat) {
   const budgetIn = el('input', { type: 'number', step: '0.01', value: cat.monthlyBudget });
   const iconIn = el('input', { type: 'text', value: cat.icon || '' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(cat.isSinkingFund);
-  const { row: giftsRow, input: giftsIn } = allowGiftsToggle(!!cat.allowGifts);
   const { row: goalRow, input: goalIn } = goalField(cat.isSinkingFund, Number(cat.goalAmount) || 0);
   const { row: noteRow, input: noteIn } = noteField(cat.note || '');
 
@@ -904,7 +791,6 @@ function editCategory(cat) {
       goalRow,
       noteRow,
       sinkingRow,
-      giftsRow,
     ),
     footer: el('button', {
       className: 'btn btn-primary',
@@ -922,7 +808,6 @@ function editCategory(cat) {
               c.isSinkingFund = sinkingIn.checked;
               c.goalAmount = nextGoal;
               c.note = noteIn.value.trim();
-              c.allowGifts = giftsIn.checked;
             }
           });
           backdrop?.remove();
