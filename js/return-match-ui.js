@@ -83,7 +83,7 @@ function openReturnPicker(incomeTxId, candidates) {
       }, 'Skip — leave as bonus only'),
     ],
   });
-  modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-wide', 'modal-scrollable');
 }
 
 /** After CSV import, run return matching for new/cleared bonus income ids. */

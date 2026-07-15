@@ -1268,7 +1268,8 @@ html[data-reduce-motion="true"] *::after {
   max-width: 720px;
 }
 
-/* Duplicate review: keep header/footer visible; scroll the list */
+/* Review / long modals: keep header/footer visible; scroll the body */
+.modal.modal-scrollable,
 .modal.modal-duplicate-review {
   display: flex;
   flex-direction: column;
@@ -1276,11 +1277,14 @@ html[data-reduce-motion="true"] *::after {
   overflow: hidden;
 }
 
+.modal.modal-scrollable .modal-header,
+.modal.modal-scrollable .modal-footer,
 .modal.modal-duplicate-review .modal-header,
 .modal.modal-duplicate-review .modal-footer {
   flex-shrink: 0;
 }
 
+.modal.modal-scrollable .modal-body,
 .modal.modal-duplicate-review .modal-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -2069,27 +2073,69 @@ html[data-reduce-motion="true"] .sticky-note {
 .review-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-height: 360px;
+  gap: 0.55rem;
+  max-height: min(50vh, 26rem);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
 }
 
 .review-item {
   display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.6rem 0.75rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
+  padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+  color: var(--text);
+  min-width: 0;
 }
 
-.review-item-main { flex: 1; font-size: 0.85rem; }
-.review-item-amt { font-weight: 600; white-space: nowrap; }
+.review-item > div {
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
+.review-item .btn-group {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.review-item-main {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-size: 0.9rem;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.review-item-amt {
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.review-item-check {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-top: 0.15rem;
+}
 
 .bill-match-item {
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: flex-start;
+}
+
+.bill-match-item > div:first-child {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 
 /* Month close */

@@ -158,7 +158,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
       }, 'Open Transactions'),
     ],
   });
-  modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-wide', 'modal-scrollable');
 }
 
 export function openDuplicateReview() {
@@ -543,7 +543,7 @@ export function openUncategorizedReview() {
       }, 'Open Transactions'),
     ],
   });
-  modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-wide', 'modal-scrollable');
 }
 
 export function openBillMatches(inbox = store.getReviewInbox()) {
@@ -617,5 +617,5 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
     ],
   });
-  modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-wide', 'modal-scrollable');
 }

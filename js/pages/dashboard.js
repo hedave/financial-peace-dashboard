@@ -595,8 +595,10 @@ function renderReconciliationCandidate(candidate, idx) {
 }
 
 function openReconciliationDialog(recon) {
+  // Always open with "as of today" — re-entering a bank balance means a fresh check
+  const today = todayISO();
   const input = el('input', { type: 'number', step: '0.01', value: recon.bankBalance ?? recon.logged });
-  const dateIn = el('input', { type: 'date', value: recon.asOfDate || new Date().toISOString().slice(0, 10) });
+  const dateIn = el('input', { type: 'date', value: today });
   const gapPreview = el('p', { className: 'reconcile-gap-preview' });
   const matchesHost = el('div', {});
 
@@ -617,7 +619,7 @@ function openReconciliationDialog(recon) {
     gapPreview.textContent = `Gap: ${formatCurrency(Math.abs(gap))} ${gap > 0 ? 'higher' : 'lower'} than logged`;
     gapPreview.style.color = 'var(--negative)';
 
-    const candidates = store.findReconciliationCandidates(gap, dateIn.value);
+    const candidates = store.findReconciliationCandidates(gap, dateIn.value || todayISO());
     matchesHost.replaceChildren(
       candidates.length
         ? renderReconciliationMatches(candidates, { limit: 4 })
@@ -627,7 +629,11 @@ function openReconciliationDialog(recon) {
     );
   }
 
-  input.addEventListener('input', refreshGapPreview);
+  // Changing the bank amount always stamps "as of" to today (you can still edit the date after)
+  input.addEventListener('input', () => {
+    dateIn.value = todayISO();
+    refreshGapPreview();
+  });
   dateIn.addEventListener('change', refreshGapPreview);
   refreshGapPreview();
 
@@ -635,10 +641,16 @@ function openReconciliationDialog(recon) {
     title: 'Reconcile Checking',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem' },
-        'Enter the balance shown in your bank app. We will scan recent transactions for combinations that explain any gap.'
+        'Enter the balance shown in your bank app. As-of date defaults to today when you update the amount. We scan recent transactions for combinations that explain any gap.'
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Bank balance'), input),
-      el('div', { className: 'form-group' }, el('label', {}, 'As of date'), dateIn),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'As of date'),
+        dateIn,
+        el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+          'Resets to today whenever you change the bank balance.',
+        ),
+      ),
       el('p', { style: 'font-size:0.85rem;margin-bottom:0.5rem' }, `Logged checking: ${formatCurrency(recon.logged)}`),
       gapPreview,
       matchesHost,
@@ -646,7 +658,7 @@ function openReconciliationDialog(recon) {
     footer: el('button', {
       className: 'btn btn-primary',
       onClick: function() {
-        store.setReconciliation(Number(input.value), dateIn.value);
+        store.setReconciliation(Number(input.value), dateIn.value || todayISO());
         this.closest('.modal-backdrop').remove();
         showToast('Reconciliation saved');
         window.appRefresh();
