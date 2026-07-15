@@ -135,7 +135,7 @@ function isBalanceOnlyLine(s) {
 function isJunkDesc(desc) {
   if (!desc) return true;
   const d = String(desc)
-    .replace(/(?i)description|category|pending/g, ' ')
+    .replace(/description|category|pending/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (d.length < 2) return true;
