@@ -69,8 +69,17 @@ export function isInMonth(dateStr, monthKey) {
   return dateStr && dateStr.startsWith(monthKey);
 }
 
+/** YYYY-MM-DD in the user's local timezone (not UTC — evenings were rolling to "tomorrow"). */
+export function formatLocalISODate(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalISODate(new Date());
 }
 
 /**

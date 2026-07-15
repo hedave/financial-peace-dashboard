@@ -6,7 +6,7 @@ import {
 } from './defaults.js';
 import {
   getCurrentMonth, isInMonth, todayISO, generateId,
-  getPreviousMonth, getRecentMonths, addOneMonthToDate,
+  getPreviousMonth, getRecentMonths, addOneMonthToDate, formatLocalISODate,
 } from './utils.js';
 import {
   normalizeImportRow, resolveCategoryId,
@@ -620,7 +620,7 @@ class Store {
     } else if (range === '30d') {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - 30);
-      const iso = cutoff.toISOString().slice(0, 10);
+      const iso = formatLocalISODate(cutoff);
       pool = (this.state.transactions || []).filter(t => (t.date || '') >= iso);
     } else {
       pool = this.getTransactionsForMonth(month);
@@ -1755,7 +1755,7 @@ class Store {
     const incomeDate = String(incomeTx.date || todayISO()).slice(0, 10);
     const start = new Date(incomeDate + 'T12:00:00');
     start.setDate(start.getDate() - lookbackDays);
-    const startIso = start.toISOString().slice(0, 10);
+    const startIso = formatLocalISODate(start);
 
     const refundedExpenseIds = new Set(
       (this.state.transactions || [])

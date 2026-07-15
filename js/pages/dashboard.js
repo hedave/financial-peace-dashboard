@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO } from '../utils.js';
+import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO, formatLocalISODate } from '../utils.js';
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
@@ -134,7 +134,7 @@ export function renderDashboard(container) {
     ));
   }
 
-  if (celebration && celebration.date === new Date().toISOString().slice(0, 10)) {
+  if (celebration && celebration.date === todayISO()) {
     container.appendChild(el('div', { className: 'banner banner-celebration confetti-burst' },
       el('div', { className: 'banner-icon' }, '🎉'),
       el('div', { className: 'banner-text' },
@@ -318,7 +318,7 @@ function weekAtAGlance(upcomingBills, paychecks) {
   const today = todayISO();
   const in7 = new Date();
   in7.setDate(in7.getDate() + 7);
-  const end = in7.toISOString().slice(0, 10);
+  const end = formatLocalISODate(in7);
 
   const payItems = [];
   (paychecks || []).forEach(p => {

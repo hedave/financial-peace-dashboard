@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate } from './utils.js';
+import { formatCurrency, formatDate, formatLocalISODate } from './utils.js';
 
 const CHECKING_TYPES = new Set(['income', 'expense', 'debt_payment', 'transfer']);
 
@@ -16,7 +16,7 @@ function roundCents(n) {
 function subtractDays(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return formatLocalISODate(d);
 }
 
 function getRecentCheckingTransactions(transactions, asOfDate, { maxDays = 90, limit = 35 } = {}) {
