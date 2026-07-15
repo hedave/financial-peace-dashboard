@@ -826,27 +826,36 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 [data-theme="dark"] .badge-due { background: #352f24; color: #d4b88a; }
 [data-theme="dark"] .badge-overdue { background: #352a2a; color: #c4a8a8; }
 
-/* Progress bars */
+/* Progress bars — fixed track size everywhere */
 .progress-bar {
-  height: 8px;
+  height: 10px;
+  min-height: 10px;
+  width: 100%;
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
   overflow: hidden;
   margin-top: 0.5rem;
+  flex-shrink: 0;
 }
 
 .progress-fill {
   height: 100%;
+  min-height: 10px;
   background: linear-gradient(90deg, var(--primary), var(--primary-light));
-  border-radius: 4px;
-  transition: width 0.5s ease;
+  border-radius: 5px;
+  transition: width 0.35s ease;
 }
 
-/* Envelope cards */
+.progress-fill-over {
+  background: linear-gradient(90deg, var(--negative), #c47878);
+}
+
+/* Envelope cards — equal height in grid; bar sits in fixed band */
 .envelope-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
+  align-items: stretch;
 }
 
 .envelope-card {
@@ -855,6 +864,11 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   border-radius: var(--radius);
   padding: 1rem;
   transition: box-shadow 0.15s, border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 .envelope-card:hover { box-shadow: var(--shadow-lg); }
@@ -865,6 +879,48 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 
 .envelope-card-clickable:hover {
   border-color: var(--primary);
+}
+
+.envelope-card-top {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.envelope-header {
+  min-height: 2.5rem;
+  align-items: flex-start;
+}
+
+.envelope-stats {
+  min-height: 3.25rem;
+}
+
+.envelope-progress {
+  margin-top: 0.65rem !important;
+  height: 10px !important;
+  min-height: 10px !important;
+}
+
+.envelope-progress-meta {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-height: 1rem;
+  line-height: 1rem;
+}
+
+.envelope-card-mid {
+  flex: 1 1 auto;
+  min-height: 0.5rem;
+}
+
+.envelope-card-footer {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  flex-shrink: 0;
 }
 
 .envelope-stat-spent .envelope-tx-hint {
@@ -1213,8 +1269,19 @@ html[data-reduce-motion="true"] *::after {
   font-size: 0.8rem;
 }
 
+.envelope-stat {
+  min-width: 0;
+}
+
 .envelope-stat label { color: var(--text-muted); display: block; font-size: 0.7rem; }
-.envelope-stat span { font-weight: 600; }
+.envelope-stat span {
+  font-weight: 600;
+  display: block;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .envelope-remaining {
   margin-top: 0.75rem;
@@ -2216,6 +2283,8 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .envelope-goal-bar {
   margin-bottom: 0.35rem;
+  height: 10px !important;
+  min-height: 10px !important;
 }
 
 .envelope-goal-pct {

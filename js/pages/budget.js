@@ -275,6 +275,12 @@ function envelopeCard(cat) {
   const healthLabel = store.getEnvelopeHealthLabel(health);
   const txCount = store.getCategoryTransactions(cat.id).length;
   const overCap = store.isOverSoftCap(cat.id);
+  // Same formula for every card: spent / available pool (budget + carry)
+  const pool = budgeted + carry;
+  let usedPct = 0;
+  if (pool > 0.005) usedPct = Math.min(100, (spent / pool) * 100);
+  else if (spent > 0) usedPct = 100; // spent with no plan still shows full bar (over)
+  if (isOver) usedPct = 100;
 
   const card = el('div', {
     className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable`,
@@ -284,63 +290,79 @@ function envelopeCard(cat) {
       openEnvelopeActivity(cat);
     },
   },
-    el('div', { className: 'envelope-header' },
-      el('div', { className: 'envelope-title' },
-        el('span', { className: 'envelope-icon' }, cat.icon || '✉️'),
-        el('span', { className: 'envelope-name' }, cat.name),
-        cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
-        healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
-        overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
+    el('div', { className: 'envelope-card-top' },
+      el('div', { className: 'envelope-header' },
+        el('div', { className: 'envelope-title' },
+          el('span', { className: 'envelope-icon' }, cat.icon || '✉️'),
+          el('span', { className: 'envelope-name' }, cat.name),
+          cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
+          healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
+          overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
+        ),
+        el('div', { className: 'btn-group' },
+          el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
+          el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×'),
+        )
       ),
-      el('div', { className: 'btn-group' },
-        el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
-        el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×'),
-      )
-    ),
-    el('div', { className: 'envelope-stats' },
-      el('div', { className: 'envelope-stat' },
-        el('label', {}, 'Budgeted'),
-        el('span', {}, formatCurrency(budgeted))
+      el('div', { className: 'envelope-stats' },
+        el('div', { className: 'envelope-stat' },
+          el('label', {}, 'Budgeted'),
+          el('span', {}, formatCurrency(budgeted))
+        ),
+        el('div', { className: 'envelope-stat envelope-stat-spent' },
+          el('label', {}, 'Spent'),
+          el('span', {}, formatCurrency(spent)),
+          txCount > 0
+            ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
+            : null,
+        ),
+        el('div', { className: 'envelope-stat' },
+          el('label', {}, 'Carry-over'),
+          el('span', {}, formatCurrency(carry))
+        ),
       ),
-      el('div', { className: 'envelope-stat envelope-stat-spent' },
-        el('label', {}, 'Spent'),
-        el('span', {}, formatCurrency(spent)),
-        txCount > 0
-          ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
-          : null,
+      el('div', { className: `envelope-remaining ${isOver ? 'over' : 'ok'}` },
+        el('span', {}, 'Remaining'),
+        el('span', { className: 'amount' }, formatCurrency(remaining))
       ),
-      el('div', { className: 'envelope-stat' },
-        el('label', {}, 'Carry-over'),
-        el('span', {}, formatCurrency(carry))
-      ),
-    ),
-    el('div', { className: `envelope-remaining ${isOver ? 'over' : 'ok'}` },
-      el('span', {}, 'Remaining'),
-      el('span', { className: 'amount' }, formatCurrency(remaining))
-    ),
-    el('div', { className: 'progress-bar', style: 'margin-top:0.5rem' },
+      // Fixed-height track on every card so bars line up and look even
       el('div', {
-        className: 'progress-fill',
-        style: `width:${budgeted > 0 ? Math.min(100, (spent / (budgeted + carry)) * 100) : 0}%;${isOver ? 'background:var(--negative)' : ''}`
-      })
+        className: 'progress-bar envelope-progress',
+        title: pool > 0
+          ? `${Math.round(usedPct)}% of ${formatCurrency(pool)} used`
+          : (spent > 0 ? 'Spending with no budget set' : 'No budget set'),
+      },
+        el('div', {
+          className: `progress-fill${isOver || (pool <= 0 && spent > 0) ? ' progress-fill-over' : ''}`,
+          style: `width:${usedPct}%`,
+        }),
+      ),
+      el('div', { className: 'envelope-progress-meta' },
+        pool > 0 || spent > 0
+          ? `${Math.round(usedPct)}% used`
+          : 'No budget set',
+      ),
+      el('div', { className: 'envelope-card-mid' },
+        goalBlock(cat),
+        linkedItems(cat),
+      ),
     ),
-    goalBlock(cat),
-    linkedItems(cat),
-    el('button', {
-      className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
-      onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
-    }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
-    el('button', {
-      className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
-      onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
-    }, 'Allocate'),
-    // Note under actions (Allocate stays primary)
-    cat.note && String(cat.note).trim()
-      ? el('div', { className: 'envelope-note' },
-        el('span', { className: 'envelope-note-label' }, 'Note'),
-        el('p', { className: 'envelope-note-text' }, String(cat.note).trim()),
-      )
-      : null,
+    el('div', { className: 'envelope-card-footer' },
+      el('button', {
+        className: 'btn btn-sm btn-secondary', style: 'width:100%',
+        onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
+      }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
+      el('button', {
+        className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
+        onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
+      }, 'Allocate'),
+      cat.note && String(cat.note).trim()
+        ? el('div', { className: 'envelope-note' },
+          el('span', { className: 'envelope-note-label' }, 'Note'),
+          el('p', { className: 'envelope-note-text' }, String(cat.note).trim()),
+        )
+        : null,
+    ),
   );
 
   return card;
