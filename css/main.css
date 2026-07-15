@@ -2224,6 +2224,46 @@ html[data-reduce-motion="true"] .sticky-note {
   color: var(--text-muted);
 }
 
+.envelope-note {
+  margin-top: 0.65rem;
+  padding: 0.5rem 0.65rem;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.envelope-note-in-modal {
+  margin-bottom: 0.85rem;
+}
+
+.envelope-note-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.envelope-note-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.envelope-activity-memo {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 0.2rem;
+  word-break: break-word;
+}
+
 /* Paychecks */
 .paycheck-list { display: flex; flex-direction: column; gap: 0.5rem; }
 

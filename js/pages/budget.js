@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState } from '../utils.js';
+import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState, todayISO } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
@@ -326,14 +326,27 @@ function envelopeCard(cat) {
     ),
     goalBlock(cat),
     linkedItems(cat),
+    cat.note && String(cat.note).trim()
+      ? el('div', { className: 'envelope-note' },
+        el('span', { className: 'envelope-note-label' }, 'Note'),
+        el('p', { className: 'envelope-note-text' }, String(cat.note).trim()),
+      )
+      : null,
     el('button', {
       className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
       onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
     }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
-    el('button', {
-      className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
-      onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
-    }, 'Allocate')
+    el('div', { className: 'btn-group', style: 'width:100%;margin-top:0.5rem;gap:0.35rem' },
+      el('button', {
+        className: 'btn btn-sm btn-primary', style: 'flex:1',
+        onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
+      }, 'Allocate'),
+      el('button', {
+        className: 'btn btn-sm btn-accent', style: 'flex:1',
+        title: 'Log gift money into this envelope (e.g. birthday from Grandma)',
+        onClick: (e) => { e.stopPropagation(); openGiftToEnvelope(cat); },
+      }, 'Gift $'),
+    ),
   );
 
   return card;
@@ -371,6 +384,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       txs.forEach(t => {
         const isPending = store.isPending?.(t);
         const isSplit = store.isSplitTransaction(t);
+        const memo = String(t.memo || '').trim();
         list.appendChild(el('div', { className: 'envelope-activity-row' },
           el('div', { className: 'envelope-activity-main' },
             el('div', { className: 'envelope-activity-top' },
@@ -378,10 +392,14 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
               el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.envelopeAmount)),
             ),
             el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
+            memo
+              ? el('div', { className: 'envelope-activity-memo' }, memo)
+              : null,
             el('div', { className: 'envelope-activity-meta' },
-              t.type === 'debt_payment' ? 'Debt payment' : 'Expense',
+              t.type === 'debt_payment' ? 'Debt payment' : (t.type === 'income' ? 'Income / gift' : 'Expense'),
               isSplit ? ' · Split' : '',
               isPending ? ' · Pending' : '',
+              t.earmarkedEnvelope ? ' · Earmarked gift' : '',
               t.envelopeAmount !== Math.abs(Number(t.amount))
                 ? ` · of ${formatCurrency(t.amount)} total`
                 : '',
@@ -411,7 +429,17 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       }, opt.label)),
     );
 
+    // Live note from store (may have been edited)
+    const live = store.getState().categories.find(c => c.id === cat.id) || cat;
+    const noteText = String(live.note || '').trim();
+
     bodyHost.innerHTML = '';
+    if (noteText) {
+      bodyHost.appendChild(el('div', { className: 'envelope-note envelope-note-in-modal' },
+        el('span', { className: 'envelope-note-label' }, 'Note'),
+        el('p', { className: 'envelope-note-text' }, noteText),
+      ));
+    }
     bodyHost.appendChild(chips);
     bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
       `${rangeLabel(range)} · ${formatCurrency(total)} · ${txs.length} transaction${txs.length === 1 ? '' : 's'}`,
@@ -433,6 +461,14 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       el('button', {
         type: 'button',
         className: 'btn btn-accent',
+        onClick: () => {
+          modal.close();
+          openGiftToEnvelope(cat);
+        },
+      }, 'Gift $'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
         onClick: () => {
           modal.close();
           openTransactionForm({ type: 'expense', categoryId: cat.id });
@@ -581,12 +617,103 @@ function goalField(isSinking, value = 0) {
   return { row, input };
 }
 
+function noteField(value = '') {
+  const input = el('textarea', {
+    rows: 3,
+    placeholder: 'e.g. $20 from Grandma for Emma’s birthday — don’t mix with allowance',
+    value: value || '',
+    style: 'width:100%;resize:vertical;min-height:4rem',
+  });
+  // textarea value via attribute may not stick in all browsers through el()
+  input.value = value || '';
+  const row = el('div', { className: 'form-group' },
+    el('label', {}, 'Note (optional)'),
+    input,
+    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+      'Shows on the envelope card and activity — gift money, kid context, reminders for your spouse.',
+    ),
+  );
+  return { row, input };
+}
+
+function openGiftToEnvelope(cat) {
+  const amountIn = el('input', { type: 'number', step: '0.01', min: 0, value: '', placeholder: '20.00' });
+  const descIn = el('input', {
+    type: 'text',
+    placeholder: 'e.g. Birthday gift from Grandma',
+    value: '',
+  });
+  const memoIn = el('input', {
+    type: 'text',
+    placeholder: 'Optional detail (age, occasion…)',
+    value: '',
+  });
+  const dateIn = el('input', { type: 'date', value: todayISO() });
+  const postCheck = el('input', { type: 'checkbox' });
+  postCheck.checked = true;
+
+  showModal({
+    title: `Gift $ → ${cat.name}`,
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'Logs income (optional checking update) and adds the amount to this envelope’s available balance as carry-over — for birthday/Christmas money that shouldn’t raid other envelopes.',
+      ),
+      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'Description'), descIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'Memo (optional)'), memoIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'Date'), dateIn),
+      el('div', { className: 'form-option', style: 'margin-top:0.5rem' },
+        el('div', { className: 'form-option-text' },
+          el('span', { className: 'form-option-label' }, 'Post to checking now'),
+          el('span', { className: 'form-option-hint' },
+            'On if cash/check already in the bank. Off if you’ll wait for CSV.',
+          ),
+        ),
+        el('label', { className: 'toggle-switch' },
+          postCheck,
+          el('span', { className: 'toggle-slider' }),
+        ),
+      ),
+    ),
+    footer: el('button', {
+      className: 'btn btn-primary',
+      onClick: function() {
+        const amt = Number(amountIn.value);
+        if (!(amt > 0)) {
+          showToast('Enter an amount greater than zero', 'info');
+          return;
+        }
+        const id = store.addGiftToEnvelope({
+          amount: amt,
+          categoryId: cat.id,
+          description: descIn.value.trim(),
+          memo: memoIn.value.trim(),
+          date: dateIn.value,
+          postToChecking: postCheck.checked,
+        });
+        if (!id) {
+          showToast('Could not save gift', 'info');
+          return;
+        }
+        this.closest('.modal-backdrop').remove();
+        showToast(
+          `${formatCurrency(amt)} earmarked for ${cat.name}`,
+          'success',
+          4000,
+        );
+        window.appRefresh();
+      },
+    }, 'Save gift'),
+  });
+}
+
 function addCategory(isSinking) {
   const nameIn = el('input', { type: 'text', placeholder: 'Category name' });
   const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
   const iconIn = el('input', { type: 'text', placeholder: 'Icon (emoji)', value: isSinking ? '🎯' : '📁' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(isSinking);
   const { row: goalRow, input: goalIn } = goalField(isSinking, 0);
+  const { row: noteRow, input: noteIn } = noteField('');
 
   sinkingIn.addEventListener('change', () => {
     const label = goalRow.querySelector('label');
@@ -608,6 +735,7 @@ function addCategory(isSinking) {
         el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
       ),
       goalRow,
+      noteRow,
       sinkingRow,
     ),
     footer: el('button', {
@@ -624,6 +752,7 @@ function addCategory(isSinking) {
             monthlyBudget: Number(budgetIn.value),
             carryOver: 0,
             goalAmount: Number(goalIn.value) > 0 ? Number(goalIn.value) : 0,
+            note: noteIn.value.trim(),
           });
         });
         this.closest('.modal-backdrop').remove();
@@ -640,6 +769,7 @@ function editCategory(cat) {
   const iconIn = el('input', { type: 'text', value: cat.icon || '' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(cat.isSinkingFund);
   const { row: goalRow, input: goalIn } = goalField(cat.isSinkingFund, Number(cat.goalAmount) || 0);
+  const { row: noteRow, input: noteIn } = noteField(cat.note || '');
 
   sinkingIn.addEventListener('change', () => {
     const label = goalRow.querySelector('label');
@@ -661,6 +791,7 @@ function editCategory(cat) {
         el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
       ),
       goalRow,
+      noteRow,
       sinkingRow,
     ),
     footer: el('button', {
@@ -678,6 +809,7 @@ function editCategory(cat) {
               c.monthlyBudget = nextBudget;
               c.isSinkingFund = sinkingIn.checked;
               c.goalAmount = nextGoal;
+              c.note = noteIn.value.trim();
             }
           });
           backdrop?.remove();

@@ -574,10 +574,16 @@ function txCard(t, state, duplicateMeta = new Map()) {
     ),
     el('div', { className: 'tx-card-body' },
       el('div', { className: 'tx-card-desc' }, t.description || '—'),
+      t.memo
+        ? el('div', { className: 'tx-card-meta', style: 'font-style:italic' }, t.memo)
+        : null,
       sourceTag ? el('div', { className: 'tx-card-meta' }, sourceTag) : null,
       el('div', { className: 'tx-card-meta' }, categoryLabel(t, state)),
       el('div', { className: 'tx-card-badges' },
         el('span', { className: 'tx-type-badge' }, TYPE_LABELS[t.type] || t.type),
+        t.earmarkedEnvelope
+          ? el('span', { className: 'tx-type-badge', title: 'Gift earmarked to envelope' }, 'Gift')
+          : null,
         pendingBadge(t),
         isDuplicate ? el('span', {
           className: 'tx-duplicate-badge',
@@ -631,6 +637,15 @@ export function openTransactionForm({
     placeholder: 'Description',
     value: transaction?.description || '',
   });
+  const memoIn = el('input', {
+    type: 'text',
+    placeholder: 'Optional note (birthday gift, which kid…)',
+    value: transaction?.memo || '',
+  });
+  const memoGroup = el('div', { className: 'form-group' },
+    el('label', {}, 'Memo (optional)'),
+    memoIn,
+  );
 
   const catGroup = el('div', { className: 'form-group' },
     el('label', {}, 'Envelope / Category'),
@@ -639,6 +654,22 @@ export function openTransactionForm({
     }),
   );
   const catSelect = catGroup.querySelector('select');
+
+  // Gift / earmark: income → also fund envelope carry-over
+  const earmarkGift = el('input', { type: 'checkbox' });
+  if (transaction?.earmarkedEnvelope) earmarkGift.checked = true;
+  const earmarkGroup = el('div', { className: 'form-option', style: 'display:none' },
+    el('div', { className: 'form-option-text' },
+      el('span', { className: 'form-option-label' }, 'Gift / earmark to this envelope'),
+      el('span', { className: 'form-option-hint' },
+        'Adds the amount to the envelope’s available balance (carry-over). Use for birthday/Christmas money from family.',
+      ),
+    ),
+    el('label', { className: 'toggle-switch' },
+      earmarkGift,
+      el('span', { className: 'toggle-slider' }),
+    ),
+  );
 
   const debtGroup = el('div', { className: 'form-group', style: 'display:none' },
     el('label', {}, 'Debt'),
@@ -695,7 +726,16 @@ export function openTransactionForm({
     const canSplit = currentType === 'expense';
     const useSplit = canSplit && splitToggle.checked;
     splitOption.style.display = canSplit ? '' : 'none';
-    catGroup.style.display = categoryUsesEnvelope(currentType) && !useSplit ? '' : 'none';
+    // Income can also pick an envelope when earmarking a gift
+    const showCat = (categoryUsesEnvelope(currentType) && !useSplit)
+      || (currentType === 'income' && !isEdit);
+    catGroup.style.display = showCat ? '' : 'none';
+    if (currentType === 'income') {
+      catGroup.querySelector('label').textContent = 'Envelope (for gift / earmark)';
+    } else {
+      catGroup.querySelector('label').textContent = 'Envelope / Category';
+    }
+    earmarkGroup.style.display = currentType === 'income' && !isEdit ? '' : 'none';
     splitSection.style.display = useSplit ? '' : 'none';
     const showDebt = currentType === 'debt_payment' && !isEdit;
     debtGroup.style.display = showDebt ? '' : 'none';
@@ -781,7 +821,9 @@ export function openTransactionForm({
       ),
       splitOption,
       catGroup,
+      earmarkGroup,
       splitSection,
+      memoGroup,
       postCheckingGroup,
       rememberGroup,
       debtGroup,
@@ -813,11 +855,23 @@ export function openTransactionForm({
             }
           }
 
-          const categoryId = !useSplit && categoryUsesEnvelope(txType) ? (catSelect.value || null) : null;
+          const wantEarmark = txType === 'income' && !isEdit && earmarkGift.checked;
+          let categoryId = null;
+          if (useSplit) {
+            categoryId = null;
+          } else if (categoryUsesEnvelope(txType) || wantEarmark || txType === 'income') {
+            categoryId = catSelect.value || null;
+          }
+          if (wantEarmark && !categoryId) {
+            showToast('Pick an envelope for the gift / earmark', 'info');
+            return;
+          }
+
           const splits = useSplit ? splitEditor.getSplits() : null;
           const clearingStatus = (txType === 'expense' || txType === 'income')
             ? (postToChecking.checked ? 'cleared' : 'pending')
             : 'cleared';
+          const memo = memoIn.value.trim();
 
           const saveTx = () => {
             if (isEdit) {
@@ -826,6 +880,7 @@ export function openTransactionForm({
                 amount: amt,
                 type: txType,
                 description: descIn.value.trim(),
+                memo,
                 clearingStatus,
               };
               if (useSplit) {
@@ -846,13 +901,20 @@ export function openTransactionForm({
                 type: txType,
                 categoryId,
                 description: descIn.value.trim(),
+                memo,
                 debtId,
                 splits,
                 clearingStatus,
+                earmarkToEnvelope: wantEarmark,
               });
               const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
-              showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
-              if (txType === 'income' && newId) {
+              const giftNote = wantEarmark ? ' · earmarked to envelope' : '';
+              showToast(
+                useSplit
+                  ? `Split transaction logged!${pendingNote}`
+                  : `Transaction logged!${pendingNote}${giftNote}`,
+              );
+              if (txType === 'income' && newId && !wantEarmark) {
                 setTimeout(() => handleBonusReturnMatch(newId), 50);
               }
             }

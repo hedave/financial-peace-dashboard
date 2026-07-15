@@ -125,10 +125,12 @@ function ensureDefaultCategories(state) {
     monthlyBudget: 0,
     carryOver: 0,
     goalAmount: 0,
+    note: '',
     ...c,
     id: c.id || generateId(),
     name: c.name.trim(),
     goalAmount: Number(c.goalAmount) > 0 ? Number(c.goalAmount) : 0,
+    note: typeof c.note === 'string' ? c.note : (c.note ? String(c.note) : ''),
   }));
 
   const sinkingNames = new Set(SINKING_FUND_DEFAULTS.map(c => c.name.toLowerCase()));
@@ -148,6 +150,7 @@ function ensureDefaultCategories(state) {
       monthlyBudget: 0,
       carryOver: 0,
       goalAmount: 0,
+      note: '',
     });
     existing.add(def.name.toLowerCase());
   });
@@ -600,6 +603,7 @@ class Store {
 
   getCategorySpent(categoryId, month = getCurrentMonth()) {
     return this.getCategoryTransactions(categoryId, { month, range: 'month' })
+      .filter(t => t.type === 'expense' || t.type === 'debt_payment')
       .reduce((sum, t) => sum + (Number(t.envelopeAmount) || 0), 0);
   }
 
@@ -627,7 +631,12 @@ class Store {
     }
 
     return pool
-      .filter(t => t.type === 'expense' || t.type === 'debt_payment')
+      .filter(t => {
+        if (t.type === 'expense' || t.type === 'debt_payment') return true;
+        // Gifts / earmarked income tied to this envelope
+        if (t.type === 'income' && t.categoryId === categoryId) return true;
+        return false;
+      })
       .map(t => {
         if (this.isSplitTransaction(t)) {
           const split = t.splits.find(s => s.categoryId === categoryId);
@@ -1527,6 +1536,9 @@ class Store {
   addTransaction({
     date, amount, type, categoryId, description, billId, debtId, splits,
     clearingStatus, postToChecking = false, incomeSourceId = null,
+    memo = '',
+    /** When true (income): also add amount to envelope carryOver (gift / earmarked). */
+    earmarkToEnvelope = false,
   }) {
     const num = Math.abs(Number(amount));
     if (!num) return null;
@@ -1536,6 +1548,7 @@ class Store {
     const status = clearingStatus
       || (postToChecking ? 'cleared' : null)
       || (wantsPending ? 'pending' : 'cleared');
+    const memoText = typeof memo === 'string' ? memo.trim() : '';
 
     let newId = null;
     this.update(s => {
@@ -1546,11 +1559,13 @@ class Store {
         type,
         categoryId: useSplits ? null : (categoryId || null),
         description: description || '',
+        memo: memoText,
         billId: billId || null,
         debtId: debtId || null,
         clearingStatus: status,
         ...(incomeSourceId ? { incomeSourceId } : {}),
         ...(useSplits ? { splits: normalizedSplits } : {}),
+        ...(earmarkToEnvelope && type === 'income' && categoryId ? { earmarkedEnvelope: true } : {}),
       };
       if (type === 'income') {
         if (status === 'cleared') this.applyImportedIncome(s, newTx);
@@ -1564,9 +1579,46 @@ class Store {
       if (type === 'debt_payment' && debtId) {
         this.adjustDebtForPayment(s, debtId, num);
       }
+      // Gift / earmarked: raise envelope available via carry-over (does not change monthly plan)
+      if (earmarkToEnvelope && type === 'income' && categoryId) {
+        const cat = s.categories.find(c => c.id === categoryId);
+        if (cat) {
+          cat.carryOver = Math.round(((Number(cat.carryOver) || 0) + num) * 100) / 100;
+        }
+      }
       newId = newTx.id;
     });
     return newId;
+  }
+
+  /** Envelopes that have a non-empty note (for dashboard attention). */
+  getEnvelopesWithNotes() {
+    return (this.state.categories || [])
+      .filter(c => !c.parentId && String(c.note || '').trim());
+  }
+
+  /**
+   * Log gift/earmarked money: income (checking if cleared) + add to envelope carry-over.
+   * Net To Allocate unchanged when cleared (income + virtual fund cancel out).
+   */
+  addGiftToEnvelope({
+    amount, categoryId, description = '', memo = '', date, postToChecking = true,
+  } = {}) {
+    const num = Math.abs(Number(amount));
+    if (!num || !categoryId) return null;
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    const desc = (description || '').trim()
+      || (cat ? `Gift → ${cat.name}` : 'Gift / earmarked');
+    return this.addTransaction({
+      date: date || todayISO(),
+      amount: num,
+      type: 'income',
+      categoryId,
+      description: desc,
+      memo: memo || '',
+      clearingStatus: postToChecking ? 'cleared' : 'pending',
+      earmarkToEnvelope: true,
+    });
   }
 
   updateTransaction(id, updates) {
@@ -1598,6 +1650,7 @@ class Store {
       if (updates.amount !== undefined) tx.amount = newAmount;
       if (updates.type !== undefined) tx.type = newType;
       if (updates.description !== undefined) tx.description = updates.description || '';
+      if (updates.memo !== undefined) tx.memo = String(updates.memo || '').trim();
       if (updates.clearingStatus !== undefined) tx.clearingStatus = newStatus;
       if (updates.splits !== undefined) {
         const normalizedSplits = this.normalizeSplits(updates.splits);

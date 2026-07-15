@@ -63,6 +63,8 @@ export function createDefaultState() {
     carryOver: 0,
     /** Soft cap (regular) or savings goal (sinking). 0 = none. */
     goalAmount: 0,
+    /** Free-text note (e.g. gift money, kid-specific context). */
+    note: '',
   }));
 
   SINKING_FUND_DEFAULTS.forEach(c => {
@@ -75,6 +77,7 @@ export function createDefaultState() {
       monthlyBudget: 0,
       carryOver: 0,
       goalAmount: 0,
+      note: '',
     });
   });
 

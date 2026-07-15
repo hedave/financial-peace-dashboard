@@ -73,6 +73,7 @@ export function renderDashboard(container) {
   if (reviewBanner) container.appendChild(reviewBanner);
 
   const overCapEnvelopes = store.getEnvelopesOverSoftCap();
+  const notedEnvelopes = store.getEnvelopesWithNotes();
   const toAllocate = store.getToAllocate();
   const daveMode = store.isDaveRamseyMode();
   const toAllocateOff = Math.abs(toAllocate) >= 0.01;
@@ -96,7 +97,7 @@ export function renderDashboard(container) {
     ));
   }
 
-  if (pendingCount > 0 || inbox.uncategorized.length > 0 || overCapEnvelopes.length > 0) {
+  if (pendingCount > 0 || inbox.uncategorized.length > 0 || overCapEnvelopes.length > 0 || notedEnvelopes.length > 0) {
     container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' },
       pendingCount > 0 ? el('button', {
         type: 'button',
@@ -113,6 +114,12 @@ export function renderDashboard(container) {
         className: 'chip chip-warn',
         onClick: () => window.appNavigate('budget', { filter: 'attention' }),
       }, `🎯 ${overCapEnvelopes.length} over cap/goal`) : null,
+      notedEnvelopes.length > 0 ? el('button', {
+        type: 'button',
+        className: 'chip',
+        title: notedEnvelopes.map(c => c.name).join(', '),
+        onClick: () => window.appNavigate('budget'),
+      }, `📝 ${notedEnvelopes.length} envelope note${notedEnvelopes.length === 1 ? '' : 's'}`) : null,
     ));
   }
 
@@ -154,6 +161,7 @@ export function renderDashboard(container) {
 
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
+    quickAction('🎁', 'Log Gift', () => window.appNavigate('budget')),
     quickAction('📥', 'Review Inbox', () => openReviewInbox()),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),
