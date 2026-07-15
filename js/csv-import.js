@@ -1,4 +1,4 @@
-import { todayISO } from './utils.js';
+import { todayISO, formatLocalISODate, parseCSV } from './utils.js';
 
 /** Parse currency strings: $1,234.56, (50.00), -50.00 */
 export function parseMoneyValue(str) {
@@ -24,7 +24,16 @@ export function parseMoneyValue(str) {
   return negative ? -n : n;
 }
 
-/** Normalize dates from common bank export formats to YYYY-MM-DD */
+const MONTH_NAMES = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+  apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+  aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+
+const MONTH_DATE_RE = /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})\b/gi;
+
+/** Normalize dates from common bank export formats to YYYY-MM-DD (local calendar). */
 export function parseImportDate(raw) {
   if (!raw) return null;
   const s = String(raw).trim().replace(/^"|"$/g, '');
@@ -43,12 +52,294 @@ export function parseImportDate(raw) {
     return `${year}-${mdyShort[1].padStart(2, '0')}-${mdyShort[2].padStart(2, '0')}`;
   }
 
+  MONTH_DATE_RE.lastIndex = 0;
+  const mon = MONTH_DATE_RE.exec(s);
+  if (mon) {
+    const m = MONTH_NAMES[mon[1].toLowerCase()];
+    if (m) {
+      return `${mon[3]}-${String(m).padStart(2, '0')}-${String(mon[2]).padStart(2, '0')}`;
+    }
+  }
+
+  // MMDDYY or MMDD suffix from USAA merchant lines (e.g. 071426, 0713)
+  const md = s.match(/\b(0[1-9]|1[0-2])([0-3]\d)(\d{2})?\b/);
+  if (md) {
+    const month = md[1];
+    const day = md[2];
+    let year = md[3] ? 2000 + Number(md[3]) : new Date().getFullYear();
+    if (md[3] && Number(md[3]) > 70) year = 1900 + Number(md[3]);
+    // Prefer recent year if only MMDD
+    if (!md[3]) {
+      const now = new Date();
+      year = now.getFullYear();
+      const candidate = new Date(year, Number(month) - 1, Number(day));
+      if (candidate.getTime() - now.getTime() > 180 * 86400000) year -= 1;
+    }
+    return `${year}-${month}-${day}`;
+  }
+
   const parsed = new Date(s);
   if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
+    return formatLocalISODate(parsed);
   }
 
   return null;
+}
+
+/** True when text looks like a normal bank CSV (headers with Date + Amount). */
+export function looksLikeStandardBankCsv(text) {
+  const head = String(text || '').slice(0, 800).toLowerCase();
+  const hasDate = /\bdate\b/.test(head);
+  const hasAmount = /\bamount\b/.test(head) || /\bdebit\b/.test(head) || /\bcredit\b/.test(head);
+  const hasDesc = /\bdescription\b/.test(head) || /\bmemo\b/.test(head) || /\bpayee\b/.test(head);
+  // Standard USAA export: Date,Description,Original Description,Category,Amount,Status
+  if (hasDate && hasAmount && hasDesc && head.includes(',')) {
+    // Funky paste often has "Date Amount" jammed without Description column of real rows
+    if (/date\s*,\s*description/.test(head) || /date,description/i.test(head)) return true;
+    if (/date\s*,\s*amount/.test(head) && !/description/.test(head)) return false;
+  }
+  return hasDate && hasAmount && hasDesc && /date\s*,/i.test(String(text || '').slice(0, 200));
+}
+
+const USAA_CATS = [
+  'Electronics & Software',
+  'Credit Card Payment',
+  'Category Pending',
+  'Fast Food',
+  'Shopping',
+  'Hobbies',
+  'Groceries',
+  'Gas & Transportation',
+  'Utilities',
+  'Insurance',
+  'Medical',
+  'Entertainment',
+  'Travel',
+  'Transfer',
+  'Income',
+];
+
+function cleanFunkyLine(line) {
+  let s = String(line || '').replace(/^\uFEFF/, '').trim();
+  s = s.replace(/,+\s*$/, '');
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+  // Fix common mojibake ellipsis from bad encodings
+  s = s.replace(/\uFFFD/g, '').replace(/…/g, '').trim();
+  return s;
+}
+
+function isBalanceOnlyLine(s) {
+  return /^\$[\d,]+\.\d{2}$/.test(s);
+}
+
+function isJunkDesc(desc) {
+  if (!desc) return true;
+  const d = String(desc)
+    .replace(/(?i)description|category|pending/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (d.length < 2) return true;
+  // Card mask only
+  if (/^\*+\d{3,}$/.test(d)) return true;
+  if (/^NC$/i.test(d)) return true;
+  return false;
+}
+
+function extractAmountFromLine(s) {
+  const m = String(s).match(
+    /(-\s*\$?\s*[\d,]+\.\d{2}|\+\s*\$?\s*[\d,]+\.\d{2}|\$\s*[\d,]+\.\d{2}|-?\s*[\d,]+\.\d{2})\s*$/,
+  );
+  if (!m) return { amount: null, rest: s };
+  const raw = m[1];
+  const rest = s.slice(0, m.index).trim();
+  const cleaned = raw.replace(/[$,\s]/g, '');
+  const amount = parseFloat(cleaned);
+  if (isNaN(amount) || amount === 0) return { amount: null, rest: s };
+  return { amount, rest };
+}
+
+function stripCategoryAndStatus(rest) {
+  let r = rest;
+  let category = '';
+  let status = '';
+  const sorted = [...USAA_CATS].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    if (r.endsWith(c)) {
+      category = c;
+      r = r.slice(0, -c.length).trim();
+      break;
+    }
+  }
+  if (/category\s*pending|pending/i.test(r) && !category) {
+    category = 'Category Pending';
+    r = r
+      .replace(/pending\s*category\s*pending/gi, ' ')
+      .replace(/category\s*pending/gi, ' ')
+      .replace(/\bpending\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    status = 'Pending';
+  }
+  if (category === 'Category Pending') status = 'Pending';
+  r = r.replace(/^description\s*/i, '').trim();
+  return { text: r, category, status };
+}
+
+function extractLastDate(s) {
+  let last = null;
+  let after = s;
+  MONTH_DATE_RE.lastIndex = 0;
+  let m;
+  // Reset for global
+  const re = new RegExp(MONTH_DATE_RE.source, 'gi');
+  while ((m = re.exec(s)) !== null) {
+    last = parseImportDate(m[0]);
+    after = (s.slice(0, m.index) + s.slice(m.index + m[0].length)).trim();
+    // continue to find last date in jammed multi-date lines
+  }
+  // rebuild after by removing all dates
+  after = s.replace(new RegExp(MONTH_DATE_RE.source, 'gi'), ' ').replace(/\s+/g, ' ').trim();
+  return { date: last, after };
+}
+
+function dateFromMerchantCode(desc, fallbackYear) {
+  // 071426 → Jul 14 2026; 071326 → Jul 13
+  const m = String(desc || '').match(/\b(0[1-9]|1[0-2])([0-3]\d)(\d{2})?\b/);
+  if (!m) return null;
+  return parseImportDate(m[0].length === 4 ? m[0] : m[0]);
+}
+
+/**
+ * Parse mangled USAA app paste / "Blank.csv" style exports where columns are
+ * scrambled across lines (Date Amount header, trailing commas, balances mixed in).
+ * Returns row objects compatible with normalizeImportRow / standard USAA CSV shape.
+ */
+export function parseUsaaAppPasteCsv(text) {
+  const rawLines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/);
+  const lines = rawLines.map(cleanFunkyLine).filter(Boolean);
+
+  const rows = [];
+  let lastDate = null;
+  let lastDesc = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i];
+    const low = s.toLowerCase();
+    if (isBalanceOnlyLine(s) || low === 'current balance' || low.startsWith('date amount')) {
+      continue;
+    }
+
+    const { amount, rest } = extractAmountFromLine(s);
+    if (amount != null) {
+      if (isBalanceOnlyLine(s)) continue;
+
+      let { text: rest2, category, status } = stripCategoryAndStatus(rest);
+      const dated = extractLastDate(rest2);
+      if (dated.date) {
+        lastDate = dated.date;
+        rest2 = dated.after;
+      }
+
+      let desc = rest2;
+      if (isJunkDesc(desc)) desc = '';
+
+      // Prefer prior merchant label (e.g. CITI CARD ONLINE PAYMENT before amount)
+      if (!desc && lastDesc && !isJunkDesc(lastDesc)) {
+        desc = lastDesc;
+      }
+
+      // Look ahead for merchant line if still empty
+      if (!desc) {
+        for (let j = i + 1; j < lines.length; j++) {
+          const ns = lines[j];
+          if (isBalanceOnlyLine(ns) || ns.toLowerCase() === 'current balance') continue;
+          const na = extractAmountFromLine(ns);
+          if (na.amount != null) break;
+          const nd = extractLastDate(ns);
+          if (nd.date) {
+            lastDate = nd.date;
+            if (nd.after && !isJunkDesc(nd.after)) {
+              desc = nd.after;
+              lastDesc = desc;
+              i = j;
+            }
+            break;
+          }
+          if (ns && !isJunkDesc(ns)) {
+            desc = ns;
+            lastDesc = desc;
+            i = j;
+            break;
+          }
+        }
+      }
+
+      if (!desc) desc = lastDesc || 'Unknown';
+      if (!isJunkDesc(desc)) lastDesc = desc;
+
+      let date = lastDate || '';
+      const codeDate = dateFromMerchantCode(desc);
+      // Merchant MMDD codes often more accurate than scrambled multi-date headers
+      if (codeDate) {
+        date = codeDate;
+        lastDate = codeDate;
+      }
+      if (!date) date = todayISO();
+
+      // Skip pure running-balance positives with no real merchant
+      if (amount > 0 && isJunkDesc(desc) && /^\$/.test(s)) continue;
+
+      rows.push({
+        Date: date,
+        Description: desc.trim(),
+        'Original Description': desc.trim(),
+        Category: category || '',
+        Amount: amount.toFixed(2),
+        Status: status || (/pending/i.test(s) ? 'Pending' : 'Posted'),
+      });
+      continue;
+    }
+
+    // No amount: carry date / description forward
+    const nd = extractLastDate(s);
+    if (nd.date) {
+      lastDate = nd.date;
+      if (nd.after && !isJunkDesc(nd.after) && nd.after.toLowerCase() !== 'current balance') {
+        lastDesc = nd.after;
+      }
+    } else if (s && s.toLowerCase() !== 'current balance' && !isBalanceOnlyLine(s) && !isJunkDesc(s)) {
+      lastDesc = s;
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Parse any bank CSV: standard USAA/Chase export or mangled app paste.
+ * Returns array of row objects for importTransactions / normalizeImportRow.
+ */
+export function parseBankCsvText(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return [];
+
+  // Prefer standard when headers look complete
+  if (looksLikeStandardBankCsv(raw)) {
+    const rows = parseCSV(raw);
+    // Guard: if almost no usable amounts, fall through to funky parser
+    const usable = rows.filter(r => {
+      const vals = Object.values(r || {}).join(' ');
+      return /[\d,]+\.\d{2}/.test(vals);
+    });
+    if (usable.length >= 1) return rows;
+  }
+
+  // "Date Amount" paste / Blank.csv style
+  const funky = parseUsaaAppPasteCsv(raw);
+  if (funky.length) return funky;
+
+  // Last resort: standard parseCSV anyway
+  return parseCSV(raw);
 }
 
 function fieldMap(row) {

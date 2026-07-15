@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, todayISO, parseCSV, emptyState } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
@@ -7,6 +7,7 @@ import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-matc
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
 import { parseBankPdfFile, rowsToImportObjects } from '../pdf-import.js';
 import { guessMerchantPattern } from '../category-rules.js';
+import { parseBankCsvText } from '../csv-import.js';
 
 let openMode = null;
 
@@ -907,7 +908,7 @@ export function openTransactionForm({
 
 function formatImportToast(stats) {
   if (!stats.parsed) {
-    return 'No transactions found in that file. Make sure it is a bank CSV export with a Date column and data rows.';
+    return 'No transactions found in that file. Use a bank CSV export, a USAA app paste CSV, or a text-based PDF.';
   }
   if (stats.count > 0) {
     const parts = [`Imported ${stats.count} transaction${stats.count === 1 ? '' : 's'}`];
@@ -953,10 +954,11 @@ const BANK_IMPORT_TIPS = {
   usaa: {
     label: 'USAA',
     tips: [
-      'CSV: Online banking → Account → Export (CSV). Signed Amount column (negative = purchase).',
-      'PDF (phone-friendly): download transaction history PDF from the USAA app/site when CSV is unavailable.',
-      'PDF is parsed only on your device — account/routing numbers are stripped and never uploaded.',
-      'After import, assign envelopes; use “Remember for future imports” for recurring merchants.',
+      'Best: USAA.com → Account → Export / Download transactions as CSV (Date, Description, Amount, Status).',
+      'App paste OK: if the phone export looks scrambled (Date Amount header, lots of commas), import it anyway — we reassemble rows from amounts + merchants.',
+      'PDF: transaction-history PDF with selectable text also works (parsed only on your device).',
+      'Pasted files may miss a few refunds if the copy was cut off — check the toast count vs your bank app.',
+      'After import, assign envelopes; use “Always use this envelope” for recurring merchants.',
     ],
   },
   chase: {
@@ -1148,7 +1150,12 @@ function openImportDialog() {
             const reader = new FileReader();
             reader.onload = e => {
               try {
-                const rows = parseCSV(e.target.result);
+                // Standard USAA/Chase CSV or mangled app-paste "Blank.csv" style
+                const rows = parseBankCsvText(e.target.result);
+                if (!rows.length) {
+                  showToast('No transactions found in that CSV — try the bank export or a full paste', 'info');
+                  return;
+                }
                 const stats = store.importTransactions(rows, {
                   includePending: includePendingIn.checked,
                 });
