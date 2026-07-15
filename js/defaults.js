@@ -65,6 +65,8 @@ export function createDefaultState() {
     goalAmount: 0,
     /** Free-text note (e.g. gift money, kid-specific context). */
     note: '',
+    /** Show Gift $ on this envelope (off by default — for kids, not bills). */
+    allowGifts: false,
   }));
 
   SINKING_FUND_DEFAULTS.forEach(c => {
@@ -78,6 +80,7 @@ export function createDefaultState() {
       carryOver: 0,
       goalAmount: 0,
       note: '',
+      allowGifts: false,
     });
   });
 

@@ -126,11 +126,13 @@ function ensureDefaultCategories(state) {
     carryOver: 0,
     goalAmount: 0,
     note: '',
+    allowGifts: false,
     ...c,
     id: c.id || generateId(),
     name: c.name.trim(),
     goalAmount: Number(c.goalAmount) > 0 ? Number(c.goalAmount) : 0,
     note: typeof c.note === 'string' ? c.note : (c.note ? String(c.note) : ''),
+    allowGifts: c.allowGifts === true,
   }));
 
   const sinkingNames = new Set(SINKING_FUND_DEFAULTS.map(c => c.name.toLowerCase()));
@@ -151,6 +153,7 @@ function ensureDefaultCategories(state) {
       carryOver: 0,
       goalAmount: 0,
       note: '',
+      allowGifts: false,
     });
     existing.add(def.name.toLowerCase());
   });

@@ -161,7 +161,6 @@ export function renderDashboard(container) {
 
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
-    quickAction('🎁', 'Log Gift', () => window.appNavigate('budget')),
     quickAction('📥', 'Review Inbox', () => openReviewInbox()),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),

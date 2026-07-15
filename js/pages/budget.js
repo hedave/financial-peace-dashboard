@@ -326,27 +326,31 @@ function envelopeCard(cat) {
     ),
     goalBlock(cat),
     linkedItems(cat),
-    cat.note && String(cat.note).trim()
-      ? el('div', { className: 'envelope-note' },
-        el('span', { className: 'envelope-note-label' }, 'Note'),
-        el('p', { className: 'envelope-note-text' }, String(cat.note).trim()),
-      )
-      : null,
     el('button', {
       className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.75rem',
       onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
     }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
     el('div', { className: 'btn-group', style: 'width:100%;margin-top:0.5rem;gap:0.35rem' },
       el('button', {
-        className: 'btn btn-sm btn-primary', style: 'flex:1',
+        className: 'btn btn-sm btn-primary',
+        style: cat.allowGifts ? 'flex:1' : 'width:100%',
         onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
       }, 'Allocate'),
-      el('button', {
-        className: 'btn btn-sm btn-accent', style: 'flex:1',
-        title: 'Log gift money into this envelope (e.g. birthday from Grandma)',
-        onClick: (e) => { e.stopPropagation(); openGiftToEnvelope(cat); },
-      }, 'Gift $'),
+      cat.allowGifts
+        ? el('button', {
+          className: 'btn btn-sm btn-accent', style: 'flex:1',
+          title: 'Log gift money into this envelope (e.g. birthday from Grandma)',
+          onClick: (e) => { e.stopPropagation(); openGiftToEnvelope(cat); },
+        }, 'Gift $')
+        : null,
     ),
+    // Note under actions so Allocate / Gift stay primary
+    cat.note && String(cat.note).trim()
+      ? el('div', { className: 'envelope-note' },
+        el('span', { className: 'envelope-note-label' }, 'Note'),
+        el('p', { className: 'envelope-note-text' }, String(cat.note).trim()),
+      )
+      : null,
   );
 
   return card;
@@ -540,14 +544,16 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
           window.appRefresh();
         },
       }, 'Close'),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-accent',
-        onClick: () => {
-          modal.close();
-          openGiftToEnvelope(cat);
-        },
-      }, 'Gift $'),
+      (store.getState().categories.find(c => c.id === cat.id) || cat).allowGifts
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-accent',
+          onClick: () => {
+            modal.close();
+            openGiftToEnvelope(cat);
+          },
+        }, 'Gift $')
+        : null,
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -680,6 +686,24 @@ function sinkingFundToggle(checked) {
   return { row, input };
 }
 
+function allowGiftsToggle(checked) {
+  const input = el('input', { type: 'checkbox' });
+  if (checked) input.checked = true;
+  const row = el('div', { className: 'form-option' },
+    el('div', { className: 'form-option-text' },
+      el('span', { className: 'form-option-label' }, 'Show Gift $ button'),
+      el('span', { className: 'form-option-hint' },
+        'For kid envelopes / birthday money — leave off for bills and regular categories',
+      ),
+    ),
+    el('label', { className: 'toggle-switch' },
+      input,
+      el('span', { className: 'toggle-slider' }),
+    ),
+  );
+  return { row, input };
+}
+
 function goalField(isSinking, value = 0) {
   const input = el('input', {
     type: 'number',
@@ -795,6 +819,7 @@ function addCategory(isSinking) {
   const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
   const iconIn = el('input', { type: 'text', placeholder: 'Icon (emoji)', value: isSinking ? '🎯' : '📁' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(isSinking);
+  const { row: giftsRow, input: giftsIn } = allowGiftsToggle(false);
   const { row: goalRow, input: goalIn } = goalField(isSinking, 0);
   const { row: noteRow, input: noteIn } = noteField('');
 
@@ -820,6 +845,7 @@ function addCategory(isSinking) {
       goalRow,
       noteRow,
       sinkingRow,
+      giftsRow,
     ),
     footer: el('button', {
       className: 'btn btn-primary',
@@ -836,6 +862,7 @@ function addCategory(isSinking) {
             carryOver: 0,
             goalAmount: Number(goalIn.value) > 0 ? Number(goalIn.value) : 0,
             note: noteIn.value.trim(),
+            allowGifts: giftsIn.checked,
           });
         });
         this.closest('.modal-backdrop').remove();
@@ -851,6 +878,7 @@ function editCategory(cat) {
   const budgetIn = el('input', { type: 'number', step: '0.01', value: cat.monthlyBudget });
   const iconIn = el('input', { type: 'text', value: cat.icon || '' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(cat.isSinkingFund);
+  const { row: giftsRow, input: giftsIn } = allowGiftsToggle(!!cat.allowGifts);
   const { row: goalRow, input: goalIn } = goalField(cat.isSinkingFund, Number(cat.goalAmount) || 0);
   const { row: noteRow, input: noteIn } = noteField(cat.note || '');
 
@@ -876,6 +904,7 @@ function editCategory(cat) {
       goalRow,
       noteRow,
       sinkingRow,
+      giftsRow,
     ),
     footer: el('button', {
       className: 'btn btn-primary',
@@ -893,6 +922,7 @@ function editCategory(cat) {
               c.isSinkingFund = sinkingIn.checked;
               c.goalAmount = nextGoal;
               c.note = noteIn.value.trim();
+              c.allowGifts = giftsIn.checked;
             }
           });
           backdrop?.remove();
