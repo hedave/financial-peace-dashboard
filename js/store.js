@@ -1597,6 +1597,14 @@ class Store {
       .filter(c => !c.parentId && String(c.note || '').trim());
   }
 
+  setEnvelopeNote(categoryId, note) {
+    const text = typeof note === 'string' ? note.trim() : '';
+    this.update(s => {
+      const c = s.categories.find(x => x.id === categoryId);
+      if (c) c.note = text;
+    });
+  }
+
   /**
    * Log gift/earmarked money: income (checking if cleared) + add to envelope carry-over.
    * Net To Allocate unchanged when cleared (income + virtual fund cancel out).

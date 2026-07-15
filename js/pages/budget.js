@@ -366,19 +366,32 @@ function rangeLabel(range) {
 
 export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}) {
   let range = initialRange;
+  let editingNote = false;
   const bodyHost = el('div', {});
   let modal;
 
+  function saveNote(text) {
+    store.setEnvelopeNote(cat.id, text);
+    editingNote = false;
+    showToast(String(text || '').trim() ? 'Envelope note saved' : 'Envelope note cleared', 'success');
+    paint();
+    // Refresh cards behind the modal without losing this view
+    // (store subscribe re-renders pages; re-open paint is enough for note)
+  }
+
   function paint() {
     const txs = store.getCategoryTransactions(cat.id, { range });
-    const total = txs.reduce((s, t) => s + (Number(t.envelopeAmount) || 0), 0);
+    // Activity total: spending only (gifts listed separately as income rows)
+    const spendTotal = txs
+      .filter(t => t.type === 'expense' || t.type === 'debt_payment')
+      .reduce((s, t) => s + (Number(t.envelopeAmount) || 0), 0);
     const list = el('div', { className: 'envelope-activity-list' });
 
     if (!txs.length) {
       list.appendChild(emptyState(
         '📝',
-        'No spending yet',
-        `Nothing charged to ${cat.name} in this range. Log an expense or import a CSV.`,
+        'No activity yet',
+        `Nothing charged to ${cat.name} in this range. Log an expense, gift, or import a CSV.`,
       ));
     } else {
       txs.forEach(t => {
@@ -416,8 +429,8 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
         ));
       });
       list.appendChild(el('div', { className: 'envelope-activity-total' },
-        el('span', {}, 'Total'),
-        el('strong', {}, formatCurrency(total)),
+        el('span', {}, 'Spent'),
+        el('strong', {}, formatCurrency(spendTotal)),
       ));
     }
 
@@ -429,20 +442,86 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       }, opt.label)),
     );
 
-    // Live note from store (may have been edited)
     const live = store.getState().categories.find(c => c.id === cat.id) || cat;
     const noteText = String(live.note || '').trim();
+    const noteBox = el('div', { className: 'envelope-note envelope-note-in-modal envelope-note-editable' });
+
+    if (editingNote) {
+      const ta = el('textarea', {
+        className: 'envelope-note-editor',
+        rows: 3,
+        placeholder: 'e.g. $20 from Grandma for Emma’s birthday — don’t mix with allowance',
+      });
+      ta.value = noteText;
+      noteBox.appendChild(el('span', { className: 'envelope-note-label' }, 'Envelope note'));
+      noteBox.appendChild(ta);
+      noteBox.appendChild(el('div', { className: 'btn-group', style: 'margin-top:0.5rem;flex-wrap:wrap;gap:0.35rem' },
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          onClick: () => saveNote(ta.value),
+        }, 'Save note'),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => { editingNote = false; paint(); },
+        }, 'Cancel'),
+        noteText
+          ? el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-danger',
+            onClick: () => {
+              confirmDialog(
+                'Clear envelope note?',
+                'This removes the general note on this envelope. Transaction memos are unchanged. You can add a new note anytime.',
+                () => saveNote(''),
+              );
+            },
+          }, 'Clear note')
+          : null,
+      ));
+      setTimeout(() => ta.focus(), 30);
+    } else if (noteText) {
+      noteBox.appendChild(el('div', { className: 'envelope-note-head' },
+        el('span', { className: 'envelope-note-label' }, 'Envelope note'),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => { editingNote = true; paint(); },
+        }, 'Edit'),
+      ));
+      noteBox.appendChild(el('p', { className: 'envelope-note-text' }, noteText));
+      noteBox.appendChild(el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary',
+        style: 'margin-top:0.45rem',
+        onClick: () => {
+          confirmDialog(
+            'Clear envelope note?',
+            'Removes this note only — gift money and transactions stay as they are.',
+            () => saveNote(''),
+          );
+        },
+      }, 'Clear note'));
+    } else {
+      noteBox.appendChild(el('span', { className: 'envelope-note-label' }, 'Envelope note'));
+      noteBox.appendChild(el('p', {
+        className: 'envelope-note-text',
+        style: 'color:var(--text-muted);font-style:italic',
+      }, 'No note yet — for gift money context, kid reminders, etc.'));
+      noteBox.appendChild(el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-primary',
+        style: 'margin-top:0.45rem',
+        onClick: () => { editingNote = true; paint(); },
+      }, '+ Add note'));
+    }
 
     bodyHost.innerHTML = '';
-    if (noteText) {
-      bodyHost.appendChild(el('div', { className: 'envelope-note envelope-note-in-modal' },
-        el('span', { className: 'envelope-note-label' }, 'Note'),
-        el('p', { className: 'envelope-note-text' }, noteText),
-      ));
-    }
+    bodyHost.appendChild(noteBox);
     bodyHost.appendChild(chips);
     bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
-      `${rangeLabel(range)} · ${formatCurrency(total)} · ${txs.length} transaction${txs.length === 1 ? '' : 's'}`,
+      `${rangeLabel(range)} · spent ${formatCurrency(spendTotal)} · ${txs.length} item${txs.length === 1 ? '' : 's'}`,
     ));
     bodyHost.appendChild(list);
   }
@@ -456,7 +535,10 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       el('button', {
         type: 'button',
         className: 'btn btn-secondary',
-        onClick: () => modal.close(),
+        onClick: () => {
+          modal.close();
+          window.appRefresh();
+        },
       }, 'Close'),
       el('button', {
         type: 'button',
@@ -476,7 +558,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       }, '+ Log expense'),
       el('button', {
         type: 'button',
-        className: 'btn btn-primary',
+        className: 'btn btn-secondary',
         onClick: () => {
           modal.close();
           window.appNavigate('transactions', { categoryId: cat.id });
@@ -484,6 +566,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       }, 'Open in Transactions'),
     ],
   });
+  modal.modal.classList.add('modal-wide', 'modal-scrollable');
   modal.modal.classList.add('modal-wide');
 }
 
