@@ -173,41 +173,48 @@ export function openDuplicateReview() {
       return;
     }
     groups.forEach(items => {
-      list.appendChild(el('div', { className: 'duplicate-review-group' },
-        el('div', { className: 'duplicate-review-group-header' },
-          el('div', {},
-            el('strong', {}, duplicateGroupDateLabel(items)),
-            ' · ',
-            formatCurrency(items[0].amount),
-            el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
-          ),
-          el('button', {
-            type: 'button',
-            className: 'btn btn-sm btn-primary',
-            title: 'Confirm all of these are real purchases (not double-posts)',
-            onClick: () => {
-              store.markTransactionsUnique(items.map(t => t.id));
-              showToast(
-                items.length === 2
-                  ? 'Marked both as unique — warning cleared'
-                  : `Marked ${items.length} as unique — warning cleared`,
-                'success',
-              );
-              paint();
-              window.appRefresh();
-              if (!store.getDuplicateTransactionGroups().length) modal?.close();
-            },
-          }, items.length === 2 ? 'Both unique' : 'All unique'),
+      const group = el('div', { className: 'duplicate-review-group' });
+      group.appendChild(el('div', { className: 'duplicate-review-group-header' },
+        el('div', { className: 'duplicate-review-group-title' },
+          el('strong', {}, duplicateGroupDateLabel(items)),
+          ' · ',
+          formatCurrency(items[0].amount),
+          el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
         ),
-        ...items.map(t => el('div', { className: 'review-item duplicate-review-item' },
-          el('div', {},
-            el('div', { className: 'review-item-main' }, t.description || '—'),
-            el('div', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.15rem' },
-              `${formatDate(t.date)} · ${TX_TYPE_LABELS[t.type] || t.type || '—'}`,
-              store.isPending?.(t) ? ' · Pending' : '',
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          title: 'Confirm all of these are real purchases (not double-posts)',
+          onClick: () => {
+            store.markTransactionsUnique(items.map(t => t.id));
+            showToast(
+              items.length === 2
+                ? 'Marked both as unique — warning cleared'
+                : `Marked ${items.length} as unique — warning cleared`,
+              'success',
+            );
+            paint();
+            window.appRefresh();
+            if (!store.getDuplicateTransactionGroups().length) modal?.close();
+          },
+        }, items.length === 2 ? 'Both unique' : 'All unique'),
+      ));
+
+      items.forEach(t => {
+        const meta = [
+          formatDate(t.date),
+          TX_TYPE_LABELS[t.type] || t.type || '—',
+          store.isPending?.(t) ? 'Pending' : null,
+        ].filter(Boolean).join(' · ');
+
+        group.appendChild(el('div', { className: 'duplicate-review-item' },
+          el('div', { className: 'duplicate-review-item-row' },
+            el('div', { className: 'review-item-main' },
+              t.description || '—',
+              el('div', { className: 'duplicate-review-item-meta' }, meta),
             ),
+            el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
           ),
-          el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
           el('div', { className: 'btn-group' },
             el('button', {
               type: 'button',
@@ -242,8 +249,10 @@ export function openDuplicateReview() {
               }),
             }, 'Delete'),
           ),
-        )),
-      ));
+        ));
+      });
+
+      list.appendChild(group);
     });
   }
 
@@ -255,8 +264,8 @@ export function openDuplicateReview() {
 
   modal = showModal({
     title: 'Possible Duplicate Transactions',
-    body: el('div', {},
-      el('p', { className: 'tx-form-hint' },
+    body: el('div', { className: 'duplicate-review-body' },
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.85rem' },
         'Same amount and similar merchant. Delete true double-posts, or mark as unique when both are real (e.g. two kids, same purchase).',
       ),
       list,
@@ -273,7 +282,7 @@ export function openDuplicateReview() {
       }, 'Open Transactions'),
     ],
   });
-  modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-wide', 'modal-duplicate-review');
 }
 
 /**
