@@ -1,4 +1,4 @@
-const CACHE = 'finpeace-v7';
+const CACHE = 'finpeace-v8';
 
 // Minimal precache — HTML/JS/CSS always network-first so deploys win
 const PRECACHE = [

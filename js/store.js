@@ -236,6 +236,14 @@ function normalizeState(state) {
   if (state.settings.lastBackupAt != null && typeof state.settings.lastBackupAt !== 'string') {
     state.settings.lastBackupAt = null;
   }
+  if (!state.settings.advisorAliases || typeof state.settings.advisorAliases !== 'object') {
+    state.settings.advisorAliases = { dining: null, vacation: null, christmas: null };
+  } else {
+    const a = state.settings.advisorAliases;
+    if (!('dining' in a)) a.dining = null;
+    if (!('vacation' in a)) a.vacation = null;
+    if (!('christmas' in a)) a.christmas = null;
+  }
   state.incomeSources = ensureBonusIncomeSource(state.incomeSources);
   migrateLegacyIncomeSourceNames(state.incomeSources);
   (state.incomeSources || []).forEach(src => {

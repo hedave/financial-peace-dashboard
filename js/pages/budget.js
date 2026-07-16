@@ -58,7 +58,10 @@ export function renderBudget(container, arg) {
   const bonusLogged = store.getBonusIncomeLogged();
   const budgeted = store.getTotalBudgeted();
   const unallocated = store.getToAllocate();
+  const focusId = arg?.focusId || arg?.categoryId || null;
   let viewFilter = (arg && arg.filter === 'attention') ? 'attention' : 'all';
+  // Focusing a specific envelope: show all so the card is visible
+  if (focusId) viewFilter = 'all';
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
@@ -200,7 +203,15 @@ export function renderBudget(container, arg) {
   function renderGrid() {
     let parents = state.categories.filter(c => !c.parentId);
     if (viewFilter === 'attention') parents = parents.filter(needsAttention);
-    const sorted = sortCategories(parents, sortKey, sortDir);
+    let sorted = sortCategories(parents, sortKey, sortDir);
+    // Pin focused envelope to the top when deep-linking from Advisor
+    if (focusId) {
+      const idx = sorted.findIndex(c => c.id === focusId);
+      if (idx > 0) {
+        const [hit] = sorted.splice(idx, 1);
+        sorted = [hit, ...sorted];
+      }
+    }
     gridEl.innerHTML = '';
     if (!sorted.length) {
       gridEl.appendChild(emptyState(
@@ -212,7 +223,7 @@ export function renderBudget(container, arg) {
       ));
       return;
     }
-    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat)));
+    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId)));
   }
 
   sortSelect.addEventListener('change', e => {
@@ -221,6 +232,15 @@ export function renderBudget(container, arg) {
   });
 
   renderGrid();
+
+  if (focusId) {
+    requestAnimationFrame(() => {
+      const node = gridEl.querySelector(`[data-category-id="${focusId}"]`);
+      if (node) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  }
 }
 
 function linkedItems(cat) {
@@ -265,7 +285,7 @@ function goalBlock(cat) {
   );
 }
 
-function envelopeCard(cat) {
+function envelopeCard(cat, focusId = null) {
   const spent = store.getCategorySpent(cat.id);
   const remaining = store.getCategoryRemaining(cat.id);
   const budgeted = Number(cat.monthlyBudget) || 0;
@@ -275,6 +295,7 @@ function envelopeCard(cat) {
   const healthLabel = store.getEnvelopeHealthLabel(health);
   const txCount = store.getCategoryTransactions(cat.id).length;
   const overCap = store.isOverSoftCap(cat.id);
+  const isFocused = focusId && cat.id === focusId;
   // Same formula for every card: spent / available pool (budget + carry)
   const pool = budgeted + carry;
   let usedPct = 0;
@@ -283,8 +304,9 @@ function envelopeCard(cat) {
   if (isOver) usedPct = 100;
 
   const card = el('div', {
-    className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable`,
-    title: 'Click to see transactions for this envelope',
+    className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable${isFocused ? ' envelope-card-focus' : ''}`,
+    'data-category-id': cat.id,
+    title: isFocused ? 'Focused from Advisor' : 'Click to see transactions for this envelope',
     onClick: (e) => {
       if (e.target.closest('button, a, input, select, textarea, label, summary')) return;
       openEnvelopeActivity(cat);

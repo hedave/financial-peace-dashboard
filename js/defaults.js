@@ -96,6 +96,12 @@ export function createDefaultState() {
       largeText: false,
       reduceMotion: false,
       lastBackupAt: null,
+      /** Advisor named envelopes — category ids (null = auto-match by name). */
+      advisorAliases: {
+        dining: null,
+        vacation: null,
+        christmas: null,
+      },
     },
     incomeSources: [
       {

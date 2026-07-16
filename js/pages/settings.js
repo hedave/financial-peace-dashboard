@@ -306,6 +306,64 @@ export async function renderSettings(container) {
   rulesSearch.addEventListener('input', () => paintRules(rulesSearch.value));
   paintRules();
 
+  // Advisor envelope aliases
+  const cats = (state.categories || []).filter(c => !c.parentId)
+    .slice()
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const aliases = state.settings.advisorAliases || { dining: null, vacation: null, christmas: null };
+
+  function aliasSelect(key, label, hint) {
+    const sel = el('select', {
+      id: `alias-${key}`,
+      onChange: (e) => {
+        const val = e.target.value || null;
+        store.update(s => {
+          if (!s.settings.advisorAliases) {
+            s.settings.advisorAliases = { dining: null, vacation: null, christmas: null };
+          }
+          s.settings.advisorAliases[key] = val || null;
+        });
+        showToast(`${label} alias saved`);
+      },
+    },
+      el('option', { value: '' }, 'Auto-match by name'),
+      ...cats.map(c => el('option', {
+        value: c.id,
+        selected: aliases[key] === c.id ? true : undefined,
+      }, `${c.icon || '✉️'} ${c.name}${c.isSinkingFund ? ' (sinking)' : ''}`)),
+    );
+    if (aliases[key]) sel.value = aliases[key];
+    else sel.value = '';
+    return el('div', { className: 'form-group' },
+      el('label', {}, label),
+      sel,
+      el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' }, hint),
+    );
+  }
+
+  container.appendChild(el('div', { className: 'card section' },
+    el('div', { className: 'section-title' }, 'Advisor envelopes'),
+    el('p', {
+      style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6',
+    },
+      'Pin which envelopes Advisor uses for dining, vacation, and Christmas. Auto-match works until you rename them — then set a pin here.',
+    ),
+    aliasSelect('dining', 'Dining / eating out', 'Used for “cut dining 20%” and affordability cushions.'),
+    aliasSelect('vacation', 'Vacation fund', 'Used for affordability and sinking-fund priority.'),
+    aliasSelect('christmas', 'Christmas fund', 'Used for holiday vs vacation priority and surplus split.'),
+    el('button', {
+      type: 'button',
+      className: 'btn btn-secondary btn-sm',
+      onClick: () => {
+        store.update(s => {
+          s.settings.advisorAliases = { dining: null, vacation: null, christmas: null };
+        });
+        showToast('Aliases reset to auto-match');
+        window.appRefresh();
+      },
+    }, 'Reset to auto-match'),
+  ));
+
   container.appendChild(el('div', { className: 'card section' },
     el('div', { className: 'section-title' }, `Category Rules (${rules.length})`),
     el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },

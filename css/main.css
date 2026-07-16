@@ -1482,7 +1482,9 @@ html[data-reduce-motion="true"] *::after {
 .sticky-note-body {
   border: none;
   background: transparent;
-  resize: vertical;
+  /* Parent .sticky-note uses overflow:hidden + slight rotate — browser
+     resize handles show but don't work. Scroll instead of a fake grip. */
+  resize: none;
   min-height: 7rem;
   flex: 1;
   padding: 0.25rem 0.75rem 0.85rem;
@@ -1491,6 +1493,7 @@ html[data-reduce-motion="true"] *::after {
   color: inherit;
   font-family: inherit;
   width: 100%;
+  overflow-y: auto;
 }
 
 .sticky-yellow { background: #fef6a8; color: #3d3a1a; }
@@ -3220,6 +3223,177 @@ html[data-reduce-motion="true"] .sticky-note {
 
   .toast {
     max-width: none;
+  }
+}
+
+/* ---------- Advisor (engine-only coach) ---------- */
+.advisor-default-hint {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.envelope-card-focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent), var(--shadow-lg);
+  animation: advisor-focus-pulse 1.2s ease-out 1;
+}
+
+@keyframes advisor-focus-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent); }
+  100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent), var(--shadow-lg); }
+}
+
+.advisor-metrics .card-value {
+  font-size: 1.35rem;
+}
+
+.advisor-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.advisor-priority-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.advisor-priority-row:last-child {
+  border-bottom: none;
+}
+
+.advisor-priority-num {
+  flex: 0 0 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.1rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 15%, var(--bg));
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.advisor-priority-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.advisor-priority-row .btn {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.advisor-chip-bar {
+  margin-bottom: 0;
+}
+
+.advisor-afford-bar {
+  margin-top: 0.75rem;
+}
+
+.advisor-afford-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.advisor-afford-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.advisor-afford-prefix {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+}
+
+.advisor-afford-input {
+  width: 8rem;
+  max-width: 40vw;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.advisor-answer-header h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+}
+
+.advisor-answer-metrics {
+  margin-bottom: 1rem;
+}
+
+.advisor-mini-metric .card-value {
+  font-size: 1.25rem;
+}
+
+.advisor-answer-p {
+  margin-bottom: 0.65rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.advisor-bullet-list {
+  margin: 0.5rem 0 1rem 1.15rem;
+  padding: 0;
+}
+
+.advisor-bullet-list li {
+  margin-bottom: 0.35rem;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.advisor-answer-actions {
+  margin-top: 0.75rem;
+}
+
+.advisor-footnote {
+  text-align: center;
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .advisor-metrics.grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .advisor-priority-row {
+    flex-wrap: wrap;
+  }
+
+  .advisor-priority-row .btn {
+    margin-left: auto;
   }
 }
 

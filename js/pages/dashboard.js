@@ -164,6 +164,7 @@ export function renderDashboard(container) {
     quickAction('📥', 'Review Inbox', () => openReviewInbox()),
     quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
     quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),
+    quickAction('🧭', 'Advisor', () => window.appNavigate('advisor')),
   ));
 
   container.appendChild(weekAtAGlance(upcoming, paychecks));
@@ -674,7 +675,8 @@ function openReconciliationDialog(recon) {
   });
 }
 
-function allocateSurplus() {
+/** Shared with Advisor — open the snowball surplus allocation modal. */
+export function allocateSurplus() {
   const surplus = store.getSurplusForSnowball();
   const target = store.getSnowballTarget();
   if (!target) {

@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { id: 'transactions', label: 'Transactions', icon: '📝' },
   { id: 'notes', label: 'Notes', icon: '🗒️' },
   { id: 'reports', label: 'Reports & Insights', icon: '📊' },
+  { id: 'advisor', label: 'Advisor', icon: '🧭' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 

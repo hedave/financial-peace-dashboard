@@ -12,6 +12,7 @@ import { renderTransactions } from './pages/transactions.js';
 import { renderReports } from './pages/reports.js';
 import { renderSettings } from './pages/settings.js';
 import { renderNotes } from './pages/notes.js';
+import { renderAdvisor, prepareAdvisorVisit } from './pages/advisor.js';
 import { isCloudConfigured } from './cloud-sync.js';
 import { showCloudAuthScreen } from './components/cloud-auth.js';
 
@@ -24,6 +25,7 @@ const PAGES = {
   transactions: renderTransactions,
   notes: renderNotes,
   reports: renderReports,
+  advisor: renderAdvisor,
   settings: renderSettings,
 };
 
@@ -60,6 +62,9 @@ function bootstrap() {
 }
 
 function navigate(page, arg) {
+  if (page === 'advisor' && currentPage !== 'advisor') {
+    prepareAdvisorVisit();
+  }
   currentPage = page;
   pageArg = arg || null;
   updateActiveNav(page);
@@ -129,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260715a';
+const APP_BUILD = '20260715i';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match
