@@ -570,15 +570,20 @@ function reconciliationCard(recon) {
 
 function renderReconciliationMatches(candidates, { compact = false, limit = 5 } = {}) {
   const shown = candidates.slice(0, limit);
+  const anyExact = shown.some(c => c.exact !== false && !c.nearMiss);
   return el('div', { className: `reconcile-matches${compact ? ' reconcile-matches-compact' : ''}` },
-    el('div', { className: 'reconcile-matches-title' }, 'Possible explanations'),
+    el('div', { className: 'reconcile-matches-title' },
+      anyExact ? 'Possible explanations' : 'Closest transactions (no exact gap match)',
+    ),
     el('p', { className: 'reconcile-matches-note' },
-      'Recent transactions that add up to the gap — often a duplicate import or a missing entry.'
+      anyExact
+        ? 'Logged transactions whose checking impact matches the gap — often a double-post, wrong amount, or bank not posted yet.'
+        : 'Nothing in your log nets exactly to this gap. Showing nearest amounts — or the gap may be a bank fee / missing deposit not in the app yet.',
     ),
     ...shown.map((candidate, idx) => renderReconciliationCandidate(candidate, idx)),
     candidates.length > shown.length
       ? el('div', { className: 'reconcile-matches-more' },
-        `+ ${candidates.length - shown.length} more combination${candidates.length - shown.length === 1 ? '' : 's'}`
+        `+ ${candidates.length - shown.length} more`
       )
       : null,
   );
@@ -586,10 +591,15 @@ function renderReconciliationMatches(candidates, { compact = false, limit = 5 } 
 
 function renderReconciliationCandidate(candidate, idx) {
   const lines = formatCandidateSummary(candidate);
-  return el('div', { className: 'reconcile-candidate' },
+  const gapLabel = candidate.nearMiss
+    ? `${formatCurrency(candidate.gapMatch)} (${formatCurrency(candidate.amtDist || 0)} off)`
+    : formatCurrency(candidate.gapMatch ?? candidate.totalAmount);
+  return el('div', { className: `reconcile-candidate${candidate.nearMiss ? ' reconcile-candidate-near' : ''}` },
     el('div', { className: 'reconcile-candidate-head' },
-      el('span', { className: 'reconcile-candidate-label' }, `Match ${idx + 1}`),
-      el('span', { className: 'reconcile-candidate-total' }, formatCurrency(candidate.totalAmount)),
+      el('span', { className: 'reconcile-candidate-label' },
+        candidate.nearMiss ? `Near ${idx + 1}` : `Match ${idx + 1}`,
+      ),
+      el('span', { className: 'reconcile-candidate-total', title: 'Amount vs gap' }, gapLabel),
     ),
     el('p', { className: 'reconcile-candidate-hint' }, candidate.hint),
     el('ul', { className: 'reconcile-candidate-list' },
@@ -630,9 +640,14 @@ function openReconciliationDialog(recon) {
     const candidates = store.findReconciliationCandidates(gap, dateIn.value || todayISO());
     matchesHost.replaceChildren(
       candidates.length
-        ? renderReconciliationMatches(candidates, { limit: 4 })
-        : el('p', { className: 'reconcile-matches-empty' },
-          'No recent transactions add up to this gap. Check for a missing import or manual balance typo.'
+        ? renderReconciliationMatches(candidates, { limit: 5 })
+        : el('div', { className: 'reconcile-matches-empty' },
+          el('p', {}, 'No matching transactions in the last 90 days that affect checking.'),
+          el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem' },
+            gap > 0
+              ? 'Bank is higher — often a deposit not imported yet, or a fee/refund only on the bank side.'
+              : 'Bank is lower — often a purchase not imported yet, or a duplicate income entry in the app.',
+          ),
         ),
     );
   }

@@ -1369,7 +1369,7 @@ class Store {
       this.state.transactions,
       gap,
       asOfDate,
-      (type, amount) => this.getCheckingDelta(type, amount),
+      (type, amount, status) => this.getCheckingDelta(type, amount, status),
     );
   }
 

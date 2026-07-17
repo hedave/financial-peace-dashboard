@@ -2675,6 +2675,15 @@ html[data-reduce-motion="true"] .sticky-note {
 .reconcile-candidate-total {
   font-size: 0.85rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reconcile-candidate-near {
+  opacity: 0.95;
+}
+
+.reconcile-candidate-near .reconcile-candidate-label {
+  color: var(--text-muted);
 }
 
 .reconcile-candidate-hint {
