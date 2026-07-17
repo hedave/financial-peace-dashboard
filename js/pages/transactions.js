@@ -379,7 +379,12 @@ export function renderTransactions(container, arg) {
     ));
   }
 
-  toolbar.querySelector('#tx-search').addEventListener('input', e => { filter = e.target.value; renderList(); });
+  let searchTimer = null;
+  toolbar.querySelector('#tx-search').addEventListener('input', e => {
+    filter = e.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderList(), 180);
+  });
   toolbar.querySelector('#tx-type-filter').addEventListener('change', e => { typeFilter = e.target.value; renderList(); });
   toolbar.querySelector('#tx-cat-filter').addEventListener('change', e => { categoryFilter = e.target.value; renderList(); });
   sortSelect.addEventListener('change', e => {

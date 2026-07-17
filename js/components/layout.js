@@ -21,7 +21,7 @@ const NAV_ITEMS = [
 /** Primary tabs for mobile bottom nav. "more" opens the sidebar. */
 const BOTTOM_NAV_ITEMS = [
   { id: 'dashboard', label: 'Home', icon: '🏠' },
-  { id: 'transactions', label: 'Txns', icon: '📝' },
+  { id: 'transactions', label: 'Log', icon: '📝' },
   { id: 'budget', label: 'Budget', icon: '✉️' },
   { id: 'bills', label: 'Bills', icon: '📋' },
   { id: 'more', label: 'More', icon: '☰' },
@@ -46,6 +46,7 @@ export function renderLayout(container, currentPage, onNavigate) {
         el('button', {
           className: `nav-link${currentPage === item.id ? ' active' : ''}`,
           'data-page': item.id,
+          'aria-current': currentPage === item.id ? 'page' : null,
           onClick: () => { closeMobile(); onNavigate(item.id); },
         },
           el('span', { className: 'icon' }, item.icon),

@@ -402,7 +402,8 @@ export async function renderSettings(container) {
         : 'Data is stored locally in your browser until cloud sync is configured.'
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
-      'Family size: ' + (state.settings.familySize || 7) + ' · Version 1.0'
+      'Family size: ' + (state.settings.familySize || 7)
+      + ' · Build 20260717b'
     ),
   ));
 }

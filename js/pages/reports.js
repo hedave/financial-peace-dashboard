@@ -235,6 +235,23 @@ function summaryCard(title, value, cls = '') {
   );
 }
 
+/** Destroy prior Chart.js instances so page re-renders don't leak. */
+const chartRegistry = new Map();
+
+function mountChart(canvasId, config) {
+  if (typeof Chart === 'undefined') return null;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const prev = chartRegistry.get(canvasId);
+  if (prev) {
+    try { prev.destroy(); } catch { /* ignore */ }
+    chartRegistry.delete(canvasId);
+  }
+  const chart = new Chart(canvas, config);
+  chartRegistry.set(canvasId, chart);
+  return chart;
+}
+
 function renderCharts(spentByCategory, state) {
   if (typeof Chart === 'undefined') return;
 
@@ -243,97 +260,84 @@ function renderCharts(spentByCategory, state) {
     '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316',
   ];
 
-  const spendingCtx = document.getElementById('spending-chart');
-  if (spendingCtx) {
-    new Chart(spendingCtx, {
-      type: 'doughnut',
-      data: {
-        labels: spentByCategory.map(c => c.name),
-        datasets: [{
-          data: spentByCategory.map(c => c.spent),
-          backgroundColor: colors,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
-      },
-    });
-  }
+  mountChart('spending-chart', {
+    type: 'doughnut',
+    data: {
+      labels: spentByCategory.map(c => c.name),
+      datasets: [{
+        data: spentByCategory.map(c => c.spent),
+        backgroundColor: colors,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
 
-  const budgetCtx = document.getElementById('budget-chart');
-  if (budgetCtx) {
-    const top = spentByCategory.sort((a, b) => b.budgeted - a.budgeted).slice(0, 8);
-    new Chart(budgetCtx, {
-      type: 'bar',
-      data: {
-        labels: top.map(c => c.name),
-        datasets: [
-          { label: 'Budgeted', data: top.map(c => c.budgeted), backgroundColor: '#3b82c4' },
-          { label: 'Actual', data: top.map(c => c.spent), backgroundColor: '#1e6b5c' },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true } },
-        plugins: { legend: { position: 'top' } },
-      },
-    });
-  }
+  const top = [...spentByCategory].sort((a, b) => b.budgeted - a.budgeted).slice(0, 8);
+  mountChart('budget-chart', {
+    type: 'bar',
+    data: {
+      labels: top.map(c => c.name),
+      datasets: [
+        { label: 'Budgeted', data: top.map(c => c.budgeted), backgroundColor: '#3b82c4' },
+        { label: 'Actual', data: top.map(c => c.spent), backgroundColor: '#1e6b5c' },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { beginAtZero: true } },
+      plugins: { legend: { position: 'top' } },
+    },
+  });
 
-  const debtCtx = document.getElementById('debt-chart');
-  if (debtCtx) {
-    const debts = store.getActiveDebts();
-    new Chart(debtCtx, {
-      type: 'bar',
-      data: {
-        labels: debts.map(d => d.name),
-        datasets: [{
-          label: 'Balance',
-          data: debts.map(d => Number(d.balance)),
-          backgroundColor: '#8f6f6f',
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        indexAxis: 'y',
-        plugins: { legend: { display: false } },
-      },
-    });
-  }
+  const debts = store.getActiveDebts();
+  mountChart('debt-chart', {
+    type: 'bar',
+    data: {
+      labels: debts.map(d => d.name),
+      datasets: [{
+        label: 'Balance',
+        data: debts.map(d => Number(d.balance)),
+        backgroundColor: '#8f6f6f',
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+    },
+  });
 }
 
 function renderTrendCharts(trends, topCategoryNames) {
   if (typeof Chart === 'undefined') return;
 
-  const trendCtx = document.getElementById('trend-chart');
-  if (trendCtx) {
-    new Chart(trendCtx, {
-      type: 'line',
-      data: {
-        labels: trends.map(t => getMonthLabel(t.month).split(' ')[0]),
-        datasets: [
-          { label: 'Income', data: trends.map(t => t.income), borderColor: '#3b82c4', tension: 0.2 },
-          { label: 'Spent', data: trends.map(t => t.spent), borderColor: '#1e6b5c', tension: 0.2 },
-          { label: 'Budgeted', data: trends.map(t => t.budgeted), borderColor: '#94a3b8', borderDash: [4, 4], tension: 0.2 },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: 'top' } },
-        scales: { y: { beginAtZero: true } },
-      },
-    });
-  }
+  mountChart('trend-chart', {
+    type: 'line',
+    data: {
+      labels: trends.map(t => getMonthLabel(t.month).split(' ')[0]),
+      datasets: [
+        { label: 'Income', data: trends.map(t => t.income), borderColor: '#3b82c4', tension: 0.2 },
+        { label: 'Spent', data: trends.map(t => t.spent), borderColor: '#1e6b5c', tension: 0.2 },
+        { label: 'Budgeted', data: trends.map(t => t.budgeted), borderColor: '#94a3b8', borderDash: [4, 4], tension: 0.2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { y: { beginAtZero: true } },
+    },
+  });
 
-  const catCtx = document.getElementById('category-trend-chart');
-  if (catCtx && topCategoryNames.length) {
+  if (topCategoryNames.length) {
     const colors = ['#1e6b5c', '#3b82c4', '#f59e0b', '#8b5cf6', '#ec4899'];
-    new Chart(catCtx, {
+    mountChart('category-trend-chart', {
       type: 'line',
       data: {
         labels: trends.map(t => getMonthLabel(t.month).split(' ')[0]),

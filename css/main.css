@@ -861,11 +861,13 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 
 .badge-paid { background: #e8efea; color: #4a6358; }
 .badge-due { background: #f5f0e6; color: #7a6548; }
+.badge-pending { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-overdue { background: #f0e8e8; color: #7a5555; }
 .badge-autopay { background: #e8eef5; color: #4a5f7a; }
 
 [data-theme="dark"] .badge-paid { background: #2a3530; color: #9bb5a8; }
 [data-theme="dark"] .badge-due { background: #352f24; color: #d4b88a; }
+[data-theme="dark"] .badge-pending { background: #252525; color: #a0a0a0; }
 [data-theme="dark"] .badge-overdue { background: #352a2a; color: #c4a8a8; }
 
 /* Progress bars — fixed track size everywhere */

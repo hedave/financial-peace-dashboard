@@ -162,8 +162,8 @@ export function renderDashboard(container) {
   container.appendChild(el('div', { className: 'quick-actions' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
     quickAction('📥', 'Review Inbox', () => openReviewInbox()),
-    quickAction('💸', 'Allocate Surplus', () => allocateSurplus()),
-    quickAction('✉️', 'Allocate', () => window.appNavigate('budget')),
+    quickAction('💸', 'Snowball $', () => allocateSurplus()),
+    quickAction('✉️', 'Envelopes', () => window.appNavigate('budget')),
     quickAction('🧭', 'Advisor', () => window.appNavigate('advisor')),
   ));
 
@@ -278,34 +278,11 @@ export function renderDashboard(container) {
     debtSummaryCard(),
   ));
 
+  // Paychecks detail + recon — bills for the week are already in “This week at a glance”
   container.appendChild(el('div', { className: 'grid grid-2 section' },
     paycheckCard(paychecks),
     reconciliationCard(reconciliation),
   ));
-
-  if (upcoming.length) {
-    container.appendChild(el('div', { className: 'section' },
-      el('div', { className: 'section-title' }, 'Upcoming Bills (7 days)'),
-      el('div', { className: 'dash-bills-list' },
-        ...upcoming.slice(0, 5).map(b => {
-          const tone = b.daysLeft < 0 ? 'overdue' : b.daysLeft <= 3 ? 'due' : 'ok';
-          return el('article', {
-            className: `dash-bill-row bill-card--${tone}`,
-            onClick: () => window.appNavigate('bills'),
-          },
-            el('div', { className: 'dash-bill-main' },
-              el('strong', {}, b.name),
-              el('span', { className: 'dash-bill-amount' }, formatCurrency(b.amount)),
-            ),
-            el('div', { className: 'dash-bill-meta' },
-              el('span', {}, b.dueDate || '—'),
-              billBadge(b),
-            ),
-          );
-        })
-      )
-    ));
-  }
 }
 
 function dashSyncLabel() {
@@ -482,20 +459,20 @@ function editBalance(type) {
   const current = isChecking ? state.balances.checking : state.balances.emergencyFund;
 
   const input = el('input', { type: 'number', step: '0.01', value: current });
-  showModal({
+  const modal = showModal({
     title: isChecking ? 'Update Checking Balance' : 'Update Emergency Fund',
     body: el('div', { className: 'form-group' }, el('label', {}, 'Current Balance'), input),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         store.update(s => {
           if (isChecking) s.balances.checking = Number(input.value);
           else s.balances.emergencyFund = Number(input.value);
         });
-        this.closest('.modal-backdrop').remove();
+        modal.close();
         showToast('Balance updated!');
-        window.appRefresh();
-      }
+      },
     }, 'Save'),
   });
 }
@@ -660,7 +637,7 @@ function openReconciliationDialog(recon) {
   dateIn.addEventListener('change', refreshGapPreview);
   refreshGapPreview();
 
-  showModal({
+const reconModal = showModal({
     title: 'Reconcile Checking',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem' },
@@ -679,12 +656,12 @@ function openReconciliationDialog(recon) {
       matchesHost,
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         store.setReconciliation(Number(input.value), dateIn.value || todayISO());
-        this.closest('.modal-backdrop').remove();
+        reconModal.close();
         showToast('Reconciliation saved');
-        window.appRefresh();
       },
     }, 'Save'),
   });
@@ -699,22 +676,25 @@ export function allocateSurplus() {
     return;
   }
   const input = el('input', { type: 'number', step: '0.01', value: surplus, min: 0 });
-  showModal({
-    title: 'Allocate Surplus to Debt Snowball',
+  const modal = showModal({
+    title: 'Snowball extra to debt',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem' }, `Send extra money to ${target.name}`),
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'This reduces checking and the debt balance (cash payment). Prefer a custom amount if not sending the full surplus.',
+      ),
       el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input)
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const result = store.allocateSurplusToDebt(Number(input.value));
-        this.closest('.modal-backdrop').remove();
+        modal.close();
         if (result) {
           showToast(`Allocated to ${result.name}!`, 'celebration');
-          window.appRefresh();
         }
-      }
+      },
     }, 'Allocate'),
   });
 }

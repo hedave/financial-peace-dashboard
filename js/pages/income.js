@@ -1,6 +1,6 @@
 import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel } from '../utils.js';
 import { store } from '../store.js';
-import { showToast } from '../components/modal.js';
+import { showToast, confirmDialog } from '../components/modal.js';
 import { openPayScheduleEditor } from '../components/pay-schedule-editor.js';
 import { scheduleSummary, getUpcomingChecks, getScheduledChecksForMonth } from '../pay-schedule.js';
 import { isPlannedIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
@@ -185,12 +185,21 @@ function incomeRow(src, state) {
     el('td', {},
       el('button', {
         className: 'btn btn-sm btn-danger',
-        onClick: () => {
-          store.update(s => { s.incomeSources = s.incomeSources.filter(x => x.id !== src.id); });
-          window.appRefresh();
-        },
+        onClick: () => confirmDeleteIncomeSource(src),
       }, 'Delete'),
     ),
+  );
+}
+
+function confirmDeleteIncomeSource(src) {
+  confirmDialog(
+    'Delete income source?',
+    `Remove “${src.name || 'this source'}” and its pay calendar? Past transactions stay; they just won’t link to this source.`,
+    () => {
+      store.update(s => { s.incomeSources = s.incomeSources.filter(x => x.id !== src.id); });
+      showToast('Income source removed');
+      window.appRefresh();
+    },
   );
 }
 
@@ -220,10 +229,7 @@ function incomeCard(src, state) {
       }, 'Edit dates'),
       el('button', {
         className: 'btn btn-sm btn-danger',
-        onClick: () => {
-          store.update(s => { s.incomeSources = s.incomeSources.filter(x => x.id !== src.id); });
-          window.appRefresh();
-        },
+        onClick: () => confirmDeleteIncomeSource(src),
       }, 'Delete'),
     )
   );

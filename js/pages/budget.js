@@ -615,7 +615,7 @@ function fundEnvelope(cat) {
     min: 0,
     value: toAllocate > 0 ? String(Math.round(Math.min(toAllocate, 50) * 100) / 100) : '0',
   });
-  showModal({
+  const modal = showModal({
     title: `Allocate: ${cat.name}`,
     body: el('div', {},
       el('p', {
@@ -638,17 +638,17 @@ function fundEnvelope(cat) {
       ),
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const amt = Number(input.value);
         if (!(amt > 0)) {
           showToast('Enter an amount greater than zero', 'info');
           return;
         }
-        const backdrop = this.closest('.modal-backdrop');
         const nextBudget = budgeted + amt;
         const assign = () => {
-          backdrop?.remove();
+          modal.close();
           doFundEnvelope(cat, amt);
         };
         if (goal > 0 && nextBudget > goal + 0.005) {
@@ -660,7 +660,7 @@ function fundEnvelope(cat) {
           return;
         }
         assign();
-      }
+      },
     }, 'Assign'),
   });
 }
@@ -776,7 +776,7 @@ function addCategory(isSinking) {
     }
   });
 
-  showModal({
+  const modal = showModal({
     title: 'Add Envelope',
     body: el('div', {},
       el('div', { className: 'form-group' }, el('label', {}, 'Name'), nameIn),
@@ -789,8 +789,9 @@ function addCategory(isSinking) {
       sinkingRow,
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         if (!nameIn.value.trim()) return;
         store.update(s => {
           s.categories.push({
@@ -805,10 +806,9 @@ function addCategory(isSinking) {
             note: noteIn.value.trim(),
           });
         });
-        this.closest('.modal-backdrop').remove();
+        modal.close();
         showToast('Envelope added!');
-        window.appRefresh();
-      }
+      },
     }, 'Add'),
   });
 }
@@ -833,7 +833,7 @@ function editCategory(cat) {
     }
   });
 
-  showModal({
+  const modal = showModal({
     title: 'Edit Envelope',
     body: el('div', {},
       el('div', { className: 'form-group' }, el('label', {}, 'Name'), nameIn),
@@ -846,11 +846,11 @@ function editCategory(cat) {
       sinkingRow,
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const nextBudget = Number(budgetIn.value) || 0;
         const nextGoal = parseGoalInput(goalIn);
-        const backdrop = this.closest('.modal-backdrop');
         // Always save — including soft cap — even if currently over the cap
         store.update(s => {
           const c = s.categories.find(x => x.id === cat.id);
@@ -863,7 +863,7 @@ function editCategory(cat) {
             c.note = noteIn.value.trim();
           }
         });
-        backdrop?.remove();
+        modal.close();
         if (nextGoal > 0 && nextBudget > nextGoal + 0.005) {
           showToast(
             `Saved. Note: budgeted ${formatCurrency(nextBudget)} is above the ${sinkingIn.checked ? 'goal' : 'soft cap'} of ${formatCurrency(nextGoal)}.`,
@@ -880,8 +880,7 @@ function editCategory(cat) {
         } else {
           showToast('Envelope saved');
         }
-        window.appRefresh();
-      }
+      },
     }, 'Save'),
   });
 }

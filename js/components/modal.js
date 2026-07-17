@@ -3,6 +3,31 @@ import { el } from '../utils.js';
 let toastContainer = null;
 let openModalCount = 0;
 let stackRefreshTimer = null;
+let escapeBound = false;
+
+function bindEscapeOnce() {
+  if (escapeBound) return;
+  escapeBound = true;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const backdrops = document.querySelectorAll('.modal-backdrop');
+    if (!backdrops.length) return;
+    const top = backdrops[backdrops.length - 1];
+    const closeBtn = top.querySelector('.close-btn');
+    if (closeBtn) closeBtn.click();
+    else top.remove();
+    // Re-sync stack after legacy remove paths
+    setTimeout(() => {
+      const n = document.querySelectorAll('.modal-backdrop').length;
+      if (n === 0) {
+        document.body.classList.remove('modal-open');
+        window.appRefresh?.({ force: true });
+      } else {
+        window.appSoftRefresh?.();
+      }
+    }, 0);
+  });
+}
 
 /** How many modals are currently open (for page-render guards). */
 export function getOpenModalCount() {
@@ -56,8 +81,15 @@ function afterModalStackChange() {
 }
 
 export function showModal({ title, body, footer, onClose }) {
+  bindEscapeOnce();
   const backdrop = el('div', { className: 'modal-backdrop' });
-  const modal = el('div', { className: 'modal', role: 'dialog', 'aria-modal': 'true' });
+  const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
+  const modal = el('div', {
+    className: 'modal',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-labelledby': titleId,
+  });
 
   const z = 200 + getOpenModalCount() * 20;
   backdrop.style.zIndex = String(z);
@@ -85,7 +117,7 @@ export function showModal({ title, body, footer, onClose }) {
   backdrop.addEventListener('pointercancel', () => { dismissArmed = false; });
 
   const header = el('div', { className: 'modal-header' },
-    el('h3', {}, title),
+    el('h3', { id: titleId }, title),
     el('button', {
       type: 'button',
       className: 'close-btn',

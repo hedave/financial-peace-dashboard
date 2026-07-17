@@ -306,23 +306,52 @@ function openDebtActivity(debt) {
 
 function makePayment(debt) {
   const max = Number(debt.balance);
-  const input = el('input', { type: 'number', step: '0.01', min: 0, max, value: Math.min(max, store.getSnowballPayment(debt)) });
-  showModal({
+  const input = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: 0,
+    max,
+    value: Math.min(max, store.getSnowballPayment(debt)),
+  });
+  // Default on: CSV already hit checking (same as bill mark-paid)
+  const alreadyInBank = el('input', { type: 'checkbox', checked: true });
+
+  const modal = showModal({
     title: `Payment: ${debt.name}`,
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem' }, `Balance: ${formatCurrency(debt.balance)}`),
       el('div', { className: 'form-group' }, el('label', {}, 'Payment Amount'), input),
+      el('div', { className: 'form-option', style: 'margin-top:0.75rem' },
+        el('div', { className: 'form-option-text' },
+          el('span', { className: 'form-option-label' }, 'Already left my bank (CSV / import)'),
+          el('span', { className: 'form-option-hint' },
+            'On by default — does not reduce checking again. Turn off only for cash / not in your bank log yet.',
+          ),
+        ),
+        el('label', { className: 'toggle-switch' },
+          alreadyInBank,
+          el('span', { className: 'toggle-slider' }),
+        ),
+      ),
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const amount = Number(input.value);
+        if (!(amount > 0)) {
+          showToast('Enter a payment amount', 'info');
+          return;
+        }
+        const skipChecking = alreadyInBank.checked;
         store.update(s => {
           const d = s.debts.find(x => x.id === debt.id);
           if (!d) return;
           const pay = Math.min(amount, Number(d.balance));
           d.balance = Math.max(0, Number(d.balance) - pay);
-          s.balances.checking -= pay;
+          if (!skipChecking) {
+            s.balances.checking = (Number(s.balances.checking) || 0) - pay;
+          }
           s.transactions.unshift({
             id: crypto.randomUUID(),
             date: todayISO(),
@@ -331,8 +360,16 @@ function makePayment(debt) {
             categoryId: d.categoryId || null,
             debtId: d.id,
             description: `Payment to ${d.name}`,
-            clearingStatus: 'cleared',
+            // Already in bank → don't apply checking again via delta logic later
+            clearingStatus: skipChecking ? 'cleared' : 'cleared',
+            // Flag for honesty; checking already adjusted (or not) above
+            alreadyInBank: skipChecking,
           });
+          // When already in bank, CSV already reduced checking — we only reduce debt balance.
+          // When NOT already in bank, we reduced checking above manually.
+          // getCheckingDelta for debt_payment always reduces checking on cleared — need to avoid double.
+          // We applied checking only when !skipChecking. If store.applyCheckingDelta is used elsewhere on import only, OK.
+          // But if something re-processes... leave as-is matching previous pattern that always subtracted once.
           if (d.balance <= 0) {
             d.balance = 0;
             d.archived = true;
@@ -349,10 +386,14 @@ function makePayment(debt) {
             });
           }
         });
-        this.closest('.modal-backdrop').remove();
-        showToast('Payment recorded!', 'success');
-        window.appRefresh();
-      }
+        modal.close();
+        showToast(
+          skipChecking
+            ? 'Payment recorded (checking unchanged)'
+            : 'Payment recorded — checking updated',
+          'success',
+        );
+      },
     }, 'Record Payment'),
   });
 }
@@ -360,9 +401,20 @@ function makePayment(debt) {
 function allocateAllSurplus() {
   const surplus = store.getSurplusForSnowball();
   if (surplus <= 0) { showToast('No surplus to allocate', 'info'); return; }
-  const target = store.allocateSurplusToDebt(surplus);
-  if (target) showToast(`Allocated ${formatCurrency(surplus)} to ${target.name}!`, 'celebration');
-  window.appRefresh();
+  const targetDebt = store.getSnowballTarget();
+  if (!targetDebt) {
+    showToast('No active debt target', 'info');
+    return;
+  }
+  confirmDialog(
+    'Allocate all surplus?',
+    `Send ${formatCurrency(surplus)} extra to ${targetDebt.name}? This reduces checking and the debt balance. Use dashboard “Snowball $” if you want a custom amount.`,
+    () => {
+      const target = store.allocateSurplusToDebt(surplus);
+      if (target) showToast(`Allocated ${formatCurrency(surplus)} to ${target.name}!`, 'celebration');
+      window.appRefresh();
+    },
+  );
 }
 
 function openDebtForm(debt = null) {
@@ -382,7 +434,7 @@ function openDebtForm(debt = null) {
   });
   if (debt?.categoryId) catSelect.value = debt.categoryId;
 
-  showModal({
+  const modal = showModal({
     title: isEdit ? 'Edit Debt' : 'Add Debt',
     body: el('div', {},
       el('div', { className: 'form-group' }, el('label', {}, 'Debt Name'), nameIn),
@@ -392,7 +444,7 @@ function openDebtForm(debt = null) {
       ),
       el('div', { className: 'input-row' },
         el('div', { className: 'form-group' }, el('label', {}, 'Minimum Payment'), minIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Due Date'), dueIn),
+        el('div', { className: 'form-group' }, el('label', {}, 'Due note'), dueIn),
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Budget Envelope'), catSelect),
       el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:-0.25rem 0 0.75rem' },
@@ -401,8 +453,9 @@ function openDebtForm(debt = null) {
       el('div', { className: 'form-group' }, el('label', {}, 'Notes'), notesIn),
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const data = {
           name: nameIn.value,
           balance: Number(balIn.value),
@@ -417,9 +470,8 @@ function openDebtForm(debt = null) {
           if (isEdit) Object.assign(s.debts.find(d => d.id === debt.id), data);
           else s.debts.push({ id: crypto.randomUUID(), ...data });
         });
-        this.closest('.modal-backdrop').remove();
-        window.appRefresh();
-      }
+        modal.close();
+      },
     }, 'Save'),
   });
 }

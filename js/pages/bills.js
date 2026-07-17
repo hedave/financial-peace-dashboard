@@ -407,9 +407,23 @@ function openBillActivity(bill) {
 
 function statusBadge(status, autoPay) {
   if (status === 'paid') return el('span', { className: 'badge badge-paid' }, 'Paid');
-  if (autoPay) return el('span', { className: 'badge badge-autopay' }, 'Auto-pay');
-  if (status === 'overdue') return el('span', { className: 'badge badge-overdue' }, 'Overdue');
-  return el('span', { className: 'badge badge-due' }, 'Due Soon');
+  if (status === 'overdue') {
+    return el('span', {},
+      el('span', { className: 'badge badge-overdue' }, 'Overdue'),
+      autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+    );
+  }
+  if (status === 'due_soon' || status === 'due') {
+    return el('span', {},
+      el('span', { className: 'badge badge-due' }, 'Due Soon'),
+      autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+    );
+  }
+  // pending / later / scheduled
+  return el('span', {},
+    el('span', { className: 'badge badge-pending' }, status === 'later' ? 'Later' : 'Scheduled'),
+    autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+  );
 }
 
 function markPaid(bill) {
@@ -417,7 +431,7 @@ function markPaid(bill) {
   const dateIn = el('input', { type: 'date', value: todayISO() });
   const alreadyInBank = el('input', { type: 'checkbox', checked: true });
 
-  showModal({
+  const modal = showModal({
     title: `Mark Paid: ${bill.name}`,
     body: el('div', {},
       el('div', { className: 'form-group' }, el('label', {}, 'Amount Paid'), amountIn),
@@ -436,13 +450,14 @@ function markPaid(bill) {
       ),
     ),
     footer: el('button', {
+      type: 'button',
       className: 'btn btn-primary',
-      onClick: function() {
+      onClick: () => {
         const amt = Number(amountIn.value);
         store.markBillPaid(bill.id, amt, dateIn.value, {
           alreadyInBank: alreadyInBank.checked,
         });
-        this.closest('.modal-backdrop').remove();
+        modal.close();
         const updated = store.getState().bills.find(b => b.id === bill.id);
         const recurring = bill.recurring !== false;
         let msg = alreadyInBank.checked
@@ -452,8 +467,7 @@ function markPaid(bill) {
           msg += ` · next due ${formatDate(updated.dueDate)}`;
         }
         showToast(msg, 'success', 4500);
-        window.appRefresh();
-      }
+      },
     }, 'Confirm Payment'),
   });
 }
