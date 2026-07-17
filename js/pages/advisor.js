@@ -192,7 +192,11 @@ function renderAnswerCard(answer) {
       el('h3', {}, answer.title || 'Answer'),
     ),
     answer.metrics?.length
-      ? el('div', { className: 'grid grid-3 advisor-answer-metrics' },
+      ? el('div', {
+          className: `grid advisor-answer-metrics ${
+            answer.metrics.length >= 4 ? 'grid-4' : answer.metrics.length === 2 ? 'grid-2' : 'grid-3'
+          }`,
+        },
           ...answer.metrics.map(m =>
             el('div', { className: 'advisor-mini-metric' },
               el('div', { className: 'card-title' }, m.label),

@@ -86,8 +86,15 @@ function buildPaydayBrief(month) {
   const billsTotal = round2(billsBeforePay.reduce((s, b) => s + (Number(b.amount) || 0), 0));
   const remainingMins = round2(store.getRemainingMinDebtPaymentsOutsideBudget(month));
   const nextAmount = next ? next.amount : 0;
-  const afterBills = next ? round2(nextAmount - billsTotal) : null;
-  const afterBillsAndMins = next ? round2(nextAmount - billsTotal - remainingMins) : null;
+  const checking = round2(store.getState().balances?.checking);
+  // Cash available through payday = what's in checking now + the next check
+  const cashThroughPay = next ? round2(checking + nextAmount) : null;
+  const afterBills = cashThroughPay != null ? round2(cashThroughPay - billsTotal) : null;
+  const afterBillsAndMins = cashThroughPay != null
+    ? round2(cashThroughPay - billsTotal - remainingMins)
+    : null;
+  // Check-only view (legacy / comparison) — not the primary "room" number
+  const afterBillsCheckOnly = next ? round2(nextAmount - billsTotal) : null;
 
   return {
     next,
@@ -100,9 +107,13 @@ function buildPaydayBrief(month) {
       daysLeft: b.daysLeft,
     })),
     billsTotal,
+    checking,
+    nextAmount,
+    cashThroughPay,
     remainingMinsOutsideBudget: remainingMins,
     afterBills,
     afterBillsAndMins,
+    afterBillsCheckOnly,
   };
 }
 

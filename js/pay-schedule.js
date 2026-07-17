@@ -1,4 +1,4 @@
-import { getPayDaysInMonth, todayISO } from './utils.js';
+import { getPayDaysInMonth, todayISO, formatLocalISODate } from './utils.js';
 
 export const DEFAULT_RECURRING = { frequency: 'monthly', day1: 1, day2: null };
 
@@ -267,8 +267,9 @@ export function matchCheckToTransaction(check, transactions, source) {
   start.setDate(start.getDate() - 3);
   const end = new Date(windowStart + 'T12:00:00');
   end.setDate(end.getDate() + 5);
-  const startIso = start.toISOString().slice(0, 10);
-  const endIso = end.toISOString().slice(0, 10);
+  // Local calendar dates — UTC slice was shifting the match window
+  const startIso = formatLocalISODate(start);
+  const endIso = formatLocalISODate(end);
 
   return transactions.find(t => {
     if (t.type !== 'income') return false;

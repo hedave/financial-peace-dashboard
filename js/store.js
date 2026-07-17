@@ -1511,7 +1511,17 @@ class Store {
     debt.balance = Math.max(0, (Number(debt.balance) || 0) - paymentDelta);
   }
 
-  /** Remove a transaction and reverse checking / debt impact. */
+  /** Reverse gift/earmark carry-over when deleting or changing an earmarked income row. */
+  reverseEarmarkCarry(state, tx, sign = -1) {
+    if (!tx || tx.type !== 'income' || !tx.earmarkedEnvelope || !tx.categoryId) return;
+    const cat = state.categories.find(c => c.id === tx.categoryId);
+    if (!cat) return;
+    const amt = Math.abs(Number(tx.amount) || 0);
+    if (!amt) return;
+    cat.carryOver = Math.round(((Number(cat.carryOver) || 0) + sign * amt) * 100) / 100;
+  }
+
+  /** Remove a transaction and reverse checking / debt / earmark impact. */
   deleteTransaction(id) {
     let removed = false;
     this.update(s => {
@@ -1522,6 +1532,7 @@ class Store {
       if (tx.type === 'debt_payment' && tx.debtId) {
         this.adjustDebtForPayment(s, tx.debtId, -Math.abs(Number(tx.amount) || 0));
       }
+      this.reverseEarmarkCarry(s, tx, -1);
       s.transactions = s.transactions.filter(x => x.id !== id);
       removed = true;
     });
@@ -1663,11 +1674,16 @@ class Store {
       const oldType = tx.type;
       const oldAmount = Math.abs(Number(tx.amount)) || 0;
       const oldStatus = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+      const oldCategoryId = tx.categoryId;
+      const wasEarmarked = !!(tx.earmarkedEnvelope && oldType === 'income' && oldCategoryId);
       const newType = updates.type ?? tx.type;
       const newAmount = updates.amount !== undefined ? Math.abs(Number(updates.amount)) : oldAmount;
       const newStatus = updates.clearingStatus !== undefined
         ? (updates.clearingStatus === 'pending' ? 'pending' : 'cleared')
         : oldStatus;
+
+      // Undo prior earmark before amount/category changes
+      if (wasEarmarked) this.reverseEarmarkCarry(s, tx, -1);
 
       const oldDelta = this.getCheckingDelta(oldType, oldAmount, oldStatus);
       const newDelta = this.getCheckingDelta(newType, newAmount, newStatus);
@@ -1704,6 +1720,16 @@ class Store {
         }
       }
       if (updates.debtId !== undefined) tx.debtId = updates.debtId || null;
+
+      // Drop earmark flag if no longer income-with-envelope
+      if (tx.type !== 'income' || !tx.categoryId) {
+        delete tx.earmarkedEnvelope;
+      }
+
+      // Re-apply earmark carry if still gift-earmarked
+      if (tx.earmarkedEnvelope && tx.type === 'income' && tx.categoryId) {
+        this.reverseEarmarkCarry(s, tx, +1);
+      }
 
       // Income linkage when first cleared
       if (newType === 'income' && newStatus === 'cleared' && oldStatus === 'pending') {

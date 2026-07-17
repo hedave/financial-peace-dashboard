@@ -128,8 +128,12 @@ function answerPayday(snap) {
     };
   }
 
+  const checking = pd.checking ?? 0;
+  const cashThroughPay = pd.cashThroughPay ?? r2(checking + next.amount);
+
   const paragraphs = [
     `Next paycheck: ${next.source} on ${formatDate(next.date)} for about ${formatCurrency(next.amount)}.`,
+    `Checking now: ${formatCurrency(checking)} · cash through payday (checking + check): ${formatCurrency(cashThroughPay)}.`,
     pd.billsBeforePay?.length
       ? `${pd.billsBeforePay.length} bill(s) due on or before that day, totaling ${formatCurrency(pd.billsTotal)}.`
       : 'No unpaid bills due on or before that paycheck.',
@@ -144,12 +148,13 @@ function answerPayday(snap) {
   if (pd.afterBills != null) {
     paragraphs.push(
       `Rough room after those bills: ${formatCurrency(pd.afterBills)}`
+      + ` (checking ${formatCurrency(checking)} + check ${formatCurrency(next.amount)} − bills ${formatCurrency(pd.billsTotal || 0)})`
       + (pd.remainingMinsOutsideBudget > 0
         ? ` · after bills + outside-budget mins: ${formatCurrency(pd.afterBillsAndMins)}.`
         : '.')
     );
     paragraphs.push(
-      'This is not a full budget — groceries, gas, and other envelopes still apply. Use it as a payday planning sketch.'
+      'This is not a full budget — groceries, gas, and other envelopes still apply. Checking is your logged balance under Income & Balances.'
     );
   }
 
@@ -169,6 +174,7 @@ function answerPayday(snap) {
     paragraphs,
     bullets: bullets.length ? bullets : undefined,
     metrics: [
+      { label: 'Checking', value: formatCurrency(checking), tone: '' },
       { label: 'Next check', value: formatCurrency(next.amount), tone: 'accent' },
       { label: 'Bills before', value: formatCurrency(pd.billsTotal || 0), tone: '' },
       {

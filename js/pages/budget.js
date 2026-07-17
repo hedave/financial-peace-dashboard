@@ -597,7 +597,6 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
     ],
   });
   modal.modal.classList.add('modal-wide', 'modal-scrollable');
-  modal.modal.classList.add('modal-wide');
 }
 
 function doFundEnvelope(cat, amt) {
