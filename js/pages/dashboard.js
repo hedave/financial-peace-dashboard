@@ -2,7 +2,7 @@ import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayIS
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
-import { showModal, showToast } from '../components/modal.js';
+import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { renderReviewBanner, openPendingReview, openReviewInbox } from '../components/review-inbox.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
 import { openEnvelopeActivity } from './budget.js';
@@ -428,14 +428,21 @@ function babyStepCard(step) {
 function debtSummaryCard() {
   const total = store.getTotalDebt();
   const months = store.estimateMonthsToDebtFree();
-  const debts = store.getActiveDebts();
+  const snowball = store.getSnowballDebts();
+  const paused = store.getPausedDebts();
+
+  let line = 'Debt free! 🎉';
+  if (snowball.length) {
+    line = `${snowball.length} in snowball · ~${months} mo ETA`;
+    if (paused.length) line += ` · ${paused.length} on hold`;
+  } else if (paused.length) {
+    line = `${paused.length} on hold · no active snowball target`;
+  }
 
   return el('div', { className: 'card' },
     el('div', { className: 'card-title' }, 'Debt Snowball'),
     el('div', { className: 'card-value', style: 'font-size:1.4rem' }, formatCurrency(total)),
-    el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem' },
-      debts.length ? `${debts.length} debts · ~${months} months to freedom` : 'Debt free! 🎉'
-    )
+    el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem' }, line)
   );
 }
 
@@ -676,12 +683,16 @@ export function allocateSurplus() {
     return;
   }
   const input = el('input', { type: 'number', step: '0.01', value: surplus, min: 0 });
+  const checking = Number(store.getState().balances?.checking) || 0;
   const modal = showModal({
     title: 'Snowball extra to debt',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem' }, `Send extra money to ${target.name}`),
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        'This reduces checking and the debt balance (cash payment). Prefer a custom amount if not sending the full surplus.',
+        'Reduces checking and the debt balance. If this debt has a linked envelope, that budget rises so To Allocate drops (can’t re-allocate the same dollars).',
+      ),
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        `Surplus available: ${formatCurrency(surplus)} · Checking: ${formatCurrency(checking)}`,
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input)
     ),
@@ -689,11 +700,29 @@ export function allocateSurplus() {
       type: 'button',
       className: 'btn btn-primary',
       onClick: () => {
-        const result = store.allocateSurplusToDebt(Number(input.value));
-        modal.close();
-        if (result) {
-          showToast(`Allocated to ${result.name}!`, 'celebration');
+        const amt = Number(input.value);
+        if (!(amt > 0)) {
+          showToast('Enter an amount', 'info');
+          return;
         }
+        if (amt > surplus + 0.02) {
+          showToast(`Only ${formatCurrency(surplus)} surplus available`, 'info');
+          return;
+        }
+        const doPay = () => {
+          const result = store.allocateSurplusToDebt(amt);
+          modal.close();
+          if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
+        };
+        if (amt > checking + 0.02) {
+          confirmDialog(
+            'More than checking balance?',
+            `You’re sending ${formatCurrency(amt)} but checking shows ${formatCurrency(checking)}. Continue anyway (e.g. balance not updated)?`,
+            doPay,
+          );
+          return;
+        }
+        doPay();
       },
     }, 'Allocate'),
   });

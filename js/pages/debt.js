@@ -506,12 +506,20 @@ function makePayment(debt) {
             d.archived = true;
             d.paidOffDate = todayISO();
             s.archivedDebts.push({ ...d });
-            const next = s.debts.filter(x => !x.archived && Number(x.balance) > 0)
+            const next = s.debts
+              .filter(x => !x.archived && !x.paused && Number(x.balance) > 0)
               .sort((a, b) => Number(a.balance) - Number(b.balance))[0];
+            const heldLeft = s.debts.some(x => !x.archived && x.paused && Number(x.balance) > 0);
             s.celebrations.unshift({
               id: crypto.randomUUID(),
               type: 'debt_paid',
-              message: `🎉 ${d.name} is PAID OFF!${next ? ` Next target: ${next.name}` : ' You are DEBT FREE!'}`,
+              message: `🎉 ${d.name} is PAID OFF!${
+                next
+                  ? ` Next target: ${next.name}`
+                  : heldLeft
+                    ? ' Snowball list clear — you still have debts on hold.'
+                    : ' You are DEBT FREE!'
+              }`,
               date: todayISO(),
               debtName: d.name,
             });

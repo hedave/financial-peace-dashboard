@@ -1,17 +1,19 @@
 import { el } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
+import { getActiveNotesBoardId } from '../pages/notes.js';
 
 /**
- * Quick sticky access from sidebar — list stickies on the active/first board.
+ * Quick sticky access from sidebar — last Notes board viewed, else first board.
  */
 export function showNotesPopup() {
   const boards = store.getNoteBoards();
-  const board = boards[0];
-  if (!board) {
+  if (!boards.length) {
     showToast('No notes board yet', 'info');
     return;
   }
+  const preferredId = getActiveNotesBoardId();
+  const board = boards.find(b => b.id === preferredId) || boards[0];
 
   const list = el('div', { className: 'quick-sticky-list' });
 

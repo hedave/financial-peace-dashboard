@@ -75,28 +75,53 @@ export async function renderSettings(container) {
   container.appendChild(el('div', { className: 'card section' },
     el('div', { className: 'section-title' }, 'Security'),
     el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem' },
-      'Optional password protection keeps your financial data private on shared devices.'
+      'Optional app lock on this device. Not bank-grade encryption — use cloud sign-in for real multi-device privacy.'
     ),
     el('div', { className: 'form-group' },
-      el('label', {}, state.settings.passwordHash ? 'Change Password' : 'Set Password'),
-      el('input', { type: 'password', id: 'pw-input', placeholder: 'Enter password' }),
+      el('label', {}, state.settings.passwordHash ? 'New password' : 'Set password'),
+      el('input', { type: 'password', id: 'pw-input', placeholder: 'Enter password', autocomplete: 'new-password' }),
+    ),
+    el('div', { className: 'form-group' },
+      el('label', {}, 'Confirm password'),
+      el('input', { type: 'password', id: 'pw-confirm', placeholder: 'Re-enter password', autocomplete: 'new-password' }),
     ),
     el('button', {
       className: 'btn btn-primary btn-sm',
       onClick: async () => {
         const pw = document.getElementById('pw-input').value;
-        if (!pw) return;
+        const conf = document.getElementById('pw-confirm').value;
+        if (!pw) {
+          showToast('Enter a password', 'info');
+          return;
+        }
+        if (pw !== conf) {
+          showToast('Passwords do not match', 'info');
+          return;
+        }
+        if (pw.length < 4) {
+          showToast('Use at least 4 characters', 'info');
+          return;
+        }
         const hash = await hashPassword(pw);
         store.update(s => { s.settings.passwordHash = hash; });
+        document.getElementById('pw-input').value = '';
+        document.getElementById('pw-confirm').value = '';
         showToast('Password set!');
+        window.appRefresh();
       }
     }, 'Save Password'),
     state.settings.passwordHash ? el('button', {
       className: 'btn btn-secondary btn-sm', style: 'margin-left:0.5rem',
       onClick: () => {
-        store.update(s => { s.settings.passwordHash = null; });
-        showToast('Password removed');
-        window.appRefresh();
+        confirmDialog(
+          'Remove app password?',
+          'Anyone with this browser profile can open the budget without a password.',
+          () => {
+            store.update(s => { s.settings.passwordHash = null; });
+            showToast('Password removed');
+            window.appRefresh();
+          },
+        );
       }
     }, 'Remove Password') : null,
   ));
@@ -196,10 +221,24 @@ export async function renderSettings(container) {
             reader.onload = ev => {
               try {
                 const data = JSON.parse(ev.target.result);
-                store.update(s => { Object.assign(s, data); });
-                applyTheme(store.getState().settings);
-                showToast('Backup restored!');
-                window.location.reload();
+                if (!data || typeof data !== 'object') throw new Error('bad');
+                const txCount = Array.isArray(data.transactions) ? data.transactions.length : 0;
+                const billCount = Array.isArray(data.bills) ? data.bills.length : 0;
+                const debtCount = Array.isArray(data.debts) ? data.debts.length : 0;
+                confirmDialog(
+                  'Replace all local data?',
+                  `This fully replaces your current budget with the backup (${txCount} transactions, ${billCount} bills, ${debtCount} debts). Current data on this device will be overwritten.`,
+                  () => {
+                    try {
+                      store.replaceStateFromBackup(data);
+                      applyTheme(store.getState().settings);
+                      showToast('Backup restored — reloading…');
+                      window.location.reload();
+                    } catch {
+                      showToast('Could not restore backup', 'info');
+                    }
+                  },
+                );
               } catch {
                 showToast('Invalid backup file', 'info');
               }
@@ -403,7 +442,7 @@ export async function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Family size: ' + (state.settings.familySize || 7)
-      + ' · Build 20260717b'
+      + ' · Build 20260717c'
     ),
   ));
 }

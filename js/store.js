@@ -7,6 +7,7 @@ import {
 import {
   getCurrentMonth, isInMonth, todayISO, generateId,
   getPreviousMonth, getRecentMonths, addOneMonthToDate, formatLocalISODate,
+  addMonths,
 } from './utils.js';
 import {
   normalizeImportRow, resolveCategoryId,
@@ -325,6 +326,7 @@ class Store {
       ...remote.state,
       _cloudUpdatedAt: remoteTime,
     });
+    this.processMonthRollover();
     this.writeLocal();
     this.notify();
     return true;
@@ -354,6 +356,7 @@ class Store {
     if (useRemote) {
       const merged = { ...remote.state, _cloudUpdatedAt: remoteTime };
       this.state = normalizeState({ ...createDefaultState(), ...merged });
+      this.processMonthRollover();
       this.writeLocal();
       this.notify();
       return { hadRemote: true, applied: true };
@@ -545,13 +548,21 @@ class Store {
     const current = getCurrentMonth();
     if (this.state.lastMonthProcessed === current) return;
 
-    const prev = this.state.lastMonthProcessed;
-    if (prev && prev !== current) {
-      this.saveMonthBudgetSnapshot(prev, false);
-      this.state.categories.forEach(cat => {
-        const remaining = this.getCategoryRemaining(cat.id, prev);
-        cat.carryOver = (cat.carryOver || 0) + remaining;
-      });
+    let cursor = this.state.lastMonthProcessed;
+    if (cursor && cursor !== current) {
+      // Walk each skipped month so June isn't skipped when May → July
+      let guard = 0;
+      while (cursor && cursor < current && guard < 36) {
+        this.saveMonthBudgetSnapshot(cursor, false);
+        this.state.categories.forEach(cat => {
+          // remaining already = budget + prior carry − spent for that month.
+          // That amount IS the new carry — do NOT add it on top of old carry again.
+          const remaining = this.getCategoryRemaining(cat.id, cursor);
+          cat.carryOver = Math.round(remaining * 100) / 100;
+        });
+        cursor = addMonths(cursor, 1);
+        guard++;
+      }
       rollRecurringBillsForNewMonth(this.state.bills, current);
     }
     this.state.lastMonthProcessed = current;
@@ -583,7 +594,10 @@ class Store {
     const bonus = this.getBonusIncomeSource();
     if (!bonus) return 0;
     return this.getTransactionsForMonth(month)
-      .filter(t => t.type === 'income' && t.incomeSourceId === bonus.id)
+      .filter(t => t.type === 'income'
+        && t.incomeSourceId === bonus.id
+        // Gift/earmark already boosted envelope carry — don't also inflate To Allocate
+        && !t.earmarkedEnvelope)
       .reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
   }
 
@@ -814,7 +828,11 @@ class Store {
     const totalSpent = this.getTotalSpent(month);
     const debtPaid = this.getTotalDebtPaid(month);
     const remainingMins = this.getRemainingMinDebtPaymentsOutsideBudget(month);
-    return income - totalSpent - debtPaid - remainingMins;
+    // Money still sitting in envelopes is already assigned — not free for snowball mid-month
+    const stillAssigned = (this.state.categories || [])
+      .filter(c => c && !c.parentId)
+      .reduce((s, c) => s + Math.max(0, this.getCategoryRemaining(c.id, month)), 0);
+    return income - totalSpent - debtPaid - remainingMins - stillAssigned;
   }
 
   /** Zero-based leftover: monthly income not assigned to envelopes (matches Budget "To Allocate") */
@@ -1477,18 +1495,24 @@ class Store {
     const debts = this.getSnowballDebts();
     if (!debts.length) return 0;
     let months = 0;
-    let surplus = this.getSurplusForSnowball();
+    const surplus = this.getSurplusForSnowball();
     const sim = debts.map(d => ({ balance: Number(d.balance) || 0, min: Number(d.minPayment) || 0 }));
     let safety = 600;
-    while (sim.some(d => d.balance > 0) && safety-- > 0) {
+    while (sim.some(d => d.balance > 0.005) && safety-- > 0) {
       months++;
       let extra = surplus;
       for (const d of sim) {
-        if (d.balance <= 0) continue;
-        const pay = d.min + extra;
-        d.balance = Math.max(0, d.balance - pay);
-        if (d.balance === 0) extra = pay - (d.balance + pay - d.balance);
-        else { extra = 0; break; }
+        if (d.balance <= 0.005) continue;
+        // Min + cascading extra from debts paid off earlier this simulated month
+        const available = d.min + extra;
+        const pay = Math.min(d.balance, available);
+        d.balance = Math.round((d.balance - pay) * 100) / 100;
+        extra = Math.round((available - pay) * 100) / 100;
+        if (d.balance > 0.005) {
+          extra = 0;
+          break;
+        }
+        // Paid off — leftover extra continues to the next debt this month
       }
     }
     return months;
@@ -1811,12 +1835,21 @@ class Store {
     const target = this.getSnowballTarget();
     if (!target) return null;
     const num = Number(amount) || this.getSurplusForSnowball();
+    if (!(num > 0)) return null;
     this.update(s => {
       const debt = s.debts.find(d => d.id === target.id);
-      if (!debt) return;
+      if (!debt || debt.paused) return;
       const pay = Math.min(num, Number(debt.balance) || 0);
+      if (!(pay > 0)) return;
       debt.balance = Math.max(0, (Number(debt.balance) || 0) - pay);
       s.balances.checking = (Number(s.balances.checking) || 0) - pay;
+      // Give those dollars a budget job so To Allocate / surplus don't stay free to re-spend
+      if (debt.categoryId) {
+        const cat = s.categories.find(c => c.id === debt.categoryId);
+        if (cat) {
+          cat.monthlyBudget = Math.round(((Number(cat.monthlyBudget) || 0) + pay) * 100) / 100;
+        }
+      }
       s.transactions.unshift({
         id: generateId(),
         date: todayISO(),
@@ -1832,13 +1865,21 @@ class Store {
         debt.archived = true;
         debt.paidOffDate = todayISO();
         s.archivedDebts.push({ ...debt });
+        // Next snowball target excludes on-hold debts
         const next = s.debts
-          .filter(d => !d.archived && Number(d.balance) > 0)
+          .filter(d => !d.archived && !d.paused && Number(d.balance) > 0)
           .sort((a, b) => Number(a.balance) - Number(b.balance))[0];
+        const heldLeft = s.debts.some(d => !d.archived && d.paused && Number(d.balance) > 0);
         s.celebrations.unshift({
           id: generateId(),
           type: 'debt_paid',
-          message: `🎉 ${debt.name} is PAID OFF!${next ? ` Next target: ${next.name}` : ' You are DEBT FREE!'}`,
+          message: `🎉 ${debt.name} is PAID OFF!${
+            next
+              ? ` Next target: ${next.name}`
+              : heldLeft
+                ? ' Snowball list clear — you still have debts on hold.'
+                : ' You are DEBT FREE!'
+          }`,
           date: todayISO(),
           debtName: debt.name,
         });
@@ -1847,18 +1888,49 @@ class Store {
     return target;
   }
 
+  /**
+   * Replace entire app state from a JSON backup (after normalize).
+   * Prefer this over Object.assign merge which leaves stale keys.
+   */
+  replaceStateFromBackup(data) {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid backup');
+    }
+    const next = normalizeState({
+      ...createDefaultState(),
+      ...data,
+    });
+    // Never inherit cloud cursor from an old export (forces a clean re-push)
+    delete next._cloudUpdatedAt;
+    this.state = next;
+    this.writeLocal();
+    this.notify();
+    return this.state;
+  }
+
   payOffDebt(debtId, manual = true) {
     this.update(s => {
       const debt = s.debts.find(d => d.id === debtId);
       if (!debt) return;
       debt.balance = 0;
       debt.archived = true;
+      debt.paused = false;
       debt.paidOffDate = todayISO();
       s.archivedDebts.push({ ...debt });
+      const next = s.debts
+        .filter(d => !d.archived && !d.paused && Number(d.balance) > 0)
+        .sort((a, b) => Number(a.balance) - Number(b.balance))[0];
+      const heldLeft = s.debts.some(d => !d.archived && d.paused && Number(d.balance) > 0);
       s.celebrations.unshift({
         id: generateId(),
         type: 'debt_paid',
-        message: `🎉 ${debt.name} is PAID OFF! ${this.getSnowballTarget() ? `Next target: ${this.getSnowballTarget()?.name}` : 'You are DEBT FREE!'}`,
+        message: `🎉 ${debt.name} is PAID OFF! ${
+          next
+            ? `Next target: ${next.name}`
+            : heldLeft
+              ? 'Snowball list clear — you still have debts on hold.'
+              : 'You are DEBT FREE!'
+        }`,
         date: todayISO(),
         debtName: debt.name,
       });

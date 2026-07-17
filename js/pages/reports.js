@@ -82,7 +82,15 @@ export function renderReports(container) {
         `This month you planned ${formatCurrency(income)} in income and budgeted ${formatCurrency(totalBudgeted)} across ${categories.length} envelopes. `,
         `You've spent ${formatCurrency(totalSpent)} so far, leaving ${formatCurrency(totalBudgeted - totalSpent)} in your planned budget. `,
         store.getTotalDebt() > 0
-          ? `Your debt snowball has ${formatCurrency(store.getTotalDebt())} remaining across ${store.getActiveDebts().length} debts.`
+          ? (() => {
+            const held = store.getPausedDebts().length;
+            const n = store.getActiveDebts().length;
+            const snow = store.getSnowballDebts().length;
+            return `You have ${formatCurrency(store.getTotalDebt())} total debt across ${n} balance${n === 1 ? '' : 's'}`
+              + (held
+                ? ` (${snow} in the snowball, ${held} on hold).`
+                : '.');
+          })()
           : 'You are debt free — keep building wealth!'
       )
     )
@@ -294,15 +302,16 @@ function renderCharts(spentByCategory, state) {
     },
   });
 
+  // Chart includes on-hold debts so total picture is honest
   const debts = store.getActiveDebts();
   mountChart('debt-chart', {
     type: 'bar',
     data: {
-      labels: debts.map(d => d.name),
+      labels: debts.map(d => d.paused ? `${d.name} (hold)` : d.name),
       datasets: [{
         label: 'Balance',
         data: debts.map(d => Number(d.balance)),
-        backgroundColor: '#8f6f6f',
+        backgroundColor: debts.map(d => d.paused ? '#a8a29e' : '#8f6f6f'),
       }],
     },
     options: {

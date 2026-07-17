@@ -111,6 +111,11 @@ function showLockScreen() {
   `;
   document.body.appendChild(lock);
 
+  const errEl = document.createElement('p');
+  errEl.id = 'lock-err';
+  errEl.style.cssText = 'color:var(--danger);font-size:0.85rem;margin:0.5rem 0 0;min-height:1.2em';
+  lock.querySelector('.lock-card')?.appendChild(errEl);
+
   const tryUnlock = async () => {
     const pw = document.getElementById('lock-pw').value;
     const hash = await hashPassword(pw);
@@ -119,7 +124,11 @@ function showLockScreen() {
       lock.remove();
       init();
     } else {
-      document.getElementById('lock-pw').style.borderColor = 'var(--danger)';
+      const input = document.getElementById('lock-pw');
+      input.style.borderColor = 'var(--danger)';
+      errEl.textContent = 'Incorrect password. Try again.';
+      input.focus();
+      input.select?.();
     }
   };
 
@@ -171,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260717b';
+const APP_BUILD = '20260717c';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

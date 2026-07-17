@@ -680,11 +680,17 @@ function fundAllEnvelopes() {
     'Assign To Allocate evenly',
     `Split ${formatCurrency(unallocated)} across ${cats.length} envelopes as monthly budget? Checking balance will not change.`,
     () => {
-      const each = unallocated / cats.length;
+      // Cent-safe split so float dust doesn't leave $0.01–0.03 stuck in To Allocate
+      const cents = Math.round(unallocated * 100);
+      const n = cats.length;
+      const base = Math.floor(cents / n);
+      let rem = cents - base * n;
       store.update(s => {
-        cats.forEach(c => {
+        cats.forEach((c, i) => {
           const cat = s.categories.find(x => x.id === c.id);
-          if (cat) cat.monthlyBudget = (Number(cat.monthlyBudget) || 0) + each;
+          if (!cat) return;
+          const add = (base + (i < rem ? 1 : 0)) / 100;
+          cat.monthlyBudget = Math.round(((Number(cat.monthlyBudget) || 0) + add) * 100) / 100;
         });
       });
       showToast('To Allocate assigned across envelopes');

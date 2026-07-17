@@ -12,6 +12,11 @@ const STICKY_COLORS = [
 ];
 
 let activeBoardId = null;
+
+/** For Quick Notes popup — last board viewed on the Notes page. */
+export function getActiveNotesBoardId() {
+  return activeBoardId;
+}
 const stickyTimers = new Map();
 
 export function renderNotes(container) {
