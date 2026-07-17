@@ -117,7 +117,8 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
               store.updateTransaction(t.id, { clearingStatus: 'cleared' });
               showToast('Marked cleared — checking updated', 'success');
               paint();
-              window.appRefresh();
+              window.appSoftRefresh?.();
+              if (!store.getPendingTransactions().length) modal?.close();
             },
           }, 'Mark cleared'),
           el('button', {
@@ -127,6 +128,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
               label: 'this pending log',
               onDone: () => {
                 paint();
+                window.appSoftRefresh?.();
                 if (!store.getPendingTransactions().length) modal?.close();
               },
             }),
@@ -162,20 +164,61 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
 }
 
 export function openDuplicateReview() {
+  const groupsAtOpen = store.getDuplicateTransactionGroups();
+  if (!groupsAtOpen.length) {
+    showToast('No duplicate transactions found', 'info');
+    return;
+  }
+
+  const progressEl = el('div', { className: 'review-progress' });
   const list = el('div', { className: 'review-list duplicate-review-list' });
   let modal;
+  let closedByEmpty = false;
+
+  function softChrome() {
+    window.appSoftRefresh?.() || window.appRefresh?.();
+  }
+
+  function remainingGroups() {
+    return store.getDuplicateTransactionGroups();
+  }
+
+  function updateProgress(groups) {
+    const n = groups.length;
+    const flagged = groups.reduce((s, g) => s + g.length, 0);
+    progressEl.textContent = n
+      ? `${n} group${n === 1 ? '' : 's'} · ${flagged} transaction${flagged === 1 ? '' : 's'} to review`
+      : 'All clear';
+    if (modal?.setTitle) {
+      modal.setTitle(n ? `Possible duplicates · ${n} left` : 'Possible duplicates');
+    }
+  }
+
+  /** Stay in the modal until the user finishes or explicitly closes. */
+  function finishIfEmpty() {
+    if (remainingGroups().length) return false;
+    closedByEmpty = true;
+    showToast('All possible duplicates reviewed', 'success');
+    // Brief beat so the empty state is visible, then close
+    setTimeout(() => modal?.close(), 280);
+    return true;
+  }
 
   function paint() {
-    const groups = store.getDuplicateTransactionGroups();
+    const groups = remainingGroups();
     list.innerHTML = '';
+    updateProgress(groups);
+
     if (!groups.length) {
-      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'No possible duplicates left.'));
+      list.appendChild(el('p', { className: 'review-empty-msg' }, 'No possible duplicates left. Nice work.'));
       return;
     }
-    groups.forEach(items => {
+
+    groups.forEach((items, groupIndex) => {
       const group = el('div', { className: 'duplicate-review-group' });
       group.appendChild(el('div', { className: 'duplicate-review-group-header' },
         el('div', { className: 'duplicate-review-group-title' },
+          el('span', { className: 'duplicate-review-group-index' }, `${groupIndex + 1}/${groups.length}`),
           el('strong', {}, duplicateGroupDateLabel(items)),
           ' · ',
           formatCurrency(items[0].amount),
@@ -189,13 +232,13 @@ export function openDuplicateReview() {
             store.markTransactionsUnique(items.map(t => t.id));
             showToast(
               items.length === 2
-                ? 'Marked both as unique — warning cleared'
-                : `Marked ${items.length} as unique — warning cleared`,
+                ? 'Marked both as unique'
+                : `Marked ${items.length} as unique`,
               'success',
             );
             paint();
-            window.appRefresh();
-            if (!store.getDuplicateTransactionGroups().length) modal?.close();
+            softChrome();
+            finishIfEmpty();
           },
         }, items.length === 2 ? 'Both unique' : 'All unique'),
       ));
@@ -221,7 +264,14 @@ export function openDuplicateReview() {
               className: 'btn btn-sm btn-secondary',
               onClick: () => {
                 import('../pages/transactions.js').then(m => {
-                  m.openTransactionForm({ transaction: t });
+                  m.openTransactionForm({
+                    transaction: t,
+                    onSaved: () => {
+                      paint();
+                      softChrome();
+                      finishIfEmpty();
+                    },
+                  });
                 });
               },
             }, 'Edit'),
@@ -233,8 +283,8 @@ export function openDuplicateReview() {
                 store.markTransactionsUnique([t.id]);
                 showToast('Marked unique', 'success');
                 paint();
-                window.appRefresh();
-                if (!store.getDuplicateTransactionGroups().length) modal?.close();
+                softChrome();
+                finishIfEmpty();
               },
             }, 'Keep'),
             el('button', {
@@ -244,7 +294,8 @@ export function openDuplicateReview() {
                 label: 'this entry (keep the other if it is the real one)',
                 onDone: () => {
                   paint();
-                  if (!store.getDuplicateTransactionGroups().length) modal?.close();
+                  softChrome();
+                  finishIfEmpty();
                 },
               }),
             }, 'Delete'),
@@ -257,21 +308,18 @@ export function openDuplicateReview() {
   }
 
   paint();
-  if (!list.children.length) {
-    showToast('No duplicate transactions found', 'info');
-    return;
-  }
 
   modal = showModal({
-    title: 'Possible Duplicate Transactions',
+    title: `Possible duplicates · ${groupsAtOpen.length} left`,
     body: el('div', { className: 'duplicate-review-body' },
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.85rem' },
-        'Same amount and similar merchant. Delete true double-posts, or mark as unique when both are real (e.g. two kids, same purchase).',
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
+        'Same amount and similar merchant. Delete true double-posts, or mark unique when both are real (e.g. two kids). This window stays open until you finish.',
       ),
+      progressEl,
       list,
     ),
     footer: [
-      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Done'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -281,8 +329,11 @@ export function openDuplicateReview() {
         },
       }, 'Open Transactions'),
     ],
+    onClose: () => {
+      if (!closedByEmpty) softChrome();
+    },
   });
-  modal.modal.classList.add('modal-wide', 'modal-duplicate-review');
+  modal.modal.classList.add('modal-wide', 'modal-duplicate-review', 'modal-scrollable');
 }
 
 /**
@@ -356,8 +407,9 @@ export function openReviewInbox(_inbox) {
           className: 'btn btn-secondary review-hub-item',
           style: 'width:100%;justify-content:space-between;display:flex;margin-bottom:0.5rem',
           onClick: () => {
-            hub.close();
+            // Open next first so modal stack never hits 0 (avoids page thrash / flash)
             q.open();
+            hub.close();
           },
         },
           el('span', {}, q.label),
@@ -415,7 +467,15 @@ export function openUncategorizedReview() {
             className: 'btn btn-sm btn-secondary',
             onClick: () => {
               import('../pages/transactions.js').then(m => {
-                m.openTransactionForm({ transaction: t, rememberDefault: true });
+                m.openTransactionForm({
+                  transaction: t,
+                  rememberDefault: true,
+                  onSaved: () => {
+                    paint();
+                    window.appSoftRefresh?.();
+                    if (!store.getReviewInbox().uncategorized.length) modal?.close();
+                  },
+                });
               });
             },
           }, 'Edit'),
@@ -425,6 +485,7 @@ export function openUncategorizedReview() {
             onClick: () => confirmDeleteTransaction(t, {
               onDone: () => {
                 paint();
+                window.appSoftRefresh?.();
                 if (!store.getReviewInbox().uncategorized.length) modal?.close();
               },
             }),
@@ -450,7 +511,8 @@ export function openUncategorizedReview() {
           const n = store.applyRulesToUncategorized();
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
           paint();
-          window.appRefresh();
+          window.appSoftRefresh?.();
+          if (!store.getReviewInbox().uncategorized.length) modal?.close();
         },
       }, 'Apply saved rules'),
       list,
@@ -488,7 +550,7 @@ export function openUncategorizedReview() {
               [...selected].forEach(id => store.deleteTransaction(id));
               showToast('Deleted selected');
               paint();
-              window.appRefresh();
+              window.appSoftRefresh?.();
               if (!store.getReviewInbox().uncategorized.length) modal.close();
             },
           );
@@ -529,7 +591,7 @@ export function openUncategorizedReview() {
             rulesSaved ? 'success' : undefined,
           );
           paint();
-          window.appRefresh();
+          window.appSoftRefresh?.();
           if (!store.getReviewInbox().uncategorized.length) modal.close();
         },
       }, 'Assign Selected'),
@@ -583,7 +645,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
               store.linkTransactionToBill(t.id, bill.id);
               showToast(`Linked to ${bill.name}`);
               paint();
-              window.appRefresh();
+              window.appSoftRefresh?.();
               if (!store.getReviewInbox().billMatches.length) modal?.close();
             },
           }, 'Link'),
@@ -594,6 +656,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
               label: 'this transaction',
               onDone: () => {
                 paint();
+                window.appSoftRefresh?.();
                 if (!store.getReviewInbox().billMatches.length) modal?.close();
               },
             }),

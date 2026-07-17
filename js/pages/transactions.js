@@ -608,6 +608,8 @@ export function openTransactionForm({
   splitMode = false,
   categoryId: presetCategoryId = null,
   rememberDefault = false,
+  /** Called after a successful save (parent review modals re-paint and stay open). */
+  onSaved = null,
 } = {}) {
   const state = store.getState();
   const isEdit = !!transaction;
@@ -667,6 +669,23 @@ export function openTransactionForm({
   const debtSelect = debtGroup.querySelector('select');
   if (transaction?.debtId) debtSelect.value = transaction.debtId;
 
+  // Label income as a paycheck source or Bonus (fixes rare mis-tags without amount gates)
+  const incomeSources = (state.incomeSources || []).filter(Boolean);
+  const incomeSourceGroup = el('div', { className: 'form-group', style: 'display:none' },
+    el('label', {}, 'Pay source'),
+    el('select', {},
+      el('option', { value: '' }, '— Auto-detect —'),
+      ...incomeSources.map(s => el('option', { value: s.id },
+        isBonusIncomeSource(s) ? BONUS_INCOME_NAME : s.name
+      )),
+    ),
+    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+      'Optional. Use when a deposit landed on the wrong job or should be Bonus.',
+    ),
+  );
+  const incomeSourceSelect = incomeSourceGroup.querySelector('select');
+  if (transaction?.incomeSourceId) incomeSourceSelect.value = transaction.incomeSourceId;
+
   const importNote = transaction?.importCategory && !transaction?.categoryId
     ? el('p', { className: 'tx-form-hint' },
       `Bank category: ${transaction.importCategory}. Pick an envelope below to map it.`
@@ -715,6 +734,7 @@ export function openTransactionForm({
     splitSection.style.display = useSplit ? '' : 'none';
     const showDebt = currentType === 'debt_payment' && !isEdit;
     debtGroup.style.display = showDebt ? '' : 'none';
+    incomeSourceGroup.style.display = currentType === 'income' && incomeSources.length ? '' : 'none';
     if (useSplit) {
       splitEditor.setTotalAmount(Number(amountIn.value) || 0);
     }
@@ -799,6 +819,7 @@ export function openTransactionForm({
       catGroup,
       splitSection,
       memoGroup,
+      incomeSourceGroup,
       postCheckingGroup,
       rememberGroup,
       debtGroup,
@@ -817,6 +838,7 @@ export function openTransactionForm({
           const txType = isCelebration ? transaction.type : typeSelect.value;
           const useSplit = txType === 'expense' && splitToggle.checked;
           const debtId = txType === 'debt_payment' && !isEdit ? (debtSelect.value || null) : (transaction?.debtId || null);
+          const incomeSourceId = txType === 'income' ? (incomeSourceSelect.value || null) : null;
 
           if (txType === 'debt_payment' && !isEdit && !debtId) {
             showToast('Select a debt for debt payments', 'info');
@@ -853,6 +875,9 @@ export function openTransactionForm({
                 updates.categoryId = categoryId;
                 updates.splits = [];
               }
+              if (txType === 'income') {
+                updates.incomeSourceId = incomeSourceId;
+              }
               store.updateTransaction(transaction.id, updates);
               showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
               if (txType === 'income') {
@@ -869,6 +894,7 @@ export function openTransactionForm({
                 debtId,
                 splits,
                 clearingStatus,
+                incomeSourceId,
               });
               const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
               showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
@@ -894,7 +920,11 @@ export function openTransactionForm({
             }
 
             modal.close();
-            window.appRefresh();
+            if (typeof onSaved === 'function') {
+              queueMicrotask(() => onSaved());
+            } else {
+              window.appRefresh();
+            }
           };
 
           // Dave Ramsey soft warning: overspending an envelope

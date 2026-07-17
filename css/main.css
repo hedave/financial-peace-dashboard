@@ -505,10 +505,35 @@ body {
   background: color-mix(in srgb, var(--warning) 5%, transparent);
 }
 
+.duplicate-review-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.review-progress {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.65rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.review-empty-msg {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.25rem 0.5rem;
+}
+
 .duplicate-review-list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* Desktop: optional inner scroll; mobile uses modal-body only (see media query) */
   max-height: min(55vh, 28rem);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -541,11 +566,28 @@ body {
   min-width: 0;
   font-weight: 600;
   line-height: 1.35;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.35rem;
+}
+
+.duplicate-review-group-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 28%, var(--bg-card));
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .duplicate-review-count {
   display: inline-block;
-  margin-left: 0.35rem;
+  margin-left: 0.15rem;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -1307,6 +1349,22 @@ html[data-reduce-motion="true"] *::after {
   vertical-align: middle;
 }
 
+/* Prevent background scroll / iOS rubber-band while a modal is open */
+body.modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+  width: 100%;
+}
+
+body.modal-open .app-shell {
+  /* Freeze interactions behind the sheet (modal is a sibling on body) */
+  pointer-events: none;
+}
+
+body.modal-open .modal-backdrop {
+  pointer-events: auto;
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;
@@ -1318,6 +1376,8 @@ html[data-reduce-motion="true"] *::after {
   justify-content: center;
   padding: 1rem;
   animation: fadeIn 0.2s;
+  /* Stacked modals each get their own z-index inline */
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -1326,9 +1386,10 @@ html[data-reduce-motion="true"] *::after {
   box-shadow: var(--shadow-lg);
   width: 100%;
   max-width: 480px;
-  max-height: 90vh;
+  max-height: min(90vh, 90dvh);
   overflow-y: auto;
   animation: slideUp 0.25s;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal.modal-wide {
@@ -1340,7 +1401,7 @@ html[data-reduce-motion="true"] *::after {
 .modal.modal-duplicate-review {
   display: flex;
   flex-direction: column;
-  max-height: min(90vh, 40rem);
+  max-height: min(90vh, 90dvh, 40rem);
   overflow: hidden;
 }
 
@@ -1357,6 +1418,7 @@ html[data-reduce-motion="true"] *::after {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .modal-notes .modal-body {
@@ -3165,25 +3227,37 @@ html[data-reduce-motion="true"] .sticky-note {
     color: var(--destructive);
   }
 
-  /* Modals — near full-screen sheets */
+  /* Modals — near full-screen bottom sheets (stable height with dvh) */
   .modal-backdrop {
     align-items: flex-end;
+    justify-content: stretch;
     padding: 0;
+    /* Prefer visualViewport height (--vvh) so address-bar show/hide is less jumpy */
+    height: 100%;
+    height: 100dvh;
+    height: var(--vvh, 100dvh);
+    max-height: 100dvh;
+    max-height: var(--vvh, 100dvh);
   }
 
   .modal {
     max-width: 100%;
     width: 100%;
-    max-height: min(92vh, 100%);
     max-height: min(92dvh, 100%);
     border-radius: var(--radius) var(--radius) 0 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Avoid double-scroll thrash when address bar shows/hides */
+    margin: 0;
   }
 
-  .modal.modal-wide {
+  .modal.modal-wide,
+  .modal.modal-scrollable,
+  .modal.modal-duplicate-review {
     max-width: 100%;
+    max-height: min(92dvh, 100%);
+    height: auto;
   }
 
   .modal-header {
@@ -3194,14 +3268,17 @@ html[data-reduce-motion="true"] .sticky-note {
   .modal-header h3 {
     font-size: 1.05rem;
     padding-right: 0.5rem;
+    line-height: 1.3;
   }
 
   .modal-body {
     flex: 1 1 auto;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 1rem;
     max-height: none;
+    min-height: 0;
   }
 
   .modal-footer {
@@ -3222,16 +3299,96 @@ html[data-reduce-motion="true"] .sticky-note {
     min-height: 44px;
   }
 
+  /* One scroll surface only — list itself does not nest-scroll on phones */
+  .duplicate-review-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .duplicate-review-group-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .duplicate-review-group-header > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .duplicate-review-item .btn-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.4rem;
+  }
+
+  .duplicate-review-item .btn-group .btn {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
+    font-size: 0.8rem;
+  }
+
+  .review-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+
+  .review-item .btn-group {
+    width: 100%;
+  }
+
+  .review-item .btn-group .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .review-banner .btn-group {
+    width: 100%;
+    margin-left: 0 !important;
+    margin-top: 0.5rem;
+  }
+
+  .review-banner {
+    flex-wrap: wrap;
+  }
+
+  /* Horizontal overflow safety */
+  .main-content,
+  .page-header,
+  .card,
+  .toolbar {
+    max-width: 100%;
+  }
+
+  .table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
   /* Toasts above bottom nav */
   .toast-container {
     bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     right: 0.75rem;
     left: 0.75rem;
     align-items: stretch;
+    z-index: 400;
   }
 
   .toast {
     max-width: none;
+  }
+
+  /* Reduce 300ms tap delay / accidental double-zoom */
+  .btn,
+  .bottom-nav-item,
+  .nav-link,
+  .chip,
+  .close-btn {
+    touch-action: manipulation;
   }
 }
 

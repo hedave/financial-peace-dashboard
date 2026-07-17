@@ -1720,6 +1720,9 @@ class Store {
         }
       }
       if (updates.debtId !== undefined) tx.debtId = updates.debtId || null;
+      if (updates.incomeSourceId !== undefined) {
+        tx.incomeSourceId = updates.incomeSourceId || null;
+      }
 
       // Drop earmark flag if no longer income-with-envelope
       if (tx.type !== 'income' || !tx.categoryId) {
@@ -1735,12 +1738,27 @@ class Store {
       if (newType === 'income' && newStatus === 'cleared' && oldStatus === 'pending') {
         this.applyImportedIncome(s, tx);
       }
+      // Manual source pick wins; otherwise auto-link when still unset
       if (newType === 'income' && !tx.incomeSourceId) {
         const src = resolveIncomeSource(tx.description, s.incomeSources, {
           date: tx.date,
           amount: tx.amount,
         });
         if (src) tx.incomeSourceId = src.id;
+      }
+      // When user labels a planned source on a cleared deposit, sync pay schedule
+      if (
+        newType === 'income'
+        && updates.incomeSourceId
+        && tx.incomeSourceId
+        && newStatus === 'cleared'
+      ) {
+        const src = s.incomeSources.find(i => i.id === tx.incomeSourceId);
+        if (src && !isBonusIncomeSource(src)) {
+          const { paySchedule, monthlyAmount } = syncPaycheckFromImport(src, tx.date, tx.amount);
+          src.paySchedule = paySchedule;
+          src.amount = monthlyAmount;
+        }
       }
     });
   }

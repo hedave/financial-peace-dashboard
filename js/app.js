@@ -51,13 +51,28 @@ async function init() {
   bootstrap();
 }
 
+function softRefreshChrome() {
+  updateNavBadges();
+  refreshSyncChip();
+}
+
 function bootstrap() {
   const shell = document.getElementById('app');
   mainEl = renderLayout(shell, currentPage, navigate);
   renderPage();
   store.subscribe(() => {
     // Notes auto-save silently; re-rendering would reset the textarea while typing
-    if (mainEl && currentPage !== 'notes') renderPage();
+    if (!mainEl || currentPage === 'notes') {
+      softRefreshChrome();
+      return;
+    }
+    // While a modal is open, never rebuild the page — that unmounts review UI
+    // context and causes mobile resize thrash. Modals re-paint themselves.
+    if (document.querySelector('.modal-backdrop')) {
+      softRefreshChrome();
+      return;
+    }
+    renderPage();
   });
 }
 
@@ -115,7 +130,29 @@ function showLockScreen() {
 }
 
 window.appNavigate = navigate;
-window.appRefresh = () => renderPage();
+/** Soft: badges/sync only. Full page re-render when no modal (or force: true). */
+window.appSoftRefresh = softRefreshChrome;
+window.appRefresh = (opts = {}) => {
+  if (!opts.force && document.querySelector('.modal-backdrop')) {
+    softRefreshChrome();
+    return;
+  }
+  renderPage();
+};
+
+/** Keep CSS dvh-ish layout stable when mobile browser chrome resizes. */
+function bindVisualViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const apply = () => {
+    document.documentElement.style.setProperty('--vvh', `${vv.height}px`);
+  };
+  apply();
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+}
+
+bindVisualViewport();
 
 async function startApp() {
   const cloud = await store.initCloud();
@@ -134,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260715i';
+const APP_BUILD = '20260717a';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match
