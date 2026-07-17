@@ -28,7 +28,7 @@ export function renderIncome(container) {
   container.appendChild(el('div', { className: 'section' },
     el('div', { className: 'section-title' }, 'Planned Income Sources'),
     el('p', { className: 'section-hint' },
-      'Name your pay sources (Primary, Secondary, Tertiary, or add more). In Edit dates, set bank-description match terms so CSV imports assign deposits automatically. Unmatched income goes to Bonus Income.'
+      'Name your pay sources and set bank match terms under Edit dates (e.g. “DFAS”, employer name). Imports also match by paycheck amount + pay date. Only truly unmatched deposits go to Bonus Income — so a regular check should not count twice.',
     ),
     el('div', { className: 'card' },
       el('div', { className: 'table-wrap income-desktop-list' },

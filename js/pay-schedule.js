@@ -137,21 +137,80 @@ export function getIncomeMatchTerms(source) {
 export function descriptionMatchesIncomeSource(description, source) {
   const desc = String(description || '').toLowerCase();
   if (!desc) return false;
-  return getIncomeMatchTerms(source).some(term => desc.includes(String(term).toLowerCase()));
+  // Require meaningful terms — ignore ultra-short names that false-positive in bank text
+  return getIncomeMatchTerms(source).some(term => {
+    const t = String(term || '').toLowerCase().trim();
+    if (t.length < 3) return false;
+    return desc.includes(t);
+  });
 }
 
-export function resolveIncomeSource(description, incomeSources = []) {
-  const planned = incomeSources.filter(src => src.type !== 'bonus');
-  const matches = planned.filter(src => descriptionMatchesIncomeSource(description, src));
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    return matches.sort((a, b) => {
-      const aLen = Math.max(...getIncomeMatchTerms(a).map(t => t.length));
-      const bLen = Math.max(...getIncomeMatchTerms(b).map(t => t.length));
+/**
+ * Pick planned income source for a deposit, or Bonus as last resort.
+ * opts: { date, amount } — used so real paychecks aren't mis-tagged Bonus
+ * when match terms aren't set (which double-counts planned + bonus).
+ */
+export function resolveIncomeSource(description, incomeSources = [], opts = {}) {
+  const planned = (incomeSources || []).filter(src => src && src.type !== 'bonus');
+  const bonus = (incomeSources || []).find(src => src?.type === 'bonus') || null;
+  const amt = Math.abs(Number(opts.amount)) || 0;
+  const iso = opts.date ? String(opts.date).slice(0, 10) : null;
+
+  // 1) Unique bank-description match (match terms + source name)
+  const descMatches = planned.filter(src => descriptionMatchesIncomeSource(description, src));
+  if (descMatches.length === 1) return descMatches[0];
+  if (descMatches.length > 1) {
+    return descMatches.sort((a, b) => {
+      const aLen = Math.max(0, ...getIncomeMatchTerms(a).map(t => String(t).length));
+      const bLen = Math.max(0, ...getIncomeMatchTerms(b).map(t => String(t).length));
       return bLen - aLen;
     })[0];
   }
-  return incomeSources.find(src => src.type === 'bonus') || null;
+
+  // 2) Near a scheduled check (date window + amount) — strongest signal for payroll
+  if (amt > 0 && iso) {
+    const scored = [];
+    planned.forEach(src => {
+      const per = getDefaultPerCheckAmount(src);
+      const month = iso.slice(0, 7);
+      const checks = getScheduledChecksForMonth(src, month);
+      checks.forEach(c => {
+        const dayDiff = Math.abs(daysBetween(c.date, iso));
+        if (dayDiff > 5) return;
+        const checkAmt = Number(c.amount) > 0 ? Number(c.amount) : per;
+        const tol = Math.max(1.5, Math.abs(checkAmt || per || amt) * 0.03);
+        if (checkAmt > 0 && amountsClose(amt, checkAmt, tol)) {
+          scored.push({ src, dayDiff, amtDiff: Math.abs(amt - checkAmt) });
+          return;
+        }
+        if (per > 0 && amountsClose(amt, per, tol)) {
+          scored.push({ src, dayDiff, amtDiff: Math.abs(amt - per) });
+        }
+      });
+    });
+    if (scored.length) {
+      scored.sort((a, b) => a.dayDiff - b.dayDiff || a.amtDiff - b.amtDiff);
+      const best = scored[0];
+      const rival = scored.find(s => s.src.id !== best.src.id);
+      if (!rival || best.dayDiff < rival.dayDiff || best.amtDiff + 0.01 < rival.amtDiff) {
+        return best.src;
+      }
+    }
+  }
+
+  // 3) Unique typical per-check amount among planned sources
+  if (amt > 0) {
+    const byAmt = planned.filter(src => {
+      const per = getDefaultPerCheckAmount(src);
+      if (!(per > 0)) return false;
+      const tol = Math.max(1.5, per * 0.03);
+      return amountsClose(amt, per, tol);
+    });
+    if (byAmt.length === 1) return byAmt[0];
+  }
+
+  // 4) True unmatched / gifts → Bonus
+  return bonus;
 }
 
 /** Apply a CSV/logged income deposit to pay schedule amounts */

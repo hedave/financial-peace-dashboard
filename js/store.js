@@ -252,13 +252,22 @@ function normalizeState(state) {
     applyDefaultMatchTerms(src);
   });
   ensureDefaultCategories(state);
+  const bonusSrc = (state.incomeSources || []).find(s => s?.type === 'bonus');
   (state.transactions || []).forEach(tx => {
     // Existing data: treat as bank-cleared so balances don't jump
     if (tx.clearingStatus !== 'pending' && tx.clearingStatus !== 'cleared') {
       tx.clearingStatus = 'cleared';
     }
-    if (tx.type !== 'income' || tx.incomeSourceId) return;
-    const source = resolveIncomeSource(tx.description, state.incomeSources);
+    if (tx.type !== 'income') return;
+    // Re-resolve missing source, or Bonus that is clearly a scheduled paycheck
+    const linked = (state.incomeSources || []).find(s => s.id === tx.incomeSourceId);
+    const isBonusTagged = !linked || linked.type === 'bonus'
+      || (bonusSrc && tx.incomeSourceId === bonusSrc.id);
+    if (tx.incomeSourceId && !isBonusTagged) return;
+    const source = resolveIncomeSource(tx.description, state.incomeSources, {
+      date: tx.date,
+      amount: tx.amount,
+    });
     if (source) tx.incomeSourceId = source.id;
   });
   return state;
@@ -1184,7 +1193,10 @@ class Store {
   }
 
   applyImportedIncome(s, tx) {
-    const source = resolveIncomeSource(tx.description, s.incomeSources);
+    const source = resolveIncomeSource(tx.description, s.incomeSources, {
+      date: tx.date,
+      amount: tx.amount,
+    });
     if (!source) return false;
     tx.incomeSourceId = source.id;
     const src = s.incomeSources.find(i => i.id === source.id);
@@ -1581,7 +1593,10 @@ class Store {
       if (type === 'income') {
         if (status === 'cleared') this.applyImportedIncome(s, newTx);
         if (!newTx.incomeSourceId) {
-          const src = resolveIncomeSource(newTx.description, s.incomeSources);
+          const src = resolveIncomeSource(newTx.description, s.incomeSources, {
+            date: newTx.date,
+            amount: newTx.amount,
+          });
           if (src) newTx.incomeSourceId = src.id;
         }
       }
@@ -1695,7 +1710,10 @@ class Store {
         this.applyImportedIncome(s, tx);
       }
       if (newType === 'income' && !tx.incomeSourceId) {
-        const src = resolveIncomeSource(tx.description, s.incomeSources);
+        const src = resolveIncomeSource(tx.description, s.incomeSources, {
+          date: tx.date,
+          amount: tx.amount,
+        });
         if (src) tx.incomeSourceId = src.id;
       }
     });
