@@ -862,6 +862,20 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 .badge-paid { background: #e8efea; color: #4a6358; }
 .badge-due { background: #f5f0e6; color: #7a6548; }
 .badge-pending { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+
+.debt-paused,
+.debt-paused-row {
+  opacity: 0.92;
+}
+
+.debt-card.debt-paused {
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.debt-on-hold-section .section-title {
+  color: var(--text-muted);
+}
 .badge-overdue { background: #f0e8e8; color: #7a5555; }
 .badge-autopay { background: #e8eef5; color: #4a5f7a; }
 

@@ -737,14 +737,15 @@ class Store {
   }
 
   getMinDebtPaymentsOutsideBudget() {
-    return this.getActiveDebts().reduce((s, d) => {
+    // On-hold debts (e.g. deferred student loans) don't claim budget mins
+    return this.getSnowballDebts().reduce((s, d) => {
       if (this.isDebtMinInBudget(d)) return s;
       return s + (Number(d.minPayment) || 0);
     }, 0);
   }
 
   getRemainingMinDebtPaymentsOutsideBudget(month = getCurrentMonth()) {
-    return this.getActiveDebts().reduce((s, d) => {
+    return this.getSnowballDebts().reduce((s, d) => {
       if (this.isDebtMinInBudget(d)) return s;
       const min = Number(d.minPayment) || 0;
       if (!min) return s;
@@ -1324,7 +1325,7 @@ class Store {
         { id: 'bills', label: 'Link bills to bank transactions', done: inbox.billMatches.length === 0, count: inbox.billMatches.length },
         { id: 'allocate', label: 'Zero-based budget (To Allocate = $0)', done: Math.abs(this.getToAllocate()) < 0.01, count: this.getToAllocate() },
         { id: 'caps', label: 'Review envelopes over soft cap / goal', done: overCap.length === 0, count: overCap.length },
-        { id: 'surplus', label: 'Allocate surplus to debt snowball', done: this.getSurplusForSnowball(month) <= 0 || !this.getActiveDebts().length, count: this.getSurplusForSnowball(month) },
+        { id: 'surplus', label: 'Allocate surplus to debt snowball', done: this.getSurplusForSnowball(month) <= 0 || !this.getSnowballDebts().length, count: this.getSurplusForSnowball(month) },
       ],
     };
   }
@@ -1416,14 +1417,37 @@ class Store {
   }
 
   // --- Debts ---
+  /** Non-archived with a balance (includes on-hold). Sorted smallest → largest. */
   getActiveDebts() {
     return [...this.state.debts]
       .filter(d => !d.archived && (Number(d.balance) || 0) > 0)
       .sort((a, b) => (Number(a.balance) || 0) - (Number(b.balance) || 0));
   }
 
+  /**
+   * Debts in the snowball attack list (excludes on-hold).
+   * Use for target, surplus extra, and payoff ETA while e.g. student loans are deferred in school.
+   */
+  getSnowballDebts() {
+    return this.getActiveDebts().filter(d => !d.paused);
+  }
+
+  getPausedDebts() {
+    return this.getActiveDebts().filter(d => !!d.paused);
+  }
+
+  setDebtPaused(id, paused = true) {
+    this.update(s => {
+      const d = s.debts.find(x => x.id === id);
+      if (!d) return;
+      d.paused = !!paused;
+      if (paused) d.pausedAt = todayISO();
+      else delete d.pausedAt;
+    });
+  }
+
   getSnowballTarget() {
-    const debts = this.getActiveDebts();
+    const debts = this.getSnowballDebts();
     return debts[0] || null;
   }
 
@@ -1431,20 +1455,26 @@ class Store {
     return this.getActiveDebts().reduce((s, d) => s + (Number(d.balance) || 0), 0);
   }
 
+  /** Balance only on debts currently in the snowball (excludes on-hold). */
+  getSnowballDebtTotal() {
+    return this.getSnowballDebts().reduce((s, d) => s + (Number(d.balance) || 0), 0);
+  }
+
   getSnowballPayment(debt) {
-    const debts = this.getActiveDebts();
+    if (!debt || debt.paused) return Number(debt?.minPayment) || 0;
+    const debts = this.getSnowballDebts();
     const idx = debts.findIndex(d => d.id === debt.id);
-    let extra = this.getSurplusForSnowball();
-    let payment = (Number(debt.minPayment) || 0) + extra;
-    for (let i = 0; i < idx; i++) {
-      payment += Number(debts[i].minPayment) || 0;
-    }
+    if (idx < 0) return Number(debt.minPayment) || 0;
     if (idx === 0) return (Number(debt.minPayment) || 0) + this.getSurplusForSnowball();
     return Number(debt.minPayment) || 0;
   }
 
+  /**
+   * Rough months to clear the *snowball* list (on-hold debts are not simulated).
+   * Total owed may still include student loans on hold.
+   */
   estimateMonthsToDebtFree() {
-    const debts = this.getActiveDebts();
+    const debts = this.getSnowballDebts();
     if (!debts.length) return 0;
     let months = 0;
     let surplus = this.getSurplusForSnowball();

@@ -4,9 +4,12 @@ import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
 
 export function renderDebt(container) {
-  const debts = store.getActiveDebts();
+  const snowball = store.getSnowballDebts();
+  const paused = store.getPausedDebts();
+  const allActive = store.getActiveDebts();
   const archived = store.getState().archivedDebts || [];
   const total = store.getTotalDebt();
+  const snowballTotal = store.getSnowballDebtTotal();
   const months = store.estimateMonthsToDebtFree();
   const target = store.getSnowballTarget();
   const surplus = store.getSurplusForSnowball();
@@ -20,21 +23,31 @@ export function renderDebt(container) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Debt Snowball'),
-    el('p', {}, 'Attack the smallest balance first — behavior change beats math!')
+    el('p', {}, 'Attack the smallest balance first. Put deferred loans (e.g. student loans in school) on hold so they leave the attack list.')
   ));
 
   container.appendChild(el('div', { className: 'grid grid-4 section' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Total Debt'),
-      el('div', { className: 'card-value negative' }, formatCurrency(total))
+      el('div', { className: 'card-value negative' }, formatCurrency(total)),
+      paused.length
+        ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+          `${formatCurrency(snowballTotal)} in snowball · ${formatCurrency(total - snowballTotal)} on hold`)
+        : null,
     ),
     el('div', { className: 'card' },
-      el('div', { className: 'card-title' }, 'Active Debts'),
-      el('div', { className: 'card-value' }, String(debts.length))
+      el('div', { className: 'card-title' }, 'In Snowball'),
+      el('div', { className: 'card-value' }, String(snowball.length)),
+      paused.length
+        ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+          `${paused.length} on hold`)
+        : null,
     ),
     el('div', { className: 'card' },
-      el('div', { className: 'card-title' }, 'Est. Months to Free'),
-      el('div', { className: 'card-value accent' }, debts.length ? `~${months}` : '0')
+      el('div', { className: 'card-title' }, 'Est. Months (snowball)'),
+      el('div', { className: 'card-value accent' }, snowball.length ? `~${months}` : '0'),
+      el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+        paused.length ? 'On-hold debts not in ETA' : 'At today’s surplus + mins'),
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Monthly Surplus'),
@@ -56,40 +69,81 @@ export function renderDebt(container) {
         onClick: () => makePayment(target)
       }, 'Make Payment')
     ));
+  } else if (paused.length && !snowball.length) {
+    container.appendChild(el('div', { className: 'banner banner-action section' },
+      el('div', { className: 'banner-icon' }, '⏸️'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, 'All remaining debts are on hold'),
+        el('p', {}, 'No snowball target until you resume a debt — or you’re only carrying deferred balances.'),
+      ),
+    ));
   }
 
   container.appendChild(el('div', { className: 'btn-group section' },
     el('button', { className: 'btn btn-primary', onClick: () => openDebtForm() }, '+ Add Debt'),
-    el('button', { className: 'btn btn-accent', onClick: () => allocateAllSurplus() }, 'Allocate All Surplus'),
+    snowball.length
+      ? el('button', { className: 'btn btn-accent', onClick: () => allocateAllSurplus() }, 'Allocate All Surplus')
+      : null,
   ));
 
-  if (!debts.length) {
+  if (!allActive.length) {
     container.appendChild(emptyState('🎉', 'Debt Free!', 'You\'ve crushed the snowball. Time to build wealth!'));
   } else {
-    const list = el('div', { className: 'section debt-list' });
-    list.appendChild(el('div', { className: 'card debt-desktop-list' },
-      el('div', { className: 'table-wrap' },
-        el('table', {},
-          el('thead', {}, el('tr', {},
-            el('th', {}, '#'),
-            el('th', {}, 'Debt'),
-            el('th', {}, 'Balance'),
-            el('th', {}, 'Rate'),
-            el('th', {}, 'Min Payment'),
-            el('th', {}, 'Envelope'),
-            el('th', {}, 'Due / Notes'),
-            el('th', {}, 'Actions'),
-          )),
-          el('tbody', {},
-            ...debts.map((d, i) => debtRow(d, i === 0))
+    if (snowball.length) {
+      const list = el('div', { className: 'section debt-list' });
+      list.appendChild(el('div', { className: 'section-title' }, 'Snowball order (smallest first)'));
+      list.appendChild(el('div', { className: 'card debt-desktop-list' },
+        el('div', { className: 'table-wrap' },
+          el('table', {},
+            el('thead', {}, el('tr', {},
+              el('th', {}, '#'),
+              el('th', {}, 'Debt'),
+              el('th', {}, 'Balance'),
+              el('th', {}, 'Rate'),
+              el('th', {}, 'Min Payment'),
+              el('th', {}, 'Envelope'),
+              el('th', {}, 'Due / Notes'),
+              el('th', {}, 'Actions'),
+            )),
+            el('tbody', {},
+              ...snowball.map((d, i) => debtRow(d, i === 0, i + 1))
+            )
           )
         )
-      )
-    ));
-    list.appendChild(el('div', { className: 'debt-mobile-list' },
-      ...debts.map((d, i) => debtCard(d, i === 0))
-    ));
-    container.appendChild(list);
+      ));
+      list.appendChild(el('div', { className: 'debt-mobile-list' },
+        ...snowball.map((d, i) => debtCard(d, i === 0))
+      ));
+      container.appendChild(list);
+    }
+
+    if (paused.length) {
+      const hold = el('div', { className: 'section debt-list debt-on-hold-section' });
+      hold.appendChild(el('div', { className: 'section-title' }, '⏸️ On hold (outside snowball)'));
+      hold.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+        'Still counted in total debt and Baby Step progress, but they don’t take snowball surplus or minimums in the plan. Resume when you’re ready to attack them (e.g. after school).',
+      ));
+      hold.appendChild(el('div', { className: 'card debt-desktop-list' },
+        el('div', { className: 'table-wrap' },
+          el('table', {},
+            el('thead', {}, el('tr', {},
+              el('th', {}, 'Debt'),
+              el('th', {}, 'Balance'),
+              el('th', {}, 'Rate'),
+              el('th', {}, 'Min'),
+              el('th', {}, 'Actions'),
+            )),
+            el('tbody', {},
+              ...paused.map(d => pausedDebtRow(d))
+            )
+          )
+        )
+      ));
+      hold.appendChild(el('div', { className: 'debt-mobile-list' },
+        ...paused.map(d => debtCard(d, false, { paused: true }))
+      ));
+      container.appendChild(hold);
+    }
   }
 
   if (archived.length) {
@@ -107,7 +161,26 @@ export function renderDebt(container) {
   }
 }
 
-function debtMoreMenu(debt) {
+function toggleDebtHold(debt, pause) {
+  const name = debt.name || 'this debt';
+  if (pause) {
+    confirmDialog(
+      'Put on hold?',
+      `Pause “${name}” from the snowball? It stays on your total debt list but won’t receive surplus or count toward snowball ETA. Use for deferred loans (e.g. student loans in school).`,
+      () => {
+        store.setDebtPaused(debt.id, true);
+        showToast(`${name} on hold`, 'info');
+        window.appRefresh();
+      },
+    );
+  } else {
+    store.setDebtPaused(debt.id, false);
+    showToast(`${name} back in the snowball`, 'success');
+    window.appRefresh();
+  }
+}
+
+function debtMoreMenu(debt, { paused = false } = {}) {
   const menu = el('details', { className: 'tx-more-menu' });
   const summary = el('summary', {
     className: 'btn btn-sm btn-secondary tx-more-trigger',
@@ -120,6 +193,14 @@ function debtMoreMenu(debt) {
     className: 'tx-more-item',
     onClick: () => { menu.removeAttribute('open'); openDebtForm(debt); },
   }, 'Edit'));
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: () => {
+      menu.removeAttribute('open');
+      toggleDebtHold(debt, !paused);
+    },
+  }, paused ? 'Resume snowball' : 'Put on hold'));
   items.appendChild(el('button', {
     type: 'button',
     className: 'tx-more-item',
@@ -152,7 +233,42 @@ function debtMoreMenu(debt) {
   return menu;
 }
 
-function debtRow(debt, isTarget) {
+function pausedDebtRow(debt) {
+  return el('tr', { className: 'debt-paused-row bill-row-clickable' },
+    el('td', {},
+      el('button', {
+        type: 'button',
+        className: 'linkish',
+        onClick: () => openDebtActivity(debt),
+      }, debt.name),
+      el('span', { className: 'badge badge-pending', style: 'margin-left:0.4rem' }, 'On hold'),
+    ),
+    el('td', { style: 'font-weight:700' }, formatCurrency(debt.balance)),
+    el('td', {}, debt.interestRate ? `${debt.interestRate}%` : '—'),
+    el('td', {}, formatCurrency(debt.minPayment)),
+    el('td', {},
+      el('div', { className: 'btn-group' },
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          onClick: () => toggleDebtHold(debt, false),
+        }, 'Resume'),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => makePayment(debt),
+        }, 'Pay'),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => openDebtForm(debt),
+        }, 'Edit'),
+      ),
+    ),
+  );
+}
+
+function debtRow(debt, isTarget, orderNum = '') {
   const state = store.getState();
   const cat = (state.categories || []).find(c => c.id === debt.categoryId);
   return el('tr', {
@@ -163,7 +279,7 @@ function debtRow(debt, isTarget) {
       openDebtActivity(debt);
     },
   },
-    el('td', {}, isTarget ? '🎯' : ''),
+    el('td', {}, isTarget ? '🎯' : String(orderNum || '')),
     el('td', {},
       el('button', {
         type: 'button',
@@ -187,6 +303,12 @@ function debtRow(debt, isTarget) {
           onClick: (e) => { e.stopPropagation(); openDebtForm(debt); },
         }, 'Edit'),
         el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          title: 'Pause from snowball (e.g. deferred student loans)',
+          onClick: (e) => { e.stopPropagation(); toggleDebtHold(debt, true); },
+        }, 'Hold'),
+        el('button', {
           className: 'btn btn-sm btn-accent',
           onClick: (e) => {
             e.stopPropagation();
@@ -206,12 +328,13 @@ function debtRow(debt, isTarget) {
   );
 }
 
-function debtCard(debt, isTarget) {
+function debtCard(debt, isTarget, opts = {}) {
+  const paused = !!opts.paused || !!debt.paused;
   const state = store.getState();
   const cat = (state.categories || []).find(c => c.id === debt.categoryId);
   const paidThisMonth = store.getDebtPaidThisMonth(debt.id);
   return el('article', {
-    className: `tx-card debt-card${isTarget ? ' debt-target' : ''} envelope-card-clickable`,
+    className: `tx-card debt-card${isTarget ? ' debt-target' : ''}${paused ? ' debt-paused' : ''} envelope-card-clickable`,
     title: 'Tap to see payment history',
     onClick: (e) => {
       if (e.target.closest('button, a, details, summary')) return;
@@ -220,7 +343,7 @@ function debtCard(debt, isTarget) {
   },
     el('div', { className: 'tx-card-top' },
       el('span', { className: 'tx-card-desc' },
-        isTarget ? '🎯 ' : '',
+        isTarget ? '🎯 ' : paused ? '⏸️ ' : '',
         debt.name
       ),
       el('span', { className: 'tx-card-amount' }, formatCurrency(debt.balance))
@@ -237,16 +360,24 @@ function debtCard(debt, isTarget) {
       (debt.dueDate || debt.notes)
         ? el('div', { className: 'tx-card-meta' }, debt.dueDate || debt.notes)
         : null,
-      isTarget ? el('div', { className: 'tx-card-badges' },
-        el('span', { className: 'tx-type-badge' }, 'Snowball target')
-      ) : null,
+      isTarget || paused
+        ? el('div', { className: 'tx-card-badges' },
+          isTarget ? el('span', { className: 'tx-type-badge' }, 'Snowball target') : null,
+          paused ? el('span', { className: 'badge badge-pending' }, 'On hold') : null,
+        )
+        : null,
     ),
     el('div', { className: 'tx-card-actions' },
-      el('button', {
-        className: 'btn btn-sm btn-primary',
-        onClick: (e) => { e.stopPropagation(); makePayment(debt); },
-      }, 'Pay'),
-      debtMoreMenu(debt)
+      paused
+        ? el('button', {
+          className: 'btn btn-sm btn-primary',
+          onClick: (e) => { e.stopPropagation(); toggleDebtHold(debt, false); },
+        }, 'Resume')
+        : el('button', {
+          className: 'btn btn-sm btn-primary',
+          onClick: (e) => { e.stopPropagation(); makePayment(debt); },
+        }, 'Pay'),
+      debtMoreMenu(debt, { paused })
     )
   );
 }
@@ -426,6 +557,8 @@ function openDebtForm(debt = null) {
   const minIn = el('input', { type: 'number', step: '0.01', value: debt?.minPayment || 0 });
   const dueIn = el('input', { type: 'text', value: debt?.dueDate || '', placeholder: 'Due date or notes' });
   const notesIn = el('textarea', { rows: 2 }, debt?.notes || '');
+  const pausedIn = el('input', { type: 'checkbox' });
+  if (debt?.paused) pausedIn.checked = true;
 
   const catSelect = el('select');
   catSelect.appendChild(el('option', { value: '' }, '— Select Envelope —'));
@@ -450,6 +583,18 @@ function openDebtForm(debt = null) {
       el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:-0.25rem 0 0.75rem' },
         'Link this debt to an envelope so minimum payments count toward your monthly budget.'
       ),
+      el('div', { className: 'form-option', style: 'margin-bottom:0.75rem' },
+        el('div', { className: 'form-option-text' },
+          el('span', { className: 'form-option-label' }, 'On hold (outside snowball)'),
+          el('span', { className: 'form-option-hint' },
+            'Use for deferred loans (e.g. student loans in school). Balance still counts toward total debt; surplus goes to other debts first.',
+          ),
+        ),
+        el('label', { className: 'toggle-switch' },
+          pausedIn,
+          el('span', { className: 'toggle-slider' }),
+        ),
+      ),
       el('div', { className: 'form-group' }, el('label', {}, 'Notes'), notesIn),
     ),
     footer: el('button', {
@@ -465,10 +610,20 @@ function openDebtForm(debt = null) {
           notes: notesIn.value,
           categoryId: catSelect.value || null,
           archived: false,
+          paused: !!pausedIn.checked,
         };
+        if (data.paused) data.pausedAt = debt?.pausedAt || todayISO();
+        else delete data.pausedAt;
         store.update(s => {
-          if (isEdit) Object.assign(s.debts.find(d => d.id === debt.id), data);
-          else s.debts.push({ id: crypto.randomUUID(), ...data });
+          if (isEdit) {
+            const existing = s.debts.find(d => d.id === debt.id);
+            if (existing) {
+              Object.assign(existing, data);
+              if (!data.paused) delete existing.pausedAt;
+            }
+          } else {
+            s.debts.push({ id: crypto.randomUUID(), ...data });
+          }
         });
         modal.close();
       },

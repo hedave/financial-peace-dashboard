@@ -194,7 +194,8 @@ export function buildAdvisorSnapshot(opts = {}) {
   const babyStep = store.detectBabyStep();
   const babyMeta = BABY_STEPS.find(s => s.step === babyStep) || null;
   const target = store.getSnowballTarget();
-  const activeDebts = store.getActiveDebts();
+  const activeDebts = store.getSnowballDebts();
+  const pausedDebts = store.getPausedDebts();
   const totalDebt = round2(store.getTotalDebt());
   const monthsToDebtFree = store.estimateMonthsToDebtFree();
   const inbox = store.getReviewInbox(month);
@@ -459,7 +460,14 @@ export function buildAdvisorSnapshot(opts = {}) {
     },
     billsNext7,
     debts,
+    pausedDebts: pausedDebts.map(d => ({
+      id: d.id,
+      name: d.name,
+      balance: round2(d.balance),
+      minPayment: round2(d.minPayment),
+    })),
     totalDebt,
+    snowballDebtTotal: round2(store.getSnowballDebtTotal()),
     snowballTarget: target
       ? {
           id: target.id,
