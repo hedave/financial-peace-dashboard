@@ -13,3 +13,5 @@ backups/
 Thumbs.db
 *.swp
 .vscode/
+docs/.Rhistory
+.Rhistory
