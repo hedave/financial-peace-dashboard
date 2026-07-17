@@ -557,11 +557,36 @@ function descriptionTokens(str) {
 export function normalizeMerchantDescription(description) {
   let s = String(description || '').toLowerCase();
   s = s.replace(/[''`]/g, '');
+  // Collapse common Amazon / marketplace variants before tokenizing
+  s = s.replace(/\bamzn\b/g, 'amazon');
+  s = s.replace(/\bamazon\.?com\b/g, 'amazon');
+  s = s.replace(/\bmktpl\b|\bmktplace\b|\bmarketplace\b/g, 'marketplace');
+  s = s.replace(/\bwal-?mart\b/g, 'walmart');
+  s = s.replace(/\bmc donald/g, 'mcdonald');
   s = s.replace(STORE_NUMBER, ' ');
+  // Order / auth codes (AMAZON MKTPL*XP57B2H33)
+  s = s.replace(/\*[a-z0-9]+\b/g, ' ');
+  s = s.replace(/\b[a-z]*\d{3,}[a-z0-9]*\b/g, ' ');
   s = s.replace(DESC_NOISE, ' ');
   s = s.replace(/[^a-z0-9\s]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
   return s;
+}
+
+/** Shared “real” merchant word (amazon, walmart, …) — ignores city/state noise */
+export function shareStrongMerchantToken(a, b) {
+  const ta = descriptionTokens(a);
+  const tb = descriptionTokens(b);
+  if (!ta.size || !tb.size) return false;
+  const weak = new Set([
+    'com', 'www', 'bill', 'billwa', 'online', 'store', 'inc', 'llc', 'usa',
+    'us', 'wa', 'nc', 'ca', 'tx', 'ny', 'fl', 'ar', 'oh', 'pa', 'the', 'and',
+  ]);
+  for (const t of ta) {
+    if (t.length < 5 || weak.has(t)) continue;
+    if (tb.has(t)) return true;
+  }
+  return false;
 }
 
 export function descriptionSimilarity(a, b) {
@@ -581,7 +606,13 @@ export function descriptionSimilarity(a, b) {
   let overlap = 0;
   ta.forEach(token => { if (tb.has(token)) overlap++; });
   const union = ta.size + tb.size - overlap;
-  return overlap / union;
+  let score = union > 0 ? overlap / union : 0;
+
+  // Brand-level boost: AMAZON.COM vs AMAZON MKTPL*XXXX should still pair
+  if (shareStrongMerchantToken(na, nb)) {
+    score = Math.max(score, 0.65);
+  }
+  return score;
 }
 
 export function areDescriptionsSimilar(a, b, threshold = 0.55) {
@@ -629,9 +660,15 @@ export function areLikelyDuplicatePair(a, b, {
   if (dayDiff === 0) return true;
   if (dayDiff > dateWindowDays) return false;
 
-  // Cross-day same amount + similar merchant: flag for review only
-  // (two kids buying the same $12.83 game a few days apart is legitimate)
-  return areDescriptionsSimilar(a.description, b.description, crossDaySimilarity);
+  // Cross-day same amount: need similar merchant.
+  // Use a slightly looser bar within 1–2 days (bank post lag / Amazon split posts).
+  // Still requires merchant similarity so two different $12.83 kids' games can be
+  // marked unique if descriptions differ and user confirms.
+  const threshold = dayDiff <= 2 ? Math.min(crossDaySimilarity, 0.45) : crossDaySimilarity;
+  if (areDescriptionsSimilar(a.description, b.description, threshold)) return true;
+  // AMAZON.COM vs AMAZON MKTPL*orderid often fail pure Jaccard — brand token is enough
+  if (shareStrongMerchantToken(a.description, b.description)) return true;
+  return false;
 }
 
 /** Soft match for Review UI / banners — includes cross-day similar merchants. */
