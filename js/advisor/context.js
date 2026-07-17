@@ -8,6 +8,7 @@ import {
   getMonthLabel,
   getPreviousMonth,
   todayISO,
+  daysUntil,
 } from '../utils.js';
 import { BABY_STEPS } from '../defaults.js';
 
@@ -34,70 +35,124 @@ function resolveNamedCategory(categories, aliasId, hints) {
   return byName ? { cat: byName, source: 'name' } : { cat: null, source: 'none' };
 }
 
+/**
+ * Unpaid bills due on or before horizon (inclusive).
+ * Unlike getUpcomingBills(), this is NOT capped to the current calendar month —
+ * payday often lands in the next month near month-end.
+ */
+function unpaidBillsThrough(horizon) {
+  const bills = store.getState().bills || [];
+  return bills
+    .filter(b => b && b.status !== 'paid')
+    .filter(b => {
+      const due = String(b.dueDate || '').slice(0, 10);
+      if (!due) return true; // open obligation, no date
+      if (!horizon) return true;
+      return due <= horizon;
+    })
+    .map(b => ({
+      ...b,
+      daysLeft: b.dueDate ? daysUntil(b.dueDate) : NaN,
+    }))
+    .sort((a, b) => {
+      const da = String(a.dueDate || '').slice(0, 10);
+      const db = String(b.dueDate || '').slice(0, 10);
+      if (!da && !db) return String(a.name || '').localeCompare(String(b.name || ''));
+      if (!da) return 1;
+      if (!db) return -1;
+      return da.localeCompare(db);
+    });
+}
+
 function buildPaydayBrief(month) {
   const today = todayISO();
   const payStatus = store.getPaycheckStatus(month);
   const upcoming = [];
 
+  // Keys already in checking via a matched deposit — must not add again as "next check"
+  const receivedKeys = new Set();
   payStatus.forEach(p => {
-    (p.upcoming || []).forEach(c => {
-      if (!c.date || c.date < today) return;
+    (p.checks || []).forEach(c => {
+      if (c.status === 'received' && c.date) {
+        receivedKeys.add(`${p.id}|${String(c.date).slice(0, 10)}`);
+      }
+    });
+  });
+
+  // Prefer month checks first (have received/overdue status), then calendar upcoming
+  payStatus.forEach(p => {
+    (p.checks || []).forEach(c => {
+      if (!c.date || c.status === 'received') return;
+      // Include overdue unreceived — deposit still expected
       upcoming.push({
         sourceId: p.id,
         source: p.name,
-        date: c.date,
-        amount: round2(c.amount || p.perCheck || 0),
+        date: String(c.date).slice(0, 10),
+        amount: round2(Number(c.amount) > 0 ? c.amount : (p.perCheck || 0)),
+        status: c.status,
       });
     });
-    (p.checks || []).forEach(c => {
-      if (!c.date || c.date < today) return;
-      if (c.status === 'received') return;
+    (p.upcoming || []).forEach(c => {
+      if (!c.date) return;
+      const date = String(c.date).slice(0, 10);
+      if (date < today) return;
+      if (receivedKeys.has(`${p.id}|${date}`)) return;
       upcoming.push({
         sourceId: p.id,
         source: p.name,
-        date: c.date,
-        amount: round2(c.receivedAmount || c.amount || p.perCheck || 0),
-        status: c.status,
+        date,
+        amount: round2(Number(c.amount) > 0 ? c.amount : (p.perCheck || 0)),
       });
     });
   });
 
-  // Dedupe by source+date
+  // Dedupe by source+date (checks path wins when listed first)
   const seen = new Set();
   const unique = upcoming.filter(c => {
     const key = `${c.sourceId}|${c.date}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).sort((a, b) => a.date.localeCompare(b.date));
+  }).sort((a, b) => a.date.localeCompare(b.date) || String(a.source).localeCompare(String(b.source)));
 
-  const next = unique[0] || null;
-  const horizon = next?.date || null;
+  const nextDate = unique[0]?.date || null;
+  // All household checks landing on the next pay day (not just the first source)
+  const nextChecks = nextDate ? unique.filter(c => c.date === nextDate) : [];
+  const nextAmount = round2(nextChecks.reduce((s, c) => s + (Number(c.amount) || 0), 0));
+  const next = nextChecks[0]
+    ? {
+        ...nextChecks[0],
+        amount: nextAmount,
+        source: nextChecks.length === 1
+          ? nextChecks[0].source
+          : nextChecks.map(c => c.source).join(' + '),
+      }
+    : null;
+  const horizon = nextDate;
 
-  const allUpcomingBills = store.getUpcomingBills(45);
+  // Bills due through payday — full unpaid list, not dashboard's this-month glance
   const billsBeforePay = horizon
-    ? allUpcomingBills.filter(b => {
-        const due = String(b.dueDate || '').slice(0, 10);
-        if (!due) return true;
-        return due <= horizon;
-      })
-    : store.getUpcomingBills(14);
+    ? unpaidBillsThrough(horizon)
+    : unpaidBillsThrough(null).filter(b => {
+        if (!Number.isFinite(b.daysLeft)) return true;
+        return b.daysLeft <= 14;
+      });
 
   const billsTotal = round2(billsBeforePay.reduce((s, b) => s + (Number(b.amount) || 0), 0));
   const remainingMins = round2(store.getRemainingMinDebtPaymentsOutsideBudget(month));
-  const nextAmount = next ? next.amount : 0;
   const checking = round2(store.getState().balances?.checking);
-  // Cash available through payday = what's in checking now + the next check
+  // Cash through payday = logged checking now + checks not yet received that land on pay day
+  // (checking already includes deposits marked received)
   const cashThroughPay = next ? round2(checking + nextAmount) : null;
   const afterBills = cashThroughPay != null ? round2(cashThroughPay - billsTotal) : null;
   const afterBillsAndMins = cashThroughPay != null
     ? round2(cashThroughPay - billsTotal - remainingMins)
     : null;
-  // Check-only view (legacy / comparison) — not the primary "room" number
   const afterBillsCheckOnly = next ? round2(nextAmount - billsTotal) : null;
 
   return {
     next,
+    nextChecks,
     upcoming: unique.slice(0, 6),
     billsBeforePay: billsBeforePay.map(b => ({
       id: b.id,

@@ -113,6 +113,8 @@ export function saveAnswerToNotes(answer) {
 function answerPayday(snap) {
   const pd = snap.payday || {};
   const next = pd.next;
+  const nextChecks = pd.nextChecks?.length ? pd.nextChecks : (next ? [next] : []);
+  const nextAmount = pd.nextAmount ?? nextChecks.reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
   if (!next) {
     return {
@@ -129,41 +131,50 @@ function answerPayday(snap) {
   }
 
   const checking = pd.checking ?? 0;
-  const cashThroughPay = pd.cashThroughPay ?? r2(checking + next.amount);
+  const cashThroughPay = pd.cashThroughPay ?? r2(checking + nextAmount);
+
+  const payLine = nextChecks.length > 1
+    ? `Next pay day: ${formatDate(next.date)} — ${nextChecks.map(c =>
+        `${c.source} ~${formatCurrency(c.amount)}`
+      ).join('; ')} (total about ${formatCurrency(nextAmount)}).`
+    : `Next paycheck: ${next.source} on ${formatDate(next.date)} for about ${formatCurrency(nextAmount)}.`;
 
   const paragraphs = [
-    `Next paycheck: ${next.source} on ${formatDate(next.date)} for about ${formatCurrency(next.amount)}.`,
-    `Checking now: ${formatCurrency(checking)} · cash through payday (checking + check): ${formatCurrency(cashThroughPay)}.`,
+    payLine,
+    `Checking now: ${formatCurrency(checking)} · cash through payday (checking + check${nextChecks.length > 1 ? 's' : ''}): ${formatCurrency(cashThroughPay)}.`,
     pd.billsBeforePay?.length
-      ? `${pd.billsBeforePay.length} bill(s) due on or before that day, totaling ${formatCurrency(pd.billsTotal)}.`
+      ? `${pd.billsBeforePay.length} unpaid bill(s) due on or before that day, totaling ${formatCurrency(pd.billsTotal)}.`
       : 'No unpaid bills due on or before that paycheck.',
   ];
 
   if (pd.remainingMinsOutsideBudget > 0) {
     paragraphs.push(
-      `Debt minimums still due this month (not already in envelopes): ${formatCurrency(pd.remainingMinsOutsideBudget)}.`
+      `Debt minimums still due this month (not already in envelopes): ${formatCurrency(pd.remainingMinsOutsideBudget)}. These are month totals, not necessarily due before payday.`
     );
   }
 
   if (pd.afterBills != null) {
     paragraphs.push(
       `Rough room after those bills: ${formatCurrency(pd.afterBills)}`
-      + ` (checking ${formatCurrency(checking)} + check ${formatCurrency(next.amount)} − bills ${formatCurrency(pd.billsTotal || 0)})`
+      + ` (checking ${formatCurrency(checking)} + check${nextChecks.length > 1 ? 's' : ''} ${formatCurrency(nextAmount)} − bills ${formatCurrency(pd.billsTotal || 0)})`
       + (pd.remainingMinsOutsideBudget > 0
         ? ` · after bills + outside-budget mins: ${formatCurrency(pd.afterBillsAndMins)}.`
         : '.')
     );
     paragraphs.push(
-      'This is not a full budget — groceries, gas, and other envelopes still apply. Checking is your logged balance under Income & Balances.'
+      'This is not a full budget — groceries, gas, and other envelopes still apply. Checking is your logged balance under Income & Balances (already includes any paycheck marked received).'
     );
   }
+
+  // Later pays: after the next pay day (not other sources on the same day)
+  const laterPays = (pd.upcoming || []).filter(c => c.date > next.date).slice(0, 4);
 
   const bullets = [
     ...(pd.billsBeforePay || []).slice(0, 8).map(b =>
       `${b.name}: ${formatCurrency(b.amount)} · ${b.dueDate ? formatDate(b.dueDate) : 'no due date'}`
       + (b.daysLeft < 0 ? ' (overdue)' : b.daysLeft === 0 ? ' (today)' : '')
     ),
-    ...(pd.upcoming || []).slice(1, 4).map(c =>
+    ...laterPays.map(c =>
       `Later pay: ${c.source} · ${formatDate(c.date)} · ${formatCurrency(c.amount)}`
     ),
   ];
@@ -175,7 +186,7 @@ function answerPayday(snap) {
     bullets: bullets.length ? bullets : undefined,
     metrics: [
       { label: 'Checking', value: formatCurrency(checking), tone: '' },
-      { label: 'Next check', value: formatCurrency(next.amount), tone: 'accent' },
+      { label: nextChecks.length > 1 ? 'Next pay day' : 'Next check', value: formatCurrency(nextAmount), tone: 'accent' },
       { label: 'Bills before', value: formatCurrency(pd.billsTotal || 0), tone: '' },
       {
         label: 'After bills',
