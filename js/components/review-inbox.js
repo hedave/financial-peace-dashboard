@@ -173,10 +173,10 @@ export function openDuplicateReview() {
   const progressEl = el('div', { className: 'review-progress' });
   const list = el('div', { className: 'review-list duplicate-review-list' });
   let modal;
-  let closedByEmpty = false;
 
   function softChrome() {
-    window.appSoftRefresh?.() || window.appRefresh?.();
+    // Never fall through to full appRefresh — that rebuilds the page and feels like a kick-out
+    window.appSoftRefresh?.();
   }
 
   function remainingGroups() {
@@ -188,20 +188,20 @@ export function openDuplicateReview() {
     const flagged = groups.reduce((s, g) => s + g.length, 0);
     progressEl.textContent = n
       ? `${n} group${n === 1 ? '' : 's'} · ${flagged} transaction${flagged === 1 ? '' : 's'} to review`
-      : 'All clear';
+      : 'All clear — hit Done when you’re finished';
     if (modal?.setTitle) {
-      modal.setTitle(n ? `Possible duplicates · ${n} left` : 'Possible duplicates');
+      modal.setTitle(n ? `Possible duplicates · ${n} left` : 'Possible duplicates · done');
     }
   }
 
-  /** Stay in the modal until the user finishes or explicitly closes. */
-  function finishIfEmpty() {
-    if (remainingGroups().length) return false;
-    closedByEmpty = true;
-    showToast('All possible duplicates reviewed', 'success');
-    // Brief beat so the empty state is visible, then close
-    setTimeout(() => modal?.close(), 280);
-    return true;
+  /** Re-paint list in place. Never auto-close — user hits Done (avoids pair-by-pair kick-out). */
+  function afterAction(toastMsg, toastType = 'success') {
+    if (toastMsg) showToast(toastMsg, toastType);
+    // Defer paint so confirm dialogs / nested modals finish unmounting first
+    queueMicrotask(() => {
+      paint();
+      softChrome();
+    });
   }
 
   function paint() {
@@ -210,7 +210,8 @@ export function openDuplicateReview() {
     updateProgress(groups);
 
     if (!groups.length) {
-      list.appendChild(el('p', { className: 'review-empty-msg' }, 'No possible duplicates left. Nice work.'));
+      list.appendChild(el('p', { className: 'review-empty-msg' },
+        'No possible duplicates left. Nice work — click Done to close.'));
       return;
     }
 
@@ -228,17 +229,15 @@ export function openDuplicateReview() {
           type: 'button',
           className: 'btn btn-sm btn-primary',
           title: 'Confirm all of these are real purchases (not double-posts)',
-          onClick: () => {
+          onClick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             store.markTransactionsUnique(items.map(t => t.id));
-            showToast(
+            afterAction(
               items.length === 2
                 ? 'Marked both as unique'
                 : `Marked ${items.length} as unique`,
-              'success',
             );
-            paint();
-            softChrome();
-            finishIfEmpty();
           },
         }, items.length === 2 ? 'Both unique' : 'All unique'),
       ));
@@ -262,15 +261,13 @@ export function openDuplicateReview() {
             el('button', {
               type: 'button',
               className: 'btn btn-sm btn-secondary',
-              onClick: () => {
+              onClick: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 import('../pages/transactions.js').then(m => {
                   m.openTransactionForm({
                     transaction: t,
-                    onSaved: () => {
-                      paint();
-                      softChrome();
-                      finishIfEmpty();
-                    },
+                    onSaved: () => afterAction('Transaction updated'),
                   });
                 });
               },
@@ -279,25 +276,24 @@ export function openDuplicateReview() {
               type: 'button',
               className: 'btn btn-sm btn-accent',
               title: 'This one is a real purchase — stop flagging it',
-              onClick: () => {
+              onClick: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 store.markTransactionsUnique([t.id]);
-                showToast('Marked unique', 'success');
-                paint();
-                softChrome();
-                finishIfEmpty();
+                afterAction('Marked unique');
               },
             }, 'Keep'),
             el('button', {
               type: 'button',
               className: 'btn btn-sm btn-danger',
-              onClick: () => confirmDeleteTransaction(t, {
-                label: 'this entry (keep the other if it is the real one)',
-                onDone: () => {
-                  paint();
-                  softChrome();
-                  finishIfEmpty();
-                },
-              }),
+              onClick: (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmDeleteTransaction(t, {
+                  label: 'this entry (keep the other if it is the real one)',
+                  onDone: () => afterAction('Deleted'),
+                });
+              },
             }, 'Delete'),
           ),
         ));
@@ -307,13 +303,11 @@ export function openDuplicateReview() {
     });
   }
 
-  paint();
-
   modal = showModal({
     title: `Possible duplicates · ${groupsAtOpen.length} left`,
     body: el('div', { className: 'duplicate-review-body' },
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
-        'Same amount and similar merchant. Delete true double-posts, or mark unique when both are real (e.g. two kids). This window stays open until you finish.',
+        'Same amount and similar merchant. Delete true double-posts, or mark unique when both are real. This window stays open until you click Done.',
       ),
       progressEl,
       list,
@@ -329,11 +323,12 @@ export function openDuplicateReview() {
         },
       }, 'Open Transactions'),
     ],
-    onClose: () => {
-      if (!closedByEmpty) softChrome();
-    },
+    // Don’t dismiss by clicking the dimmed backdrop (desktop misfires are common)
+    closeOnBackdrop: false,
+    onClose: () => softChrome(),
   });
   modal.modal.classList.add('modal-wide', 'modal-duplicate-review', 'modal-scrollable');
+  paint();
 }
 
 /**

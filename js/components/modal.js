@@ -80,7 +80,7 @@ function afterModalStackChange() {
   }, 60);
 }
 
-export function showModal({ title, body, footer, onClose }) {
+export function showModal({ title, body, footer, onClose, closeOnBackdrop = true }) {
   bindEscapeOnce();
   const backdrop = el('div', { className: 'modal-backdrop' });
   const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
@@ -105,16 +105,23 @@ export function showModal({ title, body, footer, onClose }) {
     afterModalStackChange();
   };
 
-  // Backdrop dismiss: require down+up on the backdrop itself
-  let dismissArmed = false;
-  backdrop.addEventListener('pointerdown', e => {
-    dismissArmed = e.target === backdrop;
-  });
-  backdrop.addEventListener('pointerup', e => {
-    if (dismissArmed && e.target === backdrop) close();
-    dismissArmed = false;
-  });
-  backdrop.addEventListener('pointercancel', () => { dismissArmed = false; });
+  // Backdrop dismiss: require down+up on the dimmed area only (not the sheet).
+  // Review modals set closeOnBackdrop: false — desktop clicks were kicking users out.
+  if (closeOnBackdrop) {
+    let dismissArmed = false;
+    backdrop.addEventListener('pointerdown', e => {
+      dismissArmed = e.target === backdrop;
+    });
+    backdrop.addEventListener('pointerup', e => {
+      if (dismissArmed && e.target === backdrop) close();
+      dismissArmed = false;
+    });
+    backdrop.addEventListener('pointercancel', () => { dismissArmed = false; });
+  }
+
+  // Clicks inside the sheet must never hit the backdrop
+  modal.addEventListener('pointerdown', e => e.stopPropagation());
+  modal.addEventListener('click', e => e.stopPropagation());
 
   const header = el('div', { className: 'modal-header' },
     el('h3', { id: titleId }, title),
