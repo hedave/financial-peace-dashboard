@@ -19,17 +19,26 @@ export function renderDashboard(container) {
   const surplus = store.getSurplusForSnowball();
   const surplusBasis = store.getSurplusBasis();
   const surplusCap = store.getSurplusCapInfo();
-  const surplusIncomeNote = surplusBasis === 'pay_bridge'
-    ? (surplusCap.nextPayDate
-      ? `Kept ${formatCurrency(surplusCap.billsTotal)} for bills due by next pay (${surplusCap.nextPayDate})`
-      : `Kept ${formatCurrency(surplusCap.billsTotal)} for near-term bills so checking stays non-negative`)
-    : surplusBasis === 'unallocated'
-      ? 'From zero-based budget (income minus envelope totals)'
-      : surplusBasis === 'cashflow'
-        ? (store.usesLoggedIncomeForSurplus()
-          ? 'From income received minus spending this month'
-          : 'From planned income minus spending this month')
+  // Always explain source + pay-bridge (not only when capped — otherwise it looks “ignored”)
+  const surplusSourceLine = surplusBasis === 'pay_bridge' || surplusBasis === 'unallocated'
+    ? (surplusCap.raw > 0 && surplusCap.capped
+      ? `Budget leftover ${formatCurrency(surplusCap.raw)}; safe after bills ${formatCurrency(surplus)}`
+      : 'From zero-based budget (income minus envelope totals)')
+    : surplusBasis === 'cashflow'
+      ? (store.usesLoggedIncomeForSurplus()
+        ? 'From income received minus spending this month'
+        : 'From planned income minus spending this month')
+      : surplus > 0
+        ? 'From zero-based budget (income minus envelope totals)'
         : 'Assign income to envelopes or log transactions to build surplus';
+  const payBridgeLine = surplusCap.billsTotal > 0.005
+    ? (surplusCap.capped
+      ? `Holding ${formatCurrency(surplusCap.billsTotal)} for ${surplusCap.billCount} bill(s) by ${surplusCap.nextPayDate || 'next ~2 weeks'} — snowball capped`
+      : `After ${formatCurrency(surplusCap.billsTotal)} in bills by ${surplusCap.nextPayDate || 'next pay'}, ~${formatCurrency(surplusCap.freeCash)} cash free (surplus fits)`)
+    : (surplusCap.nextPayDate
+      ? `Next pay ${surplusCap.nextPayDate} · no unpaid bills held before then`
+      : 'No upcoming pay date on calendar — near-term bills only if listed');
+  const surplusIncomeNote = `${surplusSourceLine}. ${payBridgeLine}. Tap for details.`;
   const babyStep = store.detectBabyStep();
   const celebration = store.getLatestCelebration();
   const target = store.getSnowballTarget();
@@ -208,7 +217,14 @@ export function renderDashboard(container) {
 
   container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
     statCard('Checking Balance', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
-    statCard('Surplus for Snowball', formatCurrency(surplus), surplus > 0 ? 'positive' : '', null, true, surplusIncomeNote),
+    statCard(
+      'Surplus for Snowball',
+      formatCurrency(surplus),
+      surplus > 0 ? 'positive' : '',
+      () => allocateSurplus(),
+      true,
+      surplusIncomeNote,
+    ),
     statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
     statCard(
       'Monthly Income',
