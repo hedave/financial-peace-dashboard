@@ -25,6 +25,7 @@ function r2(n) {
 export const ADVISOR_CHIPS = [
   { id: 'situation', label: "What's our situation this month?" },
   { id: 'payday', label: 'Payday brief' },
+  { id: 'after_snowball', label: 'Cash left if we snowball surplus' },
   { id: 'afford', label: 'Can we afford $___?' },
   { id: 'surplus_split', label: 'How should we split surplus?' },
   { id: 'snowball', label: 'If surplus goes to the snowball…' },
@@ -46,6 +47,8 @@ export function answerChip(chipId, opts = {}) {
       return answerSituation(snap);
     case 'payday':
       return answerPayday(snap);
+    case 'after_snowball':
+      return answerAfterSnowballCash(snap);
     case 'afford':
       return answerAfford(snap, Number(opts.amount) || 0);
     case 'surplus_split':
@@ -348,6 +351,7 @@ function answerSituation(snap) {
       { label: 'Debt', value: formatCurrency(totalDebt), tone: totalDebt > 0 ? 'negative' : 'positive' },
     ],
     actions: [
+      { label: 'Cash left if we snowball', action: 'chip', chipId: 'after_snowball' },
       { label: 'Open Budget', page: 'budget' },
       { label: 'Open Debt', page: 'debt' },
       { label: 'Reports', page: 'reports' },
@@ -464,6 +468,101 @@ function answerAfford(snap, amount) {
   };
 }
 
+/**
+ * Granular checking timeline if we send safe surplus to the snowball target.
+ */
+function answerAfterSnowballCash(snap) {
+  const cap = snap.cashflow.surplusCap || {};
+  const checking = r2(snap.balances?.checking ?? cap.checking ?? 0);
+  const surplus = r2(snap.cashflow.surplus);
+  const raw = r2(cap.raw ?? surplus);
+  const billsTotal = r2(cap.billsTotal || 0);
+  const freeCash = r2(cap.freeCash ?? Math.max(0, checking - billsTotal));
+  const target = snap.snowballTarget;
+  const pd = snap.payday || {};
+  const nextPayAmt = r2(pd.nextAmount || pd.next?.amount || 0);
+  const nextPayDate = cap.nextPayDate || pd.next?.date || null;
+  const bills = pd.billsBeforePay || [];
+
+  const afterSnowball = r2(checking - surplus);
+  const afterBills = r2(afterSnowball - billsTotal);
+  const afterNextPay = nextPayAmt > 0 ? r2(afterBills + nextPayAmt) : null;
+
+  const envelopeLeft = r2(
+    (snap.envelopes || []).reduce((s, e) => s + Math.max(0, Number(e.remaining) || 0), 0),
+  );
+
+  const paragraphs = [
+    surplus > 0
+      ? `If we send the full safe surplus (${formatCurrency(surplus)}) to ${target ? target.name : 'debt'} from checking right now, here is the cash path.`
+      : raw > 0.02 && billsTotal > 0
+        ? `Budget leftover is ${formatCurrency(raw)}, but after holding ${formatCurrency(billsTotal)} for bills before ${nextPayDate ? formatDate(nextPayDate) : 'next pay'}, safe snowball surplus is $0 — nothing extra leaves checking.`
+        : 'Safe snowball surplus is $0 right now, so checking would not change for an “allocate surplus” action.',
+    'Envelopes are labels on the same checking account — they do not hold a second balance at the bank.',
+  ];
+
+  const bullets = [
+    `1. Checking now: ${formatCurrency(checking)}`,
+    surplus > 0
+      ? `2. − Snowball extra to ${target ? target.name : 'debt'}: ${formatCurrency(surplus)}`
+      : `2. − Snowball extra: ${formatCurrency(0)} (nothing safe to send)`,
+    `3. Checking after snowball: ${formatCurrency(afterSnowball)}`,
+    billsTotal > 0
+      ? `4. − Bills due by ${nextPayDate ? formatDate(nextPayDate) : 'next pay window'}: ${formatCurrency(billsTotal)} (${cap.billCount || bills.length} unpaid)`
+      : `4. − Bills before next pay: ${formatCurrency(0)} (none held)`,
+    `5. Checking after those bills: ${formatCurrency(afterBills)}${afterBills < -0.02 ? ' ⚠️ negative — update checking or bills' : afterBills < 1 ? ' (near zero — tight until next deposit)' : ''}`,
+    nextPayDate && nextPayAmt > 0
+      ? `6. + Next paycheck (${formatDate(nextPayDate)}): ~${formatCurrency(nextPayAmt)} → about ${formatCurrency(afterNextPay)} after it lands`
+      : nextPayDate
+        ? `6. Next paycheck on calendar: ${formatDate(nextPayDate)} (amount not set — check Income)`
+        : '6. No future paycheck on the calendar — add pay dates under Income',
+    `Envelope room still “assigned” (virtual): ${formatCurrency(envelopeLeft)} — already in the checking numbers above, not extra cash.`,
+  ];
+
+  if (cap.capped && raw > surplus + 0.02) {
+    bullets.push(
+      `Cap detail: budget leftover ${formatCurrency(raw)} − hold ${formatCurrency(billsTotal)} for bills = free cash ${formatCurrency(freeCash)} → safe surplus ${formatCurrency(surplus)}.`,
+    );
+  }
+
+  const billBullets = bills.slice(0, 10).map(b =>
+    `Bill · ${b.name}: ${formatCurrency(b.amount)}${b.dueDate ? ` · due ${formatDate(b.dueDate)}` : ''}`,
+  );
+
+  return {
+    id: 'after_snowball',
+    title: surplus > 0
+      ? `Cash after snowballing ${formatCurrency(surplus)}`
+      : 'Cash if we snowball surplus (nothing safe yet)',
+    paragraphs,
+    bullets: [
+      ...bullets,
+      ...(billBullets.length
+        ? [`Bills in the hold window (${billBullets.length}${bills.length > 10 ? ` of ${bills.length}` : ''}):`, ...billBullets]
+        : []),
+    ],
+    metrics: [
+      { label: 'Checking now', value: formatCurrency(checking), tone: '' },
+      { label: 'Safe surplus', value: formatCurrency(surplus), tone: surplus > 0 ? 'accent' : '' },
+      { label: 'After snowball', value: formatCurrency(afterSnowball), tone: afterSnowball >= 0 ? '' : 'negative' },
+      {
+        label: 'After bills',
+        value: formatCurrency(afterBills),
+        tone: afterBills >= 1 ? 'positive' : afterBills >= 0 ? 'warning' : 'negative',
+      },
+    ],
+    actions: [
+      surplus > 0 && target
+        ? { label: 'Allocate surplus', action: 'allocate-surplus' }
+        : null,
+      { label: 'Payday brief', action: 'chip', chipId: 'payday' },
+      { label: 'Income & Balances', page: 'income' },
+      { label: 'Bills', page: 'bills' },
+      { label: 'Open Debt', page: 'debt' },
+    ].filter(Boolean),
+  };
+}
+
 function answerSnowball(snap) {
   const surplus = snap.cashflow.surplus;
   const target = snap.snowballTarget;
@@ -529,6 +628,7 @@ function answerSnowball(snap) {
       surplus > 0
         ? { label: 'Allocate surplus', action: 'allocate-surplus' }
         : null,
+      { label: 'Cash left if we snowball', action: 'chip', chipId: 'after_snowball' },
       { label: 'Open Debt', page: 'debt' },
       { label: 'Open Budget', page: 'budget' },
     ].filter(Boolean),

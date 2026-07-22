@@ -175,6 +175,8 @@ function defaultChipHint(chipId) {
   switch (chipId) {
     case 'payday':
       return 'Paycheck is within a few days — payday brief first.';
+    case 'after_snowball':
+      return 'See checking after snowball extra, bills, and next deposit.';
     case 'month_close':
       return 'Late in the month with open checklist items — month-close first.';
     case 'surplus_split':

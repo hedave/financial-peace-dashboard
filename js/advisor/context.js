@@ -191,6 +191,19 @@ export function buildAdvisorSnapshot(opts = {}) {
   const toAllocate = round2(store.getToAllocate());
   const surplus = round2(store.getSurplusForSnowball(month));
   const surplusBasis = store.getSurplusBasis(month);
+  const surplusCapRaw = store.getSurplusCapInfo(month);
+  const surplusCap = {
+    raw: round2(surplusCapRaw.raw),
+    safe: round2(surplusCapRaw.safe),
+    capped: !!surplusCapRaw.capped,
+    heldBack: round2(surplusCapRaw.heldBack),
+    checking: round2(surplusCapRaw.checking),
+    nextPayDate: surplusCapRaw.nextPayDate || null,
+    billsTotal: round2(surplusCapRaw.billsTotal),
+    billCount: surplusCapRaw.billCount || 0,
+    freeCash: round2(surplusCapRaw.freeCash),
+    hasNextPay: !!surplusCapRaw.hasNextPay,
+  };
   const babyStep = store.detectBabyStep();
   const babyMeta = BABY_STEPS.find(s => s.step === babyStep) || null;
   const target = store.getSnowballTarget();
@@ -423,6 +436,7 @@ export function buildAdvisorSnapshot(opts = {}) {
       spent,
       toAllocate,
       surplus,
+      surplusCap,
       prevSpentTotal: round2(
         categories.reduce((s, c) => s + store.getCategorySpent(c.id, prevMonth), 0)
       ),
