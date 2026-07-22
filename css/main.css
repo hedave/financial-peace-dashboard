@@ -876,6 +876,107 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 .debt-on-hold-section .section-title {
   color: var(--text-muted);
 }
+
+/* Dashboard cash runway */
+.cash-runway-card {
+  padding: 1rem 1.15rem 1.1rem;
+}
+
+.cash-runway-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.cash-runway-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.cash-runway-step {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cash-runway-step-num {
+  flex-shrink: 0;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cash-runway-step-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+  margin-bottom: 0.2rem;
+}
+
+.cash-runway-step-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cash-runway-step-value.accent { color: var(--accent, var(--primary)); }
+.cash-runway-step-value.positive { color: var(--positive); }
+.cash-runway-step-value.negative { color: var(--negative); }
+.cash-runway-step-value.warning { color: var(--warning, #b45309); }
+.cash-runway-step-value.muted { color: var(--text-muted); font-weight: 600; }
+
+.cash-runway-foot {
+  margin: 0.75rem 0 0;
+}
+
+.cash-runway-bills {
+  margin-top: 0.65rem;
+  font-size: 0.85rem;
+}
+
+.cash-runway-bills summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.cash-runway-bill-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.snowball-runway-preview {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+  .cash-runway-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .badge-overdue { background: #f0e8e8; color: #7a5555; }
 .badge-autopay { background: #e8eef5; color: #4a5f7a; }
 

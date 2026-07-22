@@ -184,7 +184,7 @@ export function showToast(message, type = 'info', duration = 3500) {
 export function confirmDialog(title, message, onConfirm) {
   const modal = showModal({
     title,
-    body: el('p', {}, message),
+    body: el('p', { style: 'white-space:pre-line;line-height:1.5;margin:0' }, message),
     footer: [
       el('button', {
         type: 'button',

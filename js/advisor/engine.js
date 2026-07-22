@@ -484,6 +484,7 @@ function answerAfterSnowballCash(snap) {
   const nextPayDate = cap.nextPayDate || pd.next?.date || null;
   const bills = pd.billsBeforePay || [];
 
+  const buffer = r2(cap.buffer || 0);
   const afterSnowball = r2(checking - surplus);
   const afterBills = r2(afterSnowball - billsTotal);
   const afterNextPay = nextPayAmt > 0 ? r2(afterBills + nextPayAmt) : null;
@@ -495,8 +496,11 @@ function answerAfterSnowballCash(snap) {
   const paragraphs = [
     surplus > 0
       ? `If we send the full safe surplus (${formatCurrency(surplus)}) to ${target ? target.name : 'debt'} from checking right now, here is the cash path.`
-      : raw > 0.02 && billsTotal > 0
-        ? `Budget leftover is ${formatCurrency(raw)}, but after holding ${formatCurrency(billsTotal)} for bills before ${nextPayDate ? formatDate(nextPayDate) : 'next pay'}, safe snowball surplus is $0 — nothing extra leaves checking.`
+      : raw > 0.02
+        ? `Budget leftover is ${formatCurrency(raw)}, but after holding bills`
+          + (billsTotal ? ` (${formatCurrency(billsTotal)})` : '')
+          + (buffer ? ` + ${formatCurrency(buffer)} cushion` : '')
+          + ` through ${nextPayDate ? formatDate(nextPayDate) : 'next pay'}, safe snowball is $0.`
         : 'Safe snowball surplus is $0 right now, so checking would not change for an “allocate surplus” action.',
     'Envelopes are labels on the same checking account — they do not hold a second balance at the bank.',
   ];
@@ -510,7 +514,16 @@ function answerAfterSnowballCash(snap) {
     billsTotal > 0
       ? `4. − Bills due by ${nextPayDate ? formatDate(nextPayDate) : 'next pay window'}: ${formatCurrency(billsTotal)} (${cap.billCount || bills.length} unpaid)`
       : `4. − Bills before next pay: ${formatCurrency(0)} (none held)`,
-    `5. Checking after those bills: ${formatCurrency(afterBills)}${afterBills < -0.02 ? ' ⚠️ negative — update checking or bills' : afterBills < 1 ? ' (near zero — tight until next deposit)' : ''}`,
+    `5. Checking after those bills: ${formatCurrency(afterBills)}`
+      + (afterBills < -0.02
+        ? ' ⚠️ negative — update checking or bills'
+        : buffer > 0 && afterBills + 0.02 < buffer
+          ? ` (below ${formatCurrency(buffer)} cushion — tight)`
+          : buffer > 0
+            ? ` (cushion target ${formatCurrency(buffer)})`
+            : afterBills < 1
+              ? ' (near zero — tight until next deposit)'
+              : ''),
     nextPayDate && nextPayAmt > 0
       ? `6. + Next paycheck (${formatDate(nextPayDate)}): ~${formatCurrency(nextPayAmt)} → about ${formatCurrency(afterNextPay)} after it lands`
       : nextPayDate
@@ -521,7 +534,7 @@ function answerAfterSnowballCash(snap) {
 
   if (cap.capped && raw > surplus + 0.02) {
     bullets.push(
-      `Cap detail: budget leftover ${formatCurrency(raw)} − hold ${formatCurrency(billsTotal)} for bills = free cash ${formatCurrency(freeCash)} → safe surplus ${formatCurrency(surplus)}.`,
+      `Cap detail: leftover ${formatCurrency(raw)} − bills ${formatCurrency(billsTotal)} − cushion ${formatCurrency(buffer)} = free ${formatCurrency(freeCash)} → safe surplus ${formatCurrency(surplus)}.`,
     );
   }
 
@@ -919,7 +932,8 @@ export function pickDefaultChip(snap) {
   if (day >= 25 && incomplete > 0) return 'month_close';
 
   if ((snap.cashflow?.surplus || 0) > 0 && (snap.debts?.length || 0) > 0) {
-    return 'surplus_split';
+    // Prefer cash runway over abstract split when money is on the line
+    return 'after_snowball';
   }
 
   return 'situation';

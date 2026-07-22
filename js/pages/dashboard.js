@@ -31,14 +31,17 @@ export function renderDashboard(container) {
       : surplus > 0
         ? 'From zero-based budget (income minus envelope totals)'
         : 'Assign income to envelopes or log transactions to build surplus';
-  const payBridgeLine = surplusCap.billsTotal > 0.005
+  const buf = surplusCap.buffer || 0;
+  const payBridgeLine = surplusCap.billsTotal > 0.005 || buf > 0
     ? (surplusCap.capped
-      ? `Holding ${formatCurrency(surplusCap.billsTotal)} for ${surplusCap.billCount} bill(s) by ${surplusCap.nextPayDate || 'next ~2 weeks'} — snowball capped`
-      : `After ${formatCurrency(surplusCap.billsTotal)} in bills by ${surplusCap.nextPayDate || 'next pay'}, ~${formatCurrency(surplusCap.freeCash)} cash free (surplus fits)`)
+      ? `Holds bills ${formatCurrency(surplusCap.billsTotal)} + ${formatCurrency(buf)} cushion through ${surplusCap.nextPayDate || 'next pay'} — snowball capped`
+      : `Bills ${formatCurrency(surplusCap.billsTotal)} + ${formatCurrency(buf)} cushion by ${surplusCap.nextPayDate || 'next pay'}; surplus fits`)
     : (surplusCap.nextPayDate
-      ? `Next pay ${surplusCap.nextPayDate} · no unpaid bills held before then`
-      : 'No upcoming pay date on calendar — near-term bills only if listed');
+      ? `Next pay ${surplusCap.nextPayDate} · ${formatCurrency(buf)} cushion · no bills held`
+      : `No next pay on calendar · ${formatCurrency(buf)} cushion · 14-day bill window`);
   const surplusIncomeNote = `${surplusSourceLine}. ${payBridgeLine}. Tap for details.`;
+  const runway = store.getCashRunway();
+  const billWarnings = store.getBillScheduleWarnings();
   const babyStep = store.detectBabyStep();
   const celebration = store.getLatestCelebration();
   const target = store.getSnowballTarget();
@@ -236,6 +239,19 @@ export function renderDashboard(container) {
     ),
   ));
 
+  // Cash runway — always-visible path if we snowball safe surplus
+  container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
+
+  if (billWarnings.length) {
+    container.appendChild(el('div', { className: 'chip-bar section' },
+      ...billWarnings.map(w => el('button', {
+        type: 'button',
+        className: w.severity === 'warn' ? 'chip chip-warn' : 'chip',
+        onClick: () => window.appNavigate(w.id === 'no_pay' ? 'income' : 'bills'),
+      }, w.label)),
+    ));
+  }
+
   if (topEnvelopes.length) {
     container.appendChild(el('div', { className: 'section' },
       el('div', { className: 'section-title' }, 'Top spending this month'),
@@ -415,6 +431,93 @@ function statCard(title, value, cls = '', onClick = null, highlight = false, sub
     card.appendChild(el('div', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem' }, 'Tap to update'));
   }
   return card;
+}
+
+/**
+ * Always-on cash path: checking → after snowball → after bills → after next pay.
+ */
+function cashRunwayCard(runway, target, onSnowball) {
+  const afterBillsTone = runway.negative
+    ? 'negative'
+    : runway.tight
+      ? 'warning'
+      : 'positive';
+  const steps = [
+    { label: 'Checking now', value: formatCurrency(runway.checking), tone: 'accent' },
+    {
+      label: runway.surplus > 0
+        ? `After snowball${target ? ` → ${target.name}` : ''}`
+        : 'After snowball (none safe)',
+      value: formatCurrency(runway.afterSnowball),
+      tone: runway.surplus > 0 ? '' : 'muted',
+    },
+    {
+      label: runway.billCount
+        ? `After ${runway.billCount} bill(s) by ${runway.nextPayDate ? formatDate(runway.nextPayDate) : 'window'}`
+        : 'After bills (none held)',
+      value: formatCurrency(runway.afterBills),
+      tone: afterBillsTone,
+    },
+  ];
+  if (runway.nextPayDate && runway.nextPayAmount > 0) {
+    steps.push({
+      label: `After pay ${formatDate(runway.nextPayDate)}`,
+      value: formatCurrency(runway.afterNextPay),
+      tone: 'positive',
+    });
+  }
+
+  const foot = [];
+  if (runway.buffer > 0) {
+    foot.push(`${formatCurrency(runway.buffer)} cushion kept after bills (Settings)`);
+  }
+  if (runway.surplus > 0) {
+    foot.push(`Safe snowball ${formatCurrency(runway.surplus)}`);
+  }
+  if (runway.capped && runway.heldBack > 0.02) {
+    foot.push(`${formatCurrency(runway.heldBack)} held back from budget leftover`);
+  }
+
+  return el('div', { className: 'section card cash-runway-card' },
+    el('div', { className: 'cash-runway-header' },
+      el('div', {},
+        el('div', { className: 'card-title' }, 'Cash runway (if you snowball)'),
+        el('p', { className: 'tx-form-hint', style: 'margin:0.25rem 0 0' },
+          'Same checking account the whole way — envelopes are labels, not separate piles of cash.',
+        ),
+      ),
+      runway.surplus > 0
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          onClick: onSnowball,
+        }, 'Snowball $')
+        : null,
+    ),
+    el('div', { className: 'cash-runway-steps' },
+      ...steps.map((s, i) => el('div', { className: 'cash-runway-step' },
+        el('div', { className: 'cash-runway-step-num' }, String(i + 1)),
+        el('div', { className: 'cash-runway-step-body' },
+          el('div', { className: 'cash-runway-step-label' }, s.label),
+          el('div', { className: `cash-runway-step-value ${s.tone || ''}` }, s.value),
+        ),
+      )),
+    ),
+    foot.length
+      ? el('p', { className: 'tx-form-hint cash-runway-foot' }, foot.join(' · '))
+      : null,
+    runway.bills?.length
+      ? el('details', { className: 'cash-runway-bills' },
+        el('summary', {}, `Bills in window (${runway.bills.length})`),
+        el('ul', { className: 'cash-runway-bill-list' },
+          ...runway.bills.slice(0, 12).map(b => el('li', {},
+            `${b.name}: ${formatCurrency(b.amount)}`
+            + (b.dueDate ? ` · ${formatDate(b.dueDate)}` : ' · no due date'),
+          )),
+        ),
+      )
+      : null,
+  );
 }
 
 function progressBar(spent, budgeted) {
@@ -705,42 +808,65 @@ export function allocateSurplus() {
     return;
   }
   if (surplus <= 0) {
-    if (cap.raw > 0.02 && cap.billsTotal > 0) {
+    if (cap.raw > 0.02) {
       showToast(
-        `Budget leftover is ${formatCurrency(cap.raw)}, but checking needs ~${formatCurrency(cap.billsTotal)} for bills before ${cap.nextPayDate || 'next pay'} — nothing safe to snowball yet`,
+        `Budget leftover ${formatCurrency(cap.raw)}, but safe snowball is $0 after bills`
+        + (cap.billsTotal ? ` (${formatCurrency(cap.billsTotal)})` : '')
+        + (cap.buffer ? ` + ${formatCurrency(cap.buffer)} cushion` : '')
+        + ` through ${cap.nextPayDate || 'next pay'}`,
         'info',
-        5500,
+        6000,
       );
     } else {
       showToast('No surplus available to allocate', 'info');
     }
     return;
   }
+
   const input = el('input', { type: 'number', step: '0.01', value: surplus, min: 0 });
-  const checking = cap.checking;
-  const bridgeNote = cap.billsTotal > 0
-    ? el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-      cap.capped
-        ? `Safe amount is capped: ${formatCurrency(cap.raw)} budget leftover − hold ${formatCurrency(cap.billsTotal)} for ${cap.billCount} bill(s) due by ${cap.nextPayDate || 'the next couple weeks'} → ${formatCurrency(surplus)} available. After those bills, checking won’t go negative.`
-        : `Holding ${formatCurrency(cap.billsTotal)} in checking for ${cap.billCount} bill(s) due by ${cap.nextPayDate || 'soon'}.`,
-    )
-    : el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-      'No unpaid bills due before your next paycheck — surplus is only limited by budget leftover and checking.',
-    );
+  const preview = el('div', { className: 'snowball-runway-preview tx-form-hint' });
+
+  function paintPreview() {
+    const amt = Number(input.value) || 0;
+    const r = store.getCashRunway(amt);
+    preview.innerHTML = '';
+    preview.appendChild(el('div', {},
+      `If you send ${formatCurrency(amt)} → checking ${formatCurrency(r.afterSnowball)}`
+      + ` → after bills ${formatCurrency(r.afterBills)}`
+      + (r.buffer > 0 ? ` (includes ${formatCurrency(r.buffer)} cushion target)` : '')
+      + (r.nextPayDate && r.nextPayAmount
+        ? ` → after ${formatDate(r.nextPayDate)} pay ~${formatCurrency(r.afterNextPay)}`
+        : ''),
+    ));
+    if (r.negative) {
+      preview.appendChild(el('div', { style: 'color:var(--negative);margin-top:0.35rem' },
+        'That amount would leave checking short of bills before next pay.',
+      ));
+    } else if (r.tight) {
+      preview.appendChild(el('div', { style: 'color:var(--warning, #b45309);margin-top:0.35rem' },
+        'Tight: near the cushion floor until next deposit.',
+      ));
+    }
+  }
+  input.addEventListener('input', paintPreview);
+  paintPreview();
 
   const modal = showModal({
     title: 'Snowball extra to debt',
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem' }, `Send extra money to ${target.name}`),
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        'Reduces checking and the debt balance. If this debt has a linked envelope, that budget rises so To Allocate drops (can’t re-allocate the same dollars).',
+        'Reduces checking and the debt balance. Linked debt envelopes get budget so To Allocate drops.',
       ),
-      bridgeNote,
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        `Safe to snowball: ${formatCurrency(surplus)} · Checking: ${formatCurrency(checking)}`
-        + (cap.capped ? ` · Budget leftover was ${formatCurrency(cap.raw)}` : ''),
+        `Safe max: ${formatCurrency(surplus)}`
+        + (cap.capped ? ` (budget leftover was ${formatCurrency(cap.raw)})` : '')
+        + ` · Bills held: ${formatCurrency(cap.billsTotal)}`
+        + ` · Cushion: ${formatCurrency(cap.buffer || 0)}`
+        + (cap.nextPayDate ? ` · Next pay ${formatDate(cap.nextPayDate)}` : ''),
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input)
+      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input),
+      preview,
     ),
     footer: el('button', {
       type: 'button',
@@ -752,21 +878,27 @@ export function allocateSurplus() {
           return;
         }
         if (amt > surplus + 0.02) {
-          showToast(`Only ${formatCurrency(surplus)} is safe to snowball (bills before next pay)`, 'info');
+          showToast(`Only ${formatCurrency(surplus)} is safe to snowball right now`, 'info');
           return;
         }
-        const after = checking - amt;
-        if (after + 0.02 < cap.billsTotal) {
-          showToast(
-            `That would leave only ${formatCurrency(after)} for ${formatCurrency(cap.billsTotal)} in bills before next pay`,
-            'info',
-          );
+        const r = store.getCashRunway(amt);
+        if (r.negative) {
+          showToast('That would leave checking short of bills before next pay', 'info');
           return;
         }
-        const result = store.allocateSurplusToDebt(amt);
-        modal.close();
-        if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
+        let confirmMsg = `Send ${formatCurrency(amt)} to ${target.name}?\n\n`
+          + `Checking after snowball: ${formatCurrency(r.afterSnowball)}\n`
+          + `After bills by ${r.nextPayDate ? formatDate(r.nextPayDate) : 'window'}: ${formatCurrency(r.afterBills)}`;
+        if (r.nextPayAmount) {
+          confirmMsg += `\nAfter next pay (~${formatCurrency(r.nextPayAmount)}): ~${formatCurrency(r.afterNextPay)}`;
+        }
+        if (r.tight) confirmMsg += '\n\nThis is tight until the next deposit.';
+        confirmDialog('Confirm snowball payment', confirmMsg, () => {
+          const result = store.allocateSurplusToDebt(amt);
+          modal.close();
+          if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
+        });
       },
-    }, 'Allocate'),
+    }, 'Review & allocate'),
   });
 }

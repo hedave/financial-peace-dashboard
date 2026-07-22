@@ -96,6 +96,11 @@ export function createDefaultState() {
       largeText: false,
       reduceMotion: false,
       lastBackupAt: null,
+      /**
+       * Cash cushion kept in checking after bills until next pay (and after snowball).
+       * Safe surplus ≤ checking − bills − this buffer. Default $50.
+       */
+      surplusCashBuffer: 50,
       /** Advisor named envelopes — category ids (null = auto-match by name). */
       advisorAliases: {
         dining: null,

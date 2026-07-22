@@ -849,14 +849,22 @@ class Store {
     return Math.max(toAllocate, cashAvailable);
   }
 
+  /** Cash cushion kept after bills / snowball (Settings → surplusCashBuffer, default $50). */
+  getSurplusCashBuffer() {
+    const n = Number(this.state.settings?.surplusCashBuffer);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+    return 50;
+  }
+
   /**
-   * Cash reserved so bills due on/before the next paycheck don’t leave checking negative.
-   * freeCash = max(0, checking − unpaid bills due through next pay day).
+   * Cash reserved so bills due on/before the next paycheck don’t wipe checking.
+   * freeCash = max(0, checking − bills − cushion).
    * Safe snowball extra ≤ freeCash.
    */
   getPayBridgeReserve(month = getCurrentMonth()) {
     const today = todayISO();
     const checking = Math.round((Number(this.state.balances?.checking) || 0) * 100) / 100;
+    const buffer = this.getSurplusCashBuffer();
     const payStatus = this.getPaycheckStatus(month);
 
     const receivedKeys = new Set();
@@ -900,6 +908,12 @@ class Store {
     }).sort((a, b) => a.date.localeCompare(b.date));
 
     const nextPayDate = unique[0]?.date || null;
+    const nextPayAmount = unique[0]
+      ? Math.round(
+        unique.filter(c => c.date === unique[0].date)
+          .reduce((s, c) => s + (Number(c.amount) || 0), 0) * 100,
+      ) / 100
+      : 0;
     // No pay calendar: still protect near-term unpaid bills (14 days)
     const horizon = nextPayDate || (() => {
       const d = new Date(today + 'T12:00:00');
@@ -907,25 +921,43 @@ class Store {
       return formatLocalISODate(d);
     })();
 
-    const bills = (this.state.bills || []).filter(b => {
-      if (!b || b.status === 'paid') return false;
-      const due = String(b.dueDate || '').slice(0, 10);
-      if (!due) return true; // undated obligation — keep cash
-      return due <= horizon;
-    });
+    const bills = (this.state.bills || [])
+      .filter(b => {
+        if (!b || b.status === 'paid') return false;
+        const due = String(b.dueDate || '').slice(0, 10);
+        if (!due) return true; // undated obligation — keep cash
+        return due <= horizon;
+      })
+      .map(b => ({
+        id: b.id,
+        name: b.name,
+        amount: Math.round((Number(b.amount) || 0) * 100) / 100,
+        dueDate: b.dueDate ? String(b.dueDate).slice(0, 10) : null,
+        undated: !b.dueDate,
+      }))
+      .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')));
+
     const billsTotal = Math.round(
       bills.reduce((s, b) => s + (Number(b.amount) || 0), 0) * 100,
     ) / 100;
 
-    // After snowball, checking − bills ≥ 0  →  surplus ≤ checking − bills
-    const freeCash = Math.max(0, Math.round((checking - billsTotal) * 100) / 100);
+    // After snowball + bills, leave cushion in checking
+    const reserved = Math.round((billsTotal + buffer) * 100) / 100;
+    const freeCash = Math.max(0, Math.round((checking - reserved) * 100) / 100);
+
+    const undatedBillCount = bills.filter(b => b.undated).length;
 
     return {
       checking,
+      buffer,
       nextPayDate,
+      nextPayAmount,
       horizon,
       billsTotal,
       billCount: bills.length,
+      undatedBillCount,
+      bills,
+      reserved,
       freeCash,
       hasNextPay: !!nextPayDate,
     };
@@ -934,7 +966,6 @@ class Store {
   getSurplusForSnowball(month = getCurrentMonth()) {
     const raw = this.getUncappedSurplusForSnowball(month);
     const { freeCash } = this.getPayBridgeReserve(month);
-    // Never offer more snowball extra than cash left after bills until next pay
     return Math.min(raw, freeCash);
   }
 
@@ -953,16 +984,64 @@ class Store {
     };
   }
 
+  /**
+   * Checking timeline if we send `snowballAmount` (defaults to safe surplus) to debt.
+   */
+  getCashRunway(snowballAmount = null, month = getCurrentMonth()) {
+    const cap = this.getSurplusCapInfo(month);
+    const surplus = snowballAmount != null
+      ? Math.max(0, Math.round(Number(snowballAmount) * 100) / 100)
+      : cap.safe;
+    const afterSnowball = Math.round((cap.checking - surplus) * 100) / 100;
+    const afterBills = Math.round((afterSnowball - cap.billsTotal) * 100) / 100;
+    const afterNextPay = cap.nextPayAmount > 0
+      ? Math.round((afterBills + cap.nextPayAmount) * 100) / 100
+      : null;
+    return {
+      ...cap,
+      surplus,
+      afterSnowball,
+      afterBills,
+      afterNextPay,
+      tight: afterBills < cap.buffer + 0.02,
+      negative: afterBills < -0.02,
+    };
+  }
+
   getSurplusBasis(month = getCurrentMonth()) {
     const toAllocate = this.getPlannedSnowballSurplus();
     const cashAvailable = Math.max(0, this.getCashFlowSurplus(month));
     const surplus = this.getSurplusForSnowball(month);
     if (surplus <= 0) return 'none';
     const cap = this.getSurplusCapInfo(month);
-    if (cap.capped && cap.billsTotal > 0) return 'pay_bridge';
+    if (cap.capped && (cap.billsTotal > 0 || cap.buffer > 0)) return 'pay_bridge';
     if (toAllocate >= cashAvailable && toAllocate > 0) return 'unallocated';
     if (cashAvailable > toAllocate) return 'cashflow';
     return 'unallocated';
+  }
+
+  /** Soft warnings: undated bills, missing next pay, etc. */
+  getBillScheduleWarnings() {
+    const unpaid = (this.state.bills || []).filter(b => b && b.status !== 'paid');
+    const undated = unpaid.filter(b => !b.dueDate);
+    const cap = this.getPayBridgeReserve();
+    const warnings = [];
+    if (undated.length) {
+      warnings.push({
+        id: 'undated',
+        severity: 'warn',
+        label: `${undated.length} unpaid bill(s) have no due date — cash is held for them until dated`,
+        count: undated.length,
+      });
+    }
+    if (!cap.hasNextPay) {
+      warnings.push({
+        id: 'no_pay',
+        severity: 'info',
+        label: 'No upcoming paycheck on the calendar — runway uses a 14-day bill window',
+      });
+    }
+    return warnings;
   }
 
   // --- Review inbox, rules, bills, health, paychecks, month close ---

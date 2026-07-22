@@ -1,4 +1,4 @@
-import { el } from '../utils.js';
+import { el, formatCurrency } from '../utils.js';
 import { store } from '../store.js';
 import { showToast, confirmDialog } from '../components/modal.js';
 import { hashPassword } from '../utils.js';
@@ -50,6 +50,36 @@ export async function renderSettings(container) {
       className: 'tx-form-hint',
       style: 'margin-top:0.5rem;margin-bottom:0',
     }, 'Soft only — never blocks spending. Dashboard nags until every dollar has a job; logging an over-budget expense asks for confirm.'),
+  ));
+
+  const bufferVal = state.settings.surplusCashBuffer != null
+    ? Number(state.settings.surplusCashBuffer)
+    : 50;
+  const bufferIn = el('input', {
+    type: 'number',
+    step: '1',
+    min: '0',
+    value: String(Number.isFinite(bufferVal) ? bufferVal : 50),
+  });
+  container.appendChild(el('div', { className: 'card section' },
+    el('div', { className: 'section-title' }, 'Snowball cash safety'),
+    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+      'Safe snowball surplus never spends checking below: unpaid bills due by next paycheck + this cushion. Default $50 so you’re not wiped to $0 after bills.',
+    ),
+    el('div', { className: 'form-group' },
+      el('label', {}, 'Cushion left in checking after bills ($)'),
+      bufferIn,
+    ),
+    el('button', {
+      type: 'button',
+      className: 'btn btn-primary btn-sm',
+      onClick: () => {
+        const n = Math.max(0, Number(bufferIn.value) || 0);
+        store.update(s => { s.settings.surplusCashBuffer = Math.round(n * 100) / 100; });
+        showToast(`Snowball cushion set to ${formatCurrency(n)}`);
+        window.appRefresh();
+      },
+    }, 'Save cushion'),
   ));
 
   const daysSinceBackup = daysSince(state.settings.lastBackupAt);
