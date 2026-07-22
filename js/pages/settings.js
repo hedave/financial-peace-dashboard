@@ -415,9 +415,9 @@ export async function renderSettings(container) {
     el('p', {
       style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6',
     },
-      'Pin which envelopes Advisor uses for dining, vacation, and Christmas. Auto-match works until you rename them — then set a pin here.',
+      'Pin which envelopes Advisor uses for dining, vacation, and Christmas. Auto-match works until you rename them — then set a pin here. (Dining is the default pick for “what if we cut ___ %?” until you choose another.)',
     ),
-    aliasSelect('dining', 'Dining / eating out', 'Used for “cut dining 20%” and affordability cushions.'),
+    aliasSelect('dining', 'Dining / eating out', 'Default envelope for cut-% scenarios and affordability cushions.'),
     aliasSelect('vacation', 'Vacation fund', 'Used for affordability and sinking-fund priority.'),
     aliasSelect('christmas', 'Christmas fund', 'Used for holiday vs vacation priority and surplus split.'),
     el('button', {

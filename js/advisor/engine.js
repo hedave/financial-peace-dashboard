@@ -29,7 +29,7 @@ export const ADVISOR_CHIPS = [
   { id: 'afford', label: 'Can we afford $___?' },
   { id: 'surplus_split', label: 'How should we split surplus?' },
   { id: 'snowball', label: 'If surplus goes to the snowball…' },
-  { id: 'cut_dining', label: 'What if we cut dining 20%?' },
+  { id: 'cut_envelope', label: 'What if we cut ___ by ___%?' },
   { id: 'month_close', label: 'Explain month-close status' },
   { id: 'hot_envelopes', label: 'Which envelopes are hot right now?' },
   { id: 'fund_first', label: 'Vacation vs Christmas — fund first?' },
@@ -37,7 +37,7 @@ export const ADVISOR_CHIPS = [
 
 /**
  * @param {string} chipId
- * @param {{ amount?: number, cutPct?: number, snapshot?: object }} [opts]
+ * @param {{ amount?: number, cutPct?: number, envelopeId?: string, snapshot?: object }} [opts]
  * @returns {AdvisorAnswer}
  */
 export function answerChip(chipId, opts = {}) {
@@ -55,8 +55,12 @@ export function answerChip(chipId, opts = {}) {
       return answerSurplusSplit(snap);
     case 'snowball':
       return answerSnowball(snap);
-    case 'cut_dining':
-      return answerCutDining(snap, opts.cutPct != null ? Number(opts.cutPct) : 20);
+    case 'cut_envelope':
+    case 'cut_dining': // legacy sticky id
+      return answerCutEnvelope(snap, {
+        cutPct: opts.cutPct != null ? Number(opts.cutPct) : 20,
+        envelopeId: opts.envelopeId || null,
+      });
     case 'month_close':
       return answerMonthClose(snap);
     case 'hot_envelopes':
@@ -648,27 +652,71 @@ function answerSnowball(snap) {
   };
 }
 
-function answerCutDining(snap, cutPct) {
+/**
+ * What if we cut envelope X by Y% of budget (or spent if no budget)?
+ * Family of 7: useful for groceries, kids activities, dining, gas, etc.
+ */
+function answerCutEnvelope(snap, { cutPct = 20, envelopeId = null } = {}) {
   const pct = Math.min(100, Math.max(1, Number(cutPct) || 20));
-  const dining = snap.named.dining;
-  if (!dining) {
+  const envelopes = (snap.envelopes || []).filter(e => !e.isSinkingFund);
+  if (!envelopes.length) {
     return {
-      id: 'cut_dining',
-      title: 'No Eating Out envelope found',
-      paragraphs: [
-        'Couldn’t find an envelope whose name looks like Eating Out / Dining / Fast Food. Rename or create one, then try again.',
-      ],
+      id: 'cut_envelope',
+      title: 'No envelopes to cut',
+      paragraphs: ['Add budget envelopes first, then pick one to model a cut.'],
       actions: [{ label: 'Open Budget', page: 'budget' }],
     };
   }
 
-  const base = dining.budgeted > 0 ? dining.budgeted : dining.spent;
+  let env = envelopeId
+    ? envelopes.find(e => e.id === envelopeId) || snap.envelopes.find(e => e.id === envelopeId)
+    : null;
+  if (!env && snap.named?.dining) {
+    env = envelopes.find(e => e.id === snap.named.dining.id) || snap.named.dining;
+  }
+  if (!env) {
+    // Default: highest of budgeted vs spent this month (where a cut hurts most / frees most)
+    env = [...envelopes].sort((a, b) => {
+      const ba = Math.max(a.budgeted || 0, a.spent || 0);
+      const bb = Math.max(b.budgeted || 0, b.spent || 0);
+      return bb - ba;
+    })[0];
+  }
+
+  if (!env) {
+    return {
+      id: 'cut_envelope',
+      title: 'Pick an envelope',
+      paragraphs: ['Choose an envelope and percent below, then run the question again.'],
+      actions: [{ label: 'Open Budget', page: 'budget' }],
+    };
+  }
+
+  const base = env.budgeted > 0 ? env.budgeted : env.spent;
+  if (!(base > 0)) {
+    return {
+      id: 'cut_envelope',
+      title: `${env.icon || '✉️'} ${env.name} has no budget or spend yet`,
+      paragraphs: [
+        'Set a monthly budget (or log some spending) on this envelope, then model a cut.',
+      ],
+      actions: [
+        { label: `Open ${env.name}`, page: 'budget', focusId: env.id },
+        { label: 'Open Budget', page: 'budget' },
+      ],
+    };
+  }
+
   const savings = r2(base * (pct / 100));
-  const newBudget = r2(Math.max(0, (dining.budgeted || base) - savings));
+  const newBudget = r2(Math.max(0, (env.budgeted || base) - savings));
   const newSurplus = r2(snap.cashflow.surplus + savings);
   const target = snap.snowballTarget;
-  const pay = target ? r2(target.minPayment + newSurplus) : null;
-  const months = target && pay > 0 ? Math.ceil(target.balance / pay) : null;
+  const months = target
+    ? (() => {
+        const p = r2(target.minPayment + newSurplus);
+        return p > 0 ? Math.ceil(target.balance / p) : null;
+      })()
+    : null;
   const monthsNow = target
     ? (() => {
         const p = r2(target.minPayment + snap.cashflow.surplus);
@@ -676,10 +724,24 @@ function answerCutDining(snap, cutPct) {
       })()
     : null;
 
+  // Same % on other big discretionary envelopes (not sinking) for comparison
+  const peers = envelopes
+    .filter(e => e.id !== env.id)
+    .map(e => {
+      const b = e.budgeted > 0 ? e.budgeted : e.spent;
+      return { e, base: b, save: r2(b * (pct / 100)) };
+    })
+    .filter(x => x.base >= 50 && x.save >= 5)
+    .sort((a, b) => b.save - a.save)
+    .slice(0, 5);
+
+  const peerTotal = r2(peers.reduce((s, x) => s + x.save, 0));
+  const stackSurplus = r2(newSurplus + peerTotal);
+
   const paragraphs = [
-    `${dining.icon} ${dining.name}: budgeted ${formatCurrency(dining.budgeted)}, spent ${formatCurrency(dining.spent)} this month (${formatCurrency(dining.remaining)} left).`,
-    `Cutting ${pct}% of ${formatCurrency(base)} frees about ${formatCurrency(savings)} / month if we stick to it.`,
-    `Snowball surplus would rise from ${formatCurrency(snap.cashflow.surplus)} → about ${formatCurrency(newSurplus)}.`,
+    `${env.icon || '✉️'} ${env.name}: budgeted ${formatCurrency(env.budgeted)}, spent ${formatCurrency(env.spent)} this month (${formatCurrency(env.remaining)} left).`,
+    `Cutting ${pct}% of ${formatCurrency(base)} (${env.budgeted > 0 ? 'budget' : 'this month’s spend'}) frees about ${formatCurrency(savings)} / month if the household sticks to it.`,
+    `Snowball surplus would rise from ${formatCurrency(snap.cashflow.surplus)} → about ${formatCurrency(newSurplus)} from this envelope alone.`,
   ];
 
   if (target && months != null && monthsNow != null) {
@@ -687,26 +749,51 @@ function answerCutDining(snap, cutPct) {
     paragraphs.push(
       gain > 0
         ? `On ${target.name}, that could shave ~${gain} month${gain === 1 ? '' : 's'} off the rough payoff (sketch only).`
-        : `On ${target.name}, the rough payoff pace barely moves — surplus is already high relative to the balance, or the cut is small.`
+        : `On ${target.name}, the rough payoff pace barely moves — surplus is already high relative to the balance, or the cut is small.`,
+    );
+  }
+
+  paragraphs.push(
+    'With 2 adults and 5 kids, cuts land differently by envelope: groceries and kids’ activities are “volume”; dining/entertainment are more habit. Use the free $ toward snowball or to refill what you still need.',
+  );
+
+  const bullets = [
+    `New suggested budget for ${env.name}: ${formatCurrency(newBudget)} (was ${formatCurrency(env.budgeted)})`,
+    env.prevSpent != null
+      ? `Vs last month spent: ${formatCurrency(env.prevSpent)} → watch the habit, not just the number`
+      : null,
+  ].filter(Boolean);
+
+  if (peers.length) {
+    bullets.push(`Same ${pct}% cut on other sizable envelopes (illustrative):`);
+    peers.forEach(x => {
+      bullets.push(
+        `${x.e.icon || '✉️'} ${x.e.name}: free ~${formatCurrency(x.save)} / mo (from ${formatCurrency(x.base)})`,
+      );
+    });
+    bullets.push(
+      `If you stacked ${env.name} + those peers at ${pct}%: ~${formatCurrency(savings + peerTotal)} / mo → surplus near ${formatCurrency(stackSurplus)}.`,
     );
   }
 
   return {
-    id: 'cut_dining',
-    title: `Cut ${dining.name} by ${pct}%`,
+    id: 'cut_envelope',
+    title: `Cut ${env.name} by ${pct}%`,
     paragraphs,
-    bullets: [
-      `New suggested budget: ${formatCurrency(newBudget)} (was ${formatCurrency(dining.budgeted)})`,
-      `Vs last month spent: ${formatCurrency(dining.prevSpent)} → watch the habit, not just the envelope number`,
-    ],
+    bullets,
     metrics: [
       { label: 'Frees', value: formatCurrency(savings), tone: 'positive' },
       { label: 'New surplus', value: formatCurrency(newSurplus), tone: 'accent' },
-      { label: 'Now remaining', value: formatCurrency(dining.remaining), tone: dining.remaining < 0 ? 'negative' : '' },
-    ],
+      { label: 'Now left', value: formatCurrency(env.remaining), tone: env.remaining < 0 ? 'negative' : '' },
+      peers.length
+        ? { label: `+ peers @${pct}%`, value: formatCurrency(peerTotal), tone: '' }
+        : null,
+    ].filter(Boolean),
     actions: [
-      { label: `Open ${dining.name}`, page: 'budget', focusId: dining.id },
+      { label: `Open ${env.name}`, page: 'budget', focusId: env.id },
+      { label: 'Cash if we snowball', action: 'chip', chipId: 'after_snowball' },
       { label: 'Debt snowball', page: 'debt' },
+      { label: 'Open Budget', page: 'budget' },
     ],
   };
 }

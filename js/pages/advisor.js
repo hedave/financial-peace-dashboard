@@ -1,4 +1,5 @@
 import { el, formatCurrency } from '../utils.js';
+import { store } from '../store.js';
 import { buildAdvisorSnapshot } from '../advisor/context.js';
 import {
   ADVISOR_CHIPS,
@@ -12,6 +13,9 @@ import { showToast } from '../components/modal.js';
 /** User-picked chip; null = use smart default for this visit. */
 let stickyChipId = null;
 let affordAmount = '';
+/** Flexible “cut X by Y%” controls */
+let cutEnvelopeId = '';
+let cutPct = '20';
 let lastAnswer = null;
 
 /** Call when navigating into Advisor so the default chip can re-evaluate. */
@@ -34,11 +38,27 @@ export function renderAdvisor(container) {
   const snap = buildAdvisorSnapshot();
   // Drop removed chips (e.g. old "attention" sticky from a prior visit)
   const validChipIds = new Set(ADVISOR_CHIPS.map(c => c.id));
+  // Migrate old sticky chip id
+  if (stickyChipId === 'cut_dining') stickyChipId = 'cut_envelope';
   if (stickyChipId && !validChipIds.has(stickyChipId)) stickyChipId = null;
   const activeChipId = stickyChipId || pickDefaultChip(snap);
+
+  // Default cut target: dining alias, else sticky, else largest discretionary
+  if (!cutEnvelopeId) {
+    cutEnvelopeId = snap.named?.dining?.id
+      || snap.envelopes?.filter(e => !e.isSinkingFund)
+        .sort((a, b) => Math.max(b.budgeted, b.spent) - Math.max(a.budgeted, a.spent))[0]?.id
+      || '';
+  }
+
   // Always recompute against latest store so surplus/inbox stay live
   lastAnswer = {
-    ...answerChip(activeChipId, { amount: parseAmount(affordAmount), snapshot: snap }),
+    ...answerChip(activeChipId, {
+      amount: parseAmount(affordAmount),
+      cutPct: Number(cutPct) || 20,
+      envelopeId: cutEnvelopeId || null,
+      snapshot: snap,
+    }),
     _month: snap.month,
   };
 
@@ -98,11 +118,13 @@ export function renderAdvisor(container) {
         ),
   ));
 
-  // Question chips (dining label follows alias / match)
-  const diningName = snap.named.dining?.name || 'dining';
+  // Question chips
+  const cutEnvName = snap.envelopes?.find(e => e.id === cutEnvelopeId)?.name
+    || snap.named?.dining?.name
+    || 'envelope';
   const chips = ADVISOR_CHIPS.map(chip => {
-    if (chip.id === 'cut_dining') {
-      return { ...chip, label: `What if we cut ${diningName} 20%?` };
+    if (chip.id === 'cut_envelope') {
+      return { ...chip, label: `What if we cut ${cutEnvName} ${cutPct || 20}%?` };
     }
     return chip;
   });
@@ -118,7 +140,12 @@ export function renderAdvisor(container) {
             stickyChipId = chip.id;
             const s = buildAdvisorSnapshot();
             lastAnswer = {
-              ...answerChip(chip.id, { amount: parseAmount(affordAmount), snapshot: s }),
+              ...answerChip(chip.id, {
+                amount: parseAmount(affordAmount),
+                cutPct: Number(cutPct) || 20,
+                envelopeId: cutEnvelopeId || null,
+                snapshot: s,
+              }),
               _month: s.month,
             };
             renderAdvisor(container);
@@ -128,9 +155,66 @@ export function renderAdvisor(container) {
     ),
   ));
 
+  // Cut X by Y% controls
+  const cutSelect = el('select', {
+    id: 'advisor-cut-env',
+    className: 'form-input advisor-cut-select',
+    onChange: (e) => { cutEnvelopeId = e.target.value; },
+  },
+    el('option', { value: '' }, '— Choose envelope —'),
+    ...(snap.envelopes || [])
+      .filter(e => !e.isSinkingFund)
+      .map(e => el('option', { value: e.id }, `${e.icon || '✉️'} ${e.name}`)),
+    ...(snap.envelopes || [])
+      .filter(e => e.isSinkingFund)
+      .map(e => el('option', { value: e.id }, `${e.icon || '🎯'} ${e.name} (sinking)`)),
+  );
+  if (cutEnvelopeId) cutSelect.value = cutEnvelopeId;
+
+  container.appendChild(el('div', { className: 'card section advisor-cut-bar' },
+    el('label', { className: 'advisor-afford-label' }, 'What if we cut this envelope by…'),
+    el('div', { className: 'advisor-cut-row' },
+      cutSelect,
+      el('div', { className: 'advisor-cut-pct-wrap' },
+        el('input', {
+          id: 'advisor-cut-pct',
+          type: 'number',
+          min: '1',
+          max: '100',
+          step: '1',
+          value: cutPct,
+          className: 'form-input advisor-cut-pct',
+          onInput: (e) => { cutPct = e.target.value; },
+        }),
+        el('span', { className: 'advisor-cut-pct-suffix' }, '%'),
+      ),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          stickyChipId = 'cut_envelope';
+          cutEnvelopeId = cutSelect.value || cutEnvelopeId;
+          const s = buildAdvisorSnapshot();
+          lastAnswer = {
+            ...answerChip('cut_envelope', {
+              cutPct: Number(cutPct) || 20,
+              envelopeId: cutEnvelopeId || null,
+              snapshot: s,
+            }),
+            _month: s.month,
+          };
+          renderAdvisor(container);
+        },
+      }, 'Model this cut'),
+    ),
+    el('p', { className: 'tx-form-hint' },
+      'Family of 7: try groceries, kids activities, dining, gas, etc. Shows freed $/mo, surplus impact, and same-% on other big envelopes.',
+    ),
+  ));
+
   // Afford amount
   container.appendChild(el('div', { className: 'card section advisor-afford-bar' },
-    el('label', { className: 'advisor-afford-label', for: 'advisor-afford-amt' }, 'Affordability amount'),
+    el('label', { className: 'advisor-afford-label', for: 'advisor-afford-amt' }, 'Affordability amount (family purchase)'),
     el('div', { className: 'advisor-afford-row' },
       el('span', { className: 'advisor-afford-prefix' }, '$'),
       el('input', {
@@ -158,16 +242,24 @@ export function renderAdvisor(container) {
         },
       }, 'Can we afford this?'),
     ),
-    el('p', { className: 'tx-form-hint' }, 'Checks surplus, discretionary envelope room, and Vacation-style sinking funds.'),
+    el('p', { className: 'tx-form-hint' },
+      'Checks surplus, discretionary envelope room, and Vacation/Christmas-style sinking funds — useful for trips, sports, or multi-kid costs.',
+    ),
   ));
 
   // Answer card
-  const answer = lastAnswer || answerChip(activeChipId, { amount: parseAmount(affordAmount), snapshot: snap });
+  const answer = lastAnswer || answerChip(activeChipId, {
+    amount: parseAmount(affordAmount),
+    cutPct: Number(cutPct) || 20,
+    envelopeId: cutEnvelopeId || null,
+    snapshot: snap,
+  });
   container.appendChild(renderAnswerCard(answer));
 
   // Footnote
+  const familyN = store.getState().settings?.familySize || 7;
   container.appendChild(el('p', { className: 'tx-form-hint section advisor-footnote' },
-    `Snapshot ${snap.asOf} · ${snap.envelopes.length} envelopes · ${snap.debts.length} active debt(s) · local only`,
+    `Snapshot ${snap.asOf} · household of ${familyN} · ${snap.envelopes.length} envelopes · ${snap.debts.length} active debt(s) · local only`,
   ));
 }
 

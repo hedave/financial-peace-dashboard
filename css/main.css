@@ -972,6 +972,50 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
   line-height: 1.45;
 }
 
+/* Advisor: cut X by Y% */
+.advisor-cut-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.advisor-cut-select {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.advisor-cut-pct-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.advisor-cut-pct {
+  width: 4.5rem;
+  text-align: right;
+}
+
+.advisor-cut-pct-suffix {
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .advisor-cut-row {
+    flex-direction: column;
+  }
+  .advisor-cut-select,
+  .advisor-cut-pct-wrap {
+    width: 100%;
+  }
+  .advisor-cut-pct {
+    flex: 1;
+    width: auto;
+  }
+}
+
 @media (max-width: 768px) {
   .cash-runway-steps {
     grid-template-columns: 1fr 1fr;
