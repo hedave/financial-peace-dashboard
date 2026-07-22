@@ -826,6 +826,7 @@ export function pickDefaultChip(snap) {
 }
 
 function basisLabel(basis, usesLogged) {
+  if (basis === 'pay_bridge') return 'capped for bills before next paycheck';
   if (basis === 'unallocated') return 'from zero-based leftover';
   if (basis === 'cashflow') return usesLogged ? 'from logged income − spending' : 'from planned income − spending';
   return 'none free yet';
