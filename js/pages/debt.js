@@ -13,12 +13,16 @@ export function renderDebt(container) {
   const months = store.estimateMonthsToDebtFree();
   const target = store.getSnowballTarget();
   const surplus = store.getSurplusForSnowball();
+  const surplusCap = store.getSurplusCapInfo();
   const toAllocate = store.getPlannedSnowballSurplus();
-  const surplusNote = store.getSurplusBasis() === 'unallocated' && toAllocate > 0
-    ? `Matches To Allocate (${formatCurrency(toAllocate)}) from your envelope budget`
-    : store.getSurplusBasis() === 'cashflow'
-      ? 'Based on income minus spending this month'
-      : '';
+  const basis = store.getSurplusBasis();
+  const surplusNote = basis === 'pay_bridge'
+    ? `Safe after bills before next pay${surplusCap.nextPayDate ? ` (${surplusCap.nextPayDate})` : ''}: held ${formatCurrency(surplusCap.billsTotal)}`
+    : basis === 'unallocated' && toAllocate > 0
+      ? `Matches To Allocate (${formatCurrency(toAllocate)}) from your envelope budget`
+      : basis === 'cashflow'
+        ? 'Based on income minus spending this month'
+        : '';
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },

@@ -840,11 +840,117 @@ class Store {
     return Math.max(0, this.getToAllocate());
   }
 
-  getSurplusForSnowball(month = getCurrentMonth()) {
+  /**
+   * Budget / cash-flow leftover before the “keep enough for bills until payday” cap.
+   */
+  getUncappedSurplusForSnowball(month = getCurrentMonth()) {
     const toAllocate = this.getPlannedSnowballSurplus();
     const cashAvailable = Math.max(0, this.getCashFlowSurplus(month));
-    // At minimum, use unallocated envelope funds; also use extra if cash flow is higher
     return Math.max(toAllocate, cashAvailable);
+  }
+
+  /**
+   * Cash reserved so bills due on/before the next paycheck don’t leave checking negative.
+   * freeCash = max(0, checking − unpaid bills due through next pay day).
+   * Safe snowball extra ≤ freeCash.
+   */
+  getPayBridgeReserve(month = getCurrentMonth()) {
+    const today = todayISO();
+    const checking = Math.round((Number(this.state.balances?.checking) || 0) * 100) / 100;
+    const payStatus = this.getPaycheckStatus(month);
+
+    const receivedKeys = new Set();
+    payStatus.forEach(p => {
+      (p.checks || []).forEach(c => {
+        if (c.status === 'received' && c.date) {
+          receivedKeys.add(`${p.id}|${String(c.date).slice(0, 10)}`);
+        }
+      });
+    });
+
+    const upcoming = [];
+    payStatus.forEach(p => {
+      (p.checks || []).forEach(c => {
+        if (!c.date || c.status === 'received') return;
+        upcoming.push({
+          sourceId: p.id,
+          date: String(c.date).slice(0, 10),
+          amount: Number(c.amount) > 0 ? Number(c.amount) : (Number(p.perCheck) || 0),
+        });
+      });
+      (p.upcoming || []).forEach(c => {
+        if (!c.date) return;
+        const date = String(c.date).slice(0, 10);
+        if (date < today) return;
+        if (receivedKeys.has(`${p.id}|${date}`)) return;
+        upcoming.push({
+          sourceId: p.id,
+          date,
+          amount: Number(c.amount) > 0 ? Number(c.amount) : (Number(p.perCheck) || 0),
+        });
+      });
+    });
+
+    const seen = new Set();
+    const unique = upcoming.filter(c => {
+      const key = `${c.sourceId}|${c.date}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    const nextPayDate = unique[0]?.date || null;
+    // No pay calendar: still protect near-term unpaid bills (14 days)
+    const horizon = nextPayDate || (() => {
+      const d = new Date(today + 'T12:00:00');
+      d.setDate(d.getDate() + 14);
+      return formatLocalISODate(d);
+    })();
+
+    const bills = (this.state.bills || []).filter(b => {
+      if (!b || b.status === 'paid') return false;
+      const due = String(b.dueDate || '').slice(0, 10);
+      if (!due) return true; // undated obligation — keep cash
+      return due <= horizon;
+    });
+    const billsTotal = Math.round(
+      bills.reduce((s, b) => s + (Number(b.amount) || 0), 0) * 100,
+    ) / 100;
+
+    // After snowball, checking − bills ≥ 0  →  surplus ≤ checking − bills
+    const freeCash = Math.max(0, Math.round((checking - billsTotal) * 100) / 100);
+
+    return {
+      checking,
+      nextPayDate,
+      horizon,
+      billsTotal,
+      billCount: bills.length,
+      freeCash,
+      hasNextPay: !!nextPayDate,
+    };
+  }
+
+  getSurplusForSnowball(month = getCurrentMonth()) {
+    const raw = this.getUncappedSurplusForSnowball(month);
+    const { freeCash } = this.getPayBridgeReserve(month);
+    // Never offer more snowball extra than cash left after bills until next pay
+    return Math.min(raw, freeCash);
+  }
+
+  /** Why surplus was reduced (for UI notes). */
+  getSurplusCapInfo(month = getCurrentMonth()) {
+    const raw = this.getUncappedSurplusForSnowball(month);
+    const reserve = this.getPayBridgeReserve(month);
+    const safe = Math.min(raw, reserve.freeCash);
+    const capped = raw > safe + 0.005;
+    return {
+      raw: Math.round(raw * 100) / 100,
+      safe: Math.round(safe * 100) / 100,
+      capped,
+      heldBack: Math.max(0, Math.round((raw - safe) * 100) / 100),
+      ...reserve,
+    };
   }
 
   getSurplusBasis(month = getCurrentMonth()) {
@@ -852,6 +958,8 @@ class Store {
     const cashAvailable = Math.max(0, this.getCashFlowSurplus(month));
     const surplus = this.getSurplusForSnowball(month);
     if (surplus <= 0) return 'none';
+    const cap = this.getSurplusCapInfo(month);
+    if (cap.capped && cap.billsTotal > 0) return 'pay_bridge';
     if (toAllocate >= cashAvailable && toAllocate > 0) return 'unallocated';
     if (cashAvailable > toAllocate) return 'cashflow';
     return 'unallocated';

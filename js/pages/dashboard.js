@@ -18,13 +18,18 @@ export function renderDashboard(container) {
   const spent = store.getTotalSpent();
   const surplus = store.getSurplusForSnowball();
   const surplusBasis = store.getSurplusBasis();
-  const surplusIncomeNote = surplusBasis === 'unallocated'
-    ? 'From zero-based budget (income minus envelope totals)'
-    : surplusBasis === 'cashflow'
-      ? (store.usesLoggedIncomeForSurplus()
-        ? 'From income received minus spending this month'
-        : 'From planned income minus spending this month')
-      : 'Assign income to envelopes or log transactions to build surplus';
+  const surplusCap = store.getSurplusCapInfo();
+  const surplusIncomeNote = surplusBasis === 'pay_bridge'
+    ? (surplusCap.nextPayDate
+      ? `Kept ${formatCurrency(surplusCap.billsTotal)} for bills due by next pay (${surplusCap.nextPayDate})`
+      : `Kept ${formatCurrency(surplusCap.billsTotal)} for near-term bills so checking stays non-negative`)
+    : surplusBasis === 'unallocated'
+      ? 'From zero-based budget (income minus envelope totals)'
+      : surplusBasis === 'cashflow'
+        ? (store.usesLoggedIncomeForSurplus()
+          ? 'From income received minus spending this month'
+          : 'From planned income minus spending this month')
+        : 'Assign income to envelopes or log transactions to build surplus';
   const babyStep = store.detectBabyStep();
   const celebration = store.getLatestCelebration();
   const target = store.getSnowballTarget();
@@ -677,13 +682,36 @@ const reconModal = showModal({
 /** Shared with Advisor — open the snowball surplus allocation modal. */
 export function allocateSurplus() {
   const surplus = store.getSurplusForSnowball();
+  const cap = store.getSurplusCapInfo();
   const target = store.getSnowballTarget();
   if (!target) {
     showToast('No active debts in your snowball!', 'info');
     return;
   }
+  if (surplus <= 0) {
+    if (cap.raw > 0.02 && cap.billsTotal > 0) {
+      showToast(
+        `Budget leftover is ${formatCurrency(cap.raw)}, but checking needs ~${formatCurrency(cap.billsTotal)} for bills before ${cap.nextPayDate || 'next pay'} — nothing safe to snowball yet`,
+        'info',
+        5500,
+      );
+    } else {
+      showToast('No surplus available to allocate', 'info');
+    }
+    return;
+  }
   const input = el('input', { type: 'number', step: '0.01', value: surplus, min: 0 });
-  const checking = Number(store.getState().balances?.checking) || 0;
+  const checking = cap.checking;
+  const bridgeNote = cap.billsTotal > 0
+    ? el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      cap.capped
+        ? `Safe amount is capped: ${formatCurrency(cap.raw)} budget leftover − hold ${formatCurrency(cap.billsTotal)} for ${cap.billCount} bill(s) due by ${cap.nextPayDate || 'the next couple weeks'} → ${formatCurrency(surplus)} available. After those bills, checking won’t go negative.`
+        : `Holding ${formatCurrency(cap.billsTotal)} in checking for ${cap.billCount} bill(s) due by ${cap.nextPayDate || 'soon'}.`,
+    )
+    : el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      'No unpaid bills due before your next paycheck — surplus is only limited by budget leftover and checking.',
+    );
+
   const modal = showModal({
     title: 'Snowball extra to debt',
     body: el('div', {},
@@ -691,8 +719,10 @@ export function allocateSurplus() {
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
         'Reduces checking and the debt balance. If this debt has a linked envelope, that budget rises so To Allocate drops (can’t re-allocate the same dollars).',
       ),
+      bridgeNote,
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        `Surplus available: ${formatCurrency(surplus)} · Checking: ${formatCurrency(checking)}`,
+        `Safe to snowball: ${formatCurrency(surplus)} · Checking: ${formatCurrency(checking)}`
+        + (cap.capped ? ` · Budget leftover was ${formatCurrency(cap.raw)}` : ''),
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input)
     ),
@@ -706,23 +736,20 @@ export function allocateSurplus() {
           return;
         }
         if (amt > surplus + 0.02) {
-          showToast(`Only ${formatCurrency(surplus)} surplus available`, 'info');
+          showToast(`Only ${formatCurrency(surplus)} is safe to snowball (bills before next pay)`, 'info');
           return;
         }
-        const doPay = () => {
-          const result = store.allocateSurplusToDebt(amt);
-          modal.close();
-          if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
-        };
-        if (amt > checking + 0.02) {
-          confirmDialog(
-            'More than checking balance?',
-            `You’re sending ${formatCurrency(amt)} but checking shows ${formatCurrency(checking)}. Continue anyway (e.g. balance not updated)?`,
-            doPay,
+        const after = checking - amt;
+        if (after + 0.02 < cap.billsTotal) {
+          showToast(
+            `That would leave only ${formatCurrency(after)} for ${formatCurrency(cap.billsTotal)} in bills before next pay`,
+            'info',
           );
           return;
         }
-        doPay();
+        const result = store.allocateSurplusToDebt(amt);
+        modal.close();
+        if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
       },
     }, 'Allocate'),
   });
