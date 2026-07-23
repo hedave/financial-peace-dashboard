@@ -120,10 +120,6 @@ export function renderAdvisor(container) {
   ));
 
   // Question chips — grouped for scanability
-  const cutEnvName = snap.envelopes?.find(e => e.id === cutEnvelopeId)?.name
-    || snap.named?.dining?.name
-    || 'envelope';
-
   function selectChip(chipId) {
     stickyChipId = chipId;
     const s = buildAdvisorSnapshot();
@@ -146,17 +142,11 @@ export function renderAdvisor(container) {
     chipSection.appendChild(el('div', { className: 'advisor-chip-group' },
       el('div', { className: 'advisor-chip-group-label' }, group.label),
       el('div', { className: 'chip-bar advisor-chip-bar' },
-        ...group.chips.map(chip => {
-          let label = chip.label;
-          if (chip.id === 'cut_envelope') {
-            label = `Cut ${cutEnvName} ${cutPct || 20}%`;
-          }
-          return el('button', {
-            type: 'button',
-            className: `chip${activeChipId === chip.id ? ' active' : ''}`,
-            onClick: () => selectChip(chip.id),
-          }, label);
-        }),
+        ...group.chips.map(chip => el('button', {
+          type: 'button',
+          className: `chip${activeChipId === chip.id ? ' active' : ''}`,
+          onClick: () => selectChip(chip.id),
+        }, chip.label)),
       ),
     ));
   });

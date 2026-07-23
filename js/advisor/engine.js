@@ -38,7 +38,7 @@ export const ADVISOR_CHIP_GROUPS = [
     chips: [
       { id: 'surplus_split', label: 'Split surplus' },
       { id: 'snowball', label: 'Snowball plan' },
-      { id: 'cut_envelope', label: 'Cut envelope %' },
+      { id: 'cut_envelope', label: 'Cut X by Y%' },
       { id: 'afford', label: 'Afford $___' },
     ],
   },
