@@ -2,7 +2,7 @@ import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayIS
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
-import { showModal, showToast, confirmDialog } from '../components/modal.js';
+import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { renderReviewBanner, openPendingReview, openReviewInbox } from '../components/review-inbox.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
 import { openEnvelopeActivity } from './budget.js';
@@ -86,6 +86,7 @@ export function renderDashboard(container) {
     ),
   ));
 
+  // —— Above the fold: act → cash → week ——
   const reviewBanner = renderReviewBanner(inbox);
   if (reviewBanner) container.appendChild(reviewBanner);
 
@@ -95,162 +96,167 @@ export function renderDashboard(container) {
   const daveMode = store.isDaveRamseyMode();
   const toAllocateOff = Math.abs(toAllocate) >= 0.01;
 
+  // Compact action chips (replaces multiple full banners)
+  const actionChips = [];
   if (daveMode && toAllocateOff) {
-    container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '📊'),
-      el('div', { className: 'banner-text' },
-        el('h3', {}, toAllocate > 0
-          ? `${formatCurrency(toAllocate)} still needs a job`
-          : `Over-assigned by ${formatCurrency(Math.abs(toAllocate))}`),
-        el('p', {}, toAllocate > 0
-          ? 'Dave Ramsey mode: give every dollar a job until To Allocate is $0.'
-          : 'Dave Ramsey mode: you budgeted more than planned income — trim envelopes or fix the pay calendar.'),
-      ),
-      el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
-        onClick: () => window.appNavigate('budget'),
-      }, 'Open Budget'),
-    ));
+    actionChips.push(el('button', {
+      type: 'button',
+      className: 'chip chip-warn',
+      onClick: () => window.appNavigate('budget'),
+    }, toAllocate > 0
+      ? `📊 ${formatCurrency(toAllocate)} needs a job`
+      : `📊 Over by ${formatCurrency(Math.abs(toAllocate))}`));
+  }
+  if (pendingCount > 0) {
+    actionChips.push(el('button', {
+      type: 'button', className: 'chip chip-warn', onClick: () => openPendingReview(),
+    }, `⏳ ${pendingCount} awaiting bank`));
+  }
+  if (inbox.uncategorized.length > 0) {
+    actionChips.push(el('button', {
+      type: 'button', className: 'chip chip-warn', onClick: () => openReviewInbox(),
+    }, `🏷️ ${inbox.uncategorized.length} need categories`));
+  }
+  if (overCapEnvelopes.length > 0) {
+    actionChips.push(el('button', {
+      type: 'button', className: 'chip chip-warn',
+      onClick: () => window.appNavigate('budget', { filter: 'attention' }),
+    }, `🎯 ${overCapEnvelopes.length} over cap`));
+  }
+  if (notedEnvelopes.length > 0) {
+    actionChips.push(el('button', {
+      type: 'button', className: 'chip',
+      onClick: () => window.appNavigate('budget'),
+    }, `📝 ${notedEnvelopes.length} notes`));
+  }
+  billWarnings.forEach(w => {
+    actionChips.push(el('button', {
+      type: 'button',
+      className: w.severity === 'warn' ? 'chip chip-warn' : 'chip',
+      onClick: () => window.appNavigate(w.id === 'no_pay' ? 'income' : 'bills'),
+    }, w.label.length > 48 ? `${w.label.slice(0, 46)}…` : w.label));
+  });
+  if (actionChips.length) {
+    container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' }, ...actionChips));
   }
 
-  if (pendingCount > 0 || inbox.uncategorized.length > 0 || overCapEnvelopes.length > 0 || notedEnvelopes.length > 0) {
-    container.appendChild(el('div', { className: 'chip-bar section dash-alert-chips' },
-      pendingCount > 0 ? el('button', {
-        type: 'button',
-        className: 'chip chip-warn',
-        onClick: () => openPendingReview(),
-      }, `⏳ ${pendingCount} awaiting bank`) : null,
-      inbox.uncategorized.length > 0 ? el('button', {
-        type: 'button',
-        className: 'chip chip-warn',
-        onClick: () => openReviewInbox(),
-      }, `🏷️ ${inbox.uncategorized.length} need categories`) : null,
-      overCapEnvelopes.length > 0 ? el('button', {
-        type: 'button',
-        className: 'chip chip-warn',
-        onClick: () => window.appNavigate('budget', { filter: 'attention' }),
-      }, `🎯 ${overCapEnvelopes.length} over cap/goal`) : null,
-      notedEnvelopes.length > 0 ? el('button', {
-        type: 'button',
-        className: 'chip',
-        title: notedEnvelopes.map(c => c.name).join(', '),
-        onClick: () => window.appNavigate('budget'),
-      }, `📝 ${notedEnvelopes.length} envelope note${notedEnvelopes.length === 1 ? '' : 's'}`) : null,
-    ));
-  }
-
-  const dayOfMonth = new Date().getDate();
-  if (dayOfMonth <= 7) {
-    container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '📅'),
-      el('div', { className: 'banner-text' },
-        el('h3', {}, 'New month checklist'),
-        el('p', {},
-          'Envelope budgets stay until you change them. Review kids’ envelopes, To Allocate, and optionally copy last month’s plan from Budget tools.',
-        ),
-      ),
-      el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
-        onClick: () => window.appNavigate('budget'),
-      }, 'Open Budget'),
-    ));
-  }
-
+  // Celebration only (snowball target moves into compact strip)
   if (celebration && celebration.date === todayISO()) {
-    container.appendChild(el('div', { className: 'banner banner-celebration confetti-burst' },
+    container.appendChild(el('div', { className: 'banner banner-celebration confetti-burst section' },
       el('div', { className: 'banner-icon' }, '🎉'),
       el('div', { className: 'banner-text' },
         el('h3', {}, celebration.message),
-        el('p', {}, 'Keep rolling that snowball!')
-      )
-    ));
-  } else if (target) {
-    container.appendChild(el('div', { className: 'banner banner-action' },
-      el('div', { className: 'banner-icon' }, '🎯'),
-      el('div', { className: 'banner-text' },
-        el('h3', {}, `Current snowball target: ${target.name}`),
-        el('p', {}, `Balance: ${formatCurrency(target.balance)} — Minimum: ${formatCurrency(target.minPayment)}`)
-      )
+        el('p', {}, 'Keep rolling that snowball!'),
+      ),
     ));
   }
 
-  container.appendChild(el('div', { className: 'quick-actions' },
+  // Primary stats: cash truth first
+  container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
+    statCard('Checking', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking'), false, 'Tap to update'),
+    statCard(
+      'Safe snowball',
+      formatCurrency(surplus),
+      surplus > 0 ? 'positive' : '',
+      () => allocateSurplus(),
+      true,
+      surplus > 0 ? 'Tap to send to debt · runway below' : 'Nothing safe after bills + cushion',
+    ),
+    statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
+    statCard(
+      'To Allocate',
+      formatCurrency(toAllocate),
+      Math.abs(toAllocate) < 0.01 ? 'positive' : toAllocate > 0 ? 'accent' : 'negative',
+      () => window.appNavigate('budget'),
+      false,
+      Math.abs(toAllocate) < 0.01 ? 'Every dollar has a job' : 'Tap Budget to assign',
+    ),
+  ));
+
+  container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
+
+  container.appendChild(el('div', { className: 'quick-actions section' },
     quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
-    quickAction('📥', 'Review Inbox', () => openReviewInbox()),
+    quickAction('📥', 'Review', () => openReviewInbox()),
     quickAction('💸', 'Snowball $', () => allocateSurplus()),
-    quickAction('✉️', 'Envelopes', () => window.appNavigate('budget')),
+    quickAction('✉️', 'Budget', () => window.appNavigate('budget')),
     quickAction('🧭', 'Advisor', () => window.appNavigate('advisor')),
   ));
 
   container.appendChild(weekAtAGlance(upcoming, paychecks));
 
-  const lastBackup = state.settings.lastBackupAt;
-  if (lastBackup) {
-    const days = Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000);
-    if (days >= 30) {
-      container.appendChild(el('div', { className: 'banner banner-warning section' },
-        el('div', { className: 'banner-icon' }, '💾'),
-        el('div', { className: 'banner-text' },
-          el('h3', {}, 'Backup is getting old'),
-          el('p', {}, `Last JSON backup was ${days} days ago. Settings → Export Backup keeps a safety copy.`),
-        ),
-        el('button', {
-          className: 'btn btn-secondary btn-sm',
-          style: 'margin-left:auto;align-self:center',
-          onClick: () => window.appNavigate('settings'),
-        }, 'Settings'),
-      ));
-    }
-  } else {
-    container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '💾'),
+  // New-month checklist (dismissible for this month)
+  const dayOfMonth = new Date().getDate();
+  const checklistDismissed = state.settings?.dismissMonthChecklist === month;
+  if (dayOfMonth <= 7 && !checklistDismissed) {
+    container.appendChild(el('div', { className: 'banner banner-action section' },
+      el('div', { className: 'banner-icon' }, '📅'),
       el('div', { className: 'banner-text' },
-        el('h3', {}, 'No backup yet'),
-        el('p', {}, 'Export a JSON backup from Settings when you get a chance — cloud sync is great, local backup is belt-and-suspenders.'),
+        el('h3', {}, 'New month checklist'),
+        el('p', {}, 'Review kids’ envelopes, To Allocate, and cash runway. Optional: copy last month from Budget tools.'),
+      ),
+      el('div', { className: 'btn-group', style: 'margin-left:auto;align-self:center' },
+        el('button', {
+          type: 'button', className: 'btn btn-secondary btn-sm',
+          onClick: () => {
+            store.update(s => { s.settings.dismissMonthChecklist = month; });
+            window.appRefresh();
+          },
+        }, 'Dismiss'),
+        el('button', {
+          type: 'button', className: 'btn btn-primary btn-sm',
+          onClick: () => window.appNavigate('budget'),
+        }, 'Budget'),
+      ),
+    ));
+  }
+
+  // Collapsible secondary (less daily noise)
+  const detailsBody = el('div', { className: 'dash-details-body' });
+  if (target && !(celebration && celebration.date === todayISO())) {
+    detailsBody.appendChild(el('div', { className: 'banner banner-action', style: 'margin-bottom:0.75rem' },
+      el('div', { className: 'banner-icon' }, '🎯'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `Snowball target: ${target.name}`),
+        el('p', {}, `Balance ${formatCurrency(target.balance)} · Min ${formatCurrency(target.minPayment)} · Safe extra ${formatCurrency(surplus)}`),
       ),
       el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
-        onClick: () => window.appNavigate('settings'),
-      }, 'Settings'),
+        type: 'button', className: 'btn btn-sm btn-primary', style: 'margin-left:auto',
+        onClick: () => allocateSurplus(),
+      }, 'Snowball $'),
     ));
   }
-
-  container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
-    statCard('Checking Balance', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
-    statCard(
-      'Surplus for Snowball',
-      formatCurrency(surplus),
-      surplus > 0 ? 'positive' : '',
-      () => allocateSurplus(),
-      true,
-      surplusIncomeNote,
-    ),
-    statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
-    statCard(
-      'Monthly Income',
-      formatCurrency(income),
-      '',
-      null,
-      false,
-      bonusLogged > 0 ? `+ ${formatCurrency(bonusLogged)} bonus income allocatable` : null,
-    ),
+  detailsBody.appendChild(el('div', { className: 'grid grid-2 section', style: 'margin-bottom:0' },
+    paycheckCard(paychecks),
+    reconciliationCard(reconciliation),
+  ));
+  detailsBody.appendChild(el('div', { className: 'grid grid-2 section' },
+    statCard('Monthly income (plan)', formatCurrency(income), '', null, false,
+      bonusLogged > 0 ? `+ ${formatCurrency(bonusLogged)} bonus` : 'Pay calendar'),
+    statCard('Emergency fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
   ));
 
-  // Cash runway — always-visible path if we snowball safe surplus
-  container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
-
-  if (billWarnings.length) {
-    container.appendChild(el('div', { className: 'chip-bar section' },
-      ...billWarnings.map(w => el('button', {
-        type: 'button',
-        className: w.severity === 'warn' ? 'chip chip-warn' : 'chip',
-        onClick: () => window.appNavigate(w.id === 'no_pay' ? 'income' : 'bills'),
-      }, w.label)),
+  const lastBackup = state.settings.lastBackupAt;
+  const backupDays = lastBackup
+    ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000)
+    : null;
+  if (backupDays == null || backupDays >= 30) {
+    detailsBody.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem' },
+      backupDays == null
+        ? 'No JSON backup yet — Settings → Export Backup when you can.'
+        : `Last backup ${backupDays} days ago — consider exporting a fresh copy.`,
+      ' ',
+      el('button', {
+        type: 'button', className: 'linkish',
+        onClick: () => window.appNavigate('settings'),
+      }, 'Open Settings'),
     ));
   }
+
+  container.appendChild(el('details', { className: 'section dash-details' },
+    el('summary', { className: 'dash-details-summary' }, 'More: paychecks, recon, income, backup'),
+    detailsBody,
+  ));
 
   if (topEnvelopes.length) {
     container.appendChild(el('div', { className: 'section' },
@@ -291,34 +297,31 @@ export function renderDashboard(container) {
     ));
   }
 
+  // Slim progress row
   container.appendChild(el('div', { className: 'grid grid-3 section' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Budget vs Actual'),
       el('div', { style: 'display:flex;justify-content:space-between;margin-top:0.5rem' },
         el('div', {},
           el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Budgeted'),
-          el('div', { style: 'font-weight:700' }, formatCurrency(budgeted))
+          el('div', { style: 'font-weight:700', className: 'money' }, formatCurrency(budgeted))
         ),
         el('div', {},
           el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Spent'),
-          el('div', { style: 'font-weight:700;color:var(--text)' }, formatCurrency(spent))
+          el('div', { style: 'font-weight:700;color:var(--text)', className: 'money' }, formatCurrency(spent))
         ),
         el('div', {},
           el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Remaining'),
-          el('div', { style: `font-weight:700;color:${budgeted - spent >= 0 ? 'var(--positive)' : 'var(--negative)'}` },
-            formatCurrency(budgeted - spent))
+          el('div', {
+            style: `font-weight:700;color:${budgeted - spent >= 0 ? 'var(--positive)' : 'var(--negative)'}`,
+            className: 'money',
+          }, formatCurrency(budgeted - spent))
         ),
       ),
       progressBar(spent, budgeted)
     ),
     babyStepCard(babyStep),
     debtSummaryCard(),
-  ));
-
-  // Paychecks detail + recon — bills for the week are already in “This week at a glance”
-  container.appendChild(el('div', { className: 'grid grid-2 section' },
-    paycheckCard(paychecks),
-    reconciliationCard(reconciliation),
   ));
 }
 
@@ -896,7 +899,21 @@ export function allocateSurplus() {
         confirmDialog('Confirm snowball payment', confirmMsg, () => {
           const result = store.allocateSurplusToDebt(amt);
           modal.close();
-          if (result) showToast(`Allocated to ${result.name}!`, 'celebration');
+          if (result) {
+            showUndoToast(
+              `Allocated ${formatCurrency(result.pay || amt)} to ${result.name}`,
+              () => {
+                const u = store.undoLastAction();
+                if (u.ok) {
+                  showToast('Snowball payment undone', 'info');
+                  window.appRefresh();
+                } else {
+                  showToast('Undo expired', 'info');
+                }
+              },
+            );
+            window.appRefresh();
+          }
         });
       },
     }, 'Review & allocate'),

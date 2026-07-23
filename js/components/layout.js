@@ -6,14 +6,14 @@ import { showToast } from './modal.js';
 import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
-  { id: 'income', label: 'Income & Balances', icon: '💰' },
-  { id: 'budget', label: 'Envelope Budget', icon: '✉️' },
-  { id: 'bills', label: 'Bills & Payments', icon: '📋' },
-  { id: 'debt', label: 'Debt Snowball', icon: '❄️' },
+  { id: 'dashboard', label: 'Home', icon: '🏠' },
+  { id: 'income', label: 'Income', icon: '💰' },
+  { id: 'budget', label: 'Budget', icon: '✉️' },
+  { id: 'bills', label: 'Bills', icon: '📋' },
+  { id: 'debt', label: 'Debt', icon: '❄️' },
   { id: 'transactions', label: 'Transactions', icon: '📝' },
   { id: 'notes', label: 'Notes', icon: '🗒️' },
-  { id: 'reports', label: 'Reports & Insights', icon: '📊' },
+  { id: 'reports', label: 'Reports', icon: '📊' },
   { id: 'advisor', label: 'Advisor', icon: '🧭' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
@@ -31,14 +31,14 @@ const BOTTOM_NAV_PAGE_IDS = new Set(
   BOTTOM_NAV_ITEMS.filter(i => i.id !== 'more').map(i => i.id)
 );
 
-const FAB_PAGES = new Set(['dashboard', 'transactions']);
+const FAB_PAGES = new Set(['dashboard', 'transactions', 'budget']);
 
 export function renderLayout(container, currentPage, onNavigate) {
   const state = store.getState();
 
   const sidebar = el('nav', { className: 'sidebar', id: 'sidebar' },
     el('div', { className: 'sidebar-header' },
-      el('h1', {}, 'Financial Peace Dashboard'),
+      el('h1', {}, 'FinPeace'),
       el('div', { className: 'tagline' }, 'Give every dollar a job')
     ),
     el('div', { className: 'nav-links' },

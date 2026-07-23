@@ -554,7 +554,9 @@ function allocateAllSurplus() {
     `Send ${formatCurrency(surplus)} extra to ${targetDebt.name}? This reduces checking and the debt balance. Use dashboard “Snowball $” if you want a custom amount.`,
     () => {
       const target = store.allocateSurplusToDebt(surplus);
-      if (target) showToast(`Allocated ${formatCurrency(surplus)} to ${target.name}!`, 'celebration');
+      if (target) {
+        showToast(`Allocated ${formatCurrency(target.pay || surplus)} to ${target.name}!`, 'celebration');
+      }
       window.appRefresh();
     },
   );

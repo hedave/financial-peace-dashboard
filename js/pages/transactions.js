@@ -1,6 +1,6 @@
 import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
 import { store } from '../store.js';
-import { showModal, showToast, confirmDialog } from '../components/modal.js';
+import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
 import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
 import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-match-ui.js';
@@ -654,10 +654,11 @@ export function openTransactionForm({
     memoIn,
   );
 
+  const lastCat = state.settings?.lastExpenseCategoryId || '';
   const catGroup = el('div', { className: 'form-group' },
     el('label', {}, 'Envelope / Category'),
     buildCategorySelect(state, {
-      value: transaction?.categoryId || presetCategoryId || '',
+      value: transaction?.categoryId || presetCategoryId || (!isEdit && type === 'expense' ? lastCat : '') || '',
     }),
   );
   const catSelect = catGroup.querySelector('select');
@@ -884,6 +885,9 @@ export function openTransactionForm({
                 updates.incomeSourceId = incomeSourceId;
               }
               store.updateTransaction(transaction.id, updates);
+              if (txType === 'expense' && categoryId) {
+                store.update(s => { s.settings.lastExpenseCategoryId = categoryId; });
+              }
               showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
               if (txType === 'income') {
                 setTimeout(() => handleBonusReturnMatch(transaction.id), 50);
@@ -901,6 +905,9 @@ export function openTransactionForm({
                 clearingStatus,
                 incomeSourceId,
               });
+              if (txType === 'expense' && categoryId) {
+                store.update(s => { s.settings.lastExpenseCategoryId = categoryId; });
+              }
               const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
               showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
               if (txType === 'income' && newId) {
@@ -1045,22 +1052,113 @@ const BANK_IMPORT_TIPS = {
 
 function finishImport(stats, modal) {
   modal.close();
-  const type = (stats.count > 0 || stats.matchedPending > 0) ? 'success' : 'info';
-  showToast(formatImportToast(stats), type, 6000);
   if (stats.count > 0 || stats.matchedPending > 0) {
     window.appRefresh();
     if (stats.incomeIdsForReturnMatch?.length) {
       setTimeout(() => handleBonusReturnsForIds(stats.incomeIdsForReturnMatch), 200);
     }
-    const stillPending = store.getPendingTransactions().length;
-    if (stats.billMatches > 0) {
-      setTimeout(() => openBillMatches(store.getReviewInbox()), 400);
-    } else if (store.getReviewInbox().uncategorized.length > 0) {
-      setTimeout(() => openReviewInbox(store.getReviewInbox()), 400);
-    } else if (stillPending > 0 && stats.matchedPending > 0) {
-      setTimeout(() => openPendingReview(), 500);
-    }
+    openImportSummary(stats);
+  } else {
+    showToast(formatImportToast(stats), 'info', 6000);
   }
+}
+
+/** Post-import summary sheet with deep links into Review. */
+function openImportSummary(stats) {
+  const inbox = store.getReviewInbox();
+  const stillPending = store.getPendingTransactions().length;
+  const lines = [
+    stats.count ? `${stats.count} new transaction${stats.count === 1 ? '' : 's'}` : null,
+    stats.matchedPending ? `${stats.matchedPending} pending matched (checking updated)` : null,
+    stats.expense ? `${stats.expense} expenses` : null,
+    stats.income ? `${stats.income} income` : null,
+    stats.categorized ? `${stats.categorized} auto-categorized` : null,
+    stats.ruleApplied ? `${stats.ruleApplied} from saved rules` : null,
+    stats.autoPayBills ? `${stats.autoPayBills} auto-pay bills` : null,
+    stats.duplicates ? `${stats.duplicates} duplicates skipped` : null,
+  ].filter(Boolean);
+
+  // Cash / runway impact when import reports dollar totals
+  const expenseAmt = Number(stats.expenseAmount ?? stats.expenseTotal ?? 0) || 0;
+  const incomeAmt = Number(stats.incomeAmount ?? stats.incomeTotal ?? 0) || 0;
+  const netHint = (expenseAmt > 0 || incomeAmt > 0)
+    ? [
+      expenseAmt > 0 ? `Cleared expenses ~${formatCurrency(expenseAmt)} hit checking` : null,
+      incomeAmt > 0 ? `Income ~${formatCurrency(incomeAmt)}` : null,
+      stillPending ? `${stillPending} pending still off-book` : null,
+    ].filter(Boolean).join(' · ')
+    : (stillPending
+      ? `${stillPending} pending still off-book (checking unchanged until they clear)`
+      : 'Checking only moves for cleared rows.');
+
+  const next = [];
+  if (inbox.uncategorized.length) {
+    next.push({
+      label: `Review ${inbox.uncategorized.length} needing categories`,
+      run: () => openReviewInbox(),
+    });
+  }
+  if (inbox.billMatches.length) {
+    next.push({
+      label: `Link ${inbox.billMatches.length} bill match${inbox.billMatches.length === 1 ? '' : 'es'}`,
+      run: () => openBillMatches(inbox),
+    });
+  }
+  if (inbox.duplicates?.length) {
+    next.push({
+      label: `Check ${inbox.duplicates.length} possible duplicates`,
+      run: () => openDuplicateReview(),
+    });
+  }
+  if (stillPending) {
+    next.push({
+      label: `${stillPending} still awaiting bank`,
+      run: () => openPendingReview(),
+    });
+  }
+  next.push({
+    label: 'View cash runway on Home',
+    run: () => window.appNavigate('dashboard'),
+  });
+
+  let sheet;
+  sheet = showModal({
+    title: stats.count ? 'Import complete' : 'Import finished',
+    body: el('div', {},
+      el('p', { style: 'margin-bottom:0.75rem;font-weight:600' }, lines.join(' · ') || 'Done'),
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        `${netHint} Assign envelopes next so Budget and snowball stay honest.`,
+      ),
+      next.length
+        ? el('div', { className: 'import-summary-next' },
+          el('div', { className: 'section-title', style: 'margin-bottom:0.5rem' }, 'Next'),
+          ...next.map(n => el('button', {
+            type: 'button',
+            className: 'btn btn-secondary',
+            style: 'width:100%;justify-content:flex-start;margin-bottom:0.4rem',
+            onClick: () => { sheet.close(); n.run(); },
+          }, n.label)),
+        )
+        : el('p', { className: 'tx-form-hint' }, 'Nothing left in the Review queues — nice.'),
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => sheet.close(),
+      }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          sheet.close();
+          if (next[0]) next[0].run();
+          else window.appNavigate('transactions');
+        },
+      }, next[0] ? 'Start review' : 'Open Log'),
+    ],
+  });
+  sheet.modal.classList.add('modal-scrollable');
 }
 
 function openImportDialog() {
@@ -1237,7 +1335,16 @@ function openImportDialog() {
 
 function deleteTransaction(id) {
   confirmDialog('Delete Transaction', 'Remove this transaction and reverse its balance impact?', () => {
-    store.deleteTransaction(id);
+    if (!store.deleteTransaction(id)) return;
+    showUndoToast('Transaction deleted', () => {
+      const u = store.undoLastAction();
+      if (u.ok) {
+        showToast('Transaction restored', 'success');
+        window.appRefresh();
+      } else {
+        showToast('Undo expired', 'info');
+      }
+    });
     window.appRefresh();
   });
 }

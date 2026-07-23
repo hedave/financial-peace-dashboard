@@ -179,6 +179,39 @@ export function showToast(message, type = 'info', duration = 3500) {
   const toast = el('div', { className: `toast ${type}` }, message);
   toastContainer.appendChild(toast);
   setTimeout(() => toast.remove(), duration);
+  return toast;
+}
+
+/**
+ * Toast with Undo action (e.g. after delete or snowball allocate).
+ * @param {string} message
+ * @param {() => void} onUndo
+ * @param {number} [duration=8000]
+ */
+export function showUndoToast(message, onUndo, duration = 8000) {
+  if (!toastContainer) {
+    toastContainer = el('div', { className: 'toast-container' });
+    document.body.appendChild(toastContainer);
+  }
+  let done = false;
+  const toast = el('div', { className: 'toast undo-toast' });
+  toast.appendChild(el('span', { className: 'undo-toast-msg' }, message));
+  const btn = el('button', {
+    type: 'button',
+    className: 'undo-toast-btn',
+    onClick: () => {
+      if (done) return;
+      done = true;
+      toast.remove();
+      try { onUndo?.(); } catch (e) { console.error(e); }
+    },
+  }, 'Undo');
+  toast.appendChild(btn);
+  toastContainer.appendChild(toast);
+  setTimeout(() => {
+    if (!done) toast.remove();
+  }, duration);
+  return toast;
 }
 
 export function confirmDialog(title, message, onConfirm) {

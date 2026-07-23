@@ -168,11 +168,19 @@ export function renderBudget(container, arg) {
   );
   sortSelect.value = sortOptionValue(sortKey, sortDir);
 
+  const favIds = () => new Set(store.getState().settings?.favoriteCategoryIds || []);
+  function isKidsEnvelope(cat) {
+    const n = String(cat.name || '').toLowerCase();
+    return /kid|child|children|school|sport|activit|allowance|clothes|cloth|college|camp|scout|gift|birthday/.test(n);
+  }
+
   const filterBar = el('div', { className: 'chip-bar section' });
   function renderFilterChips() {
     filterBar.innerHTML = '';
     [
-      { id: 'all', label: 'All envelopes' },
+      { id: 'all', label: 'All' },
+      { id: 'favorites', label: '★ Favorites' },
+      { id: 'kids', label: 'Kids / family' },
       { id: 'attention', label: 'Needs attention' },
     ].forEach(opt => {
       filterBar.appendChild(el('button', {
@@ -201,9 +209,19 @@ export function renderBudget(container, arg) {
   }
 
   function renderGrid() {
+    const favorites = favIds();
     let parents = state.categories.filter(c => !c.parentId);
     if (viewFilter === 'attention') parents = parents.filter(needsAttention);
+    else if (viewFilter === 'favorites') parents = parents.filter(c => favorites.has(c.id));
+    else if (viewFilter === 'kids') parents = parents.filter(isKidsEnvelope);
     let sorted = sortCategories(parents, sortKey, sortDir);
+    // Favorites first when viewing all
+    if (viewFilter === 'all' && favorites.size) {
+      sorted = [
+        ...sorted.filter(c => favorites.has(c.id)),
+        ...sorted.filter(c => !favorites.has(c.id)),
+      ];
+    }
     // Pin focused envelope to the top when deep-linking from Advisor
     if (focusId) {
       const idx = sorted.findIndex(c => c.id === focusId);
@@ -215,15 +233,35 @@ export function renderBudget(container, arg) {
     gridEl.innerHTML = '';
     if (!sorted.length) {
       gridEl.appendChild(emptyState(
-        '✓',
-        viewFilter === 'attention' ? 'All clear' : 'No envelopes',
+        viewFilter === 'favorites' ? '★' : '✓',
+        viewFilter === 'attention' ? 'All clear'
+          : viewFilter === 'favorites' ? 'No favorites yet'
+            : viewFilter === 'kids' ? 'No kids/family envelopes'
+              : 'No envelopes',
         viewFilter === 'attention'
           ? 'No envelopes need attention right now.'
-          : 'Add a category to start budgeting.',
+          : viewFilter === 'favorites'
+            ? 'Tap ★ on an envelope card to pin it here for a family of 7 quick scan.'
+            : viewFilter === 'kids'
+              ? 'Name envelopes with kid/school/sport/etc. to show them here.'
+              : 'Add a category to start budgeting.',
       ));
       return;
     }
-    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId)));
+    if (viewFilter === 'all' && favorites.size) {
+      const favList = sorted.filter(c => favorites.has(c.id));
+      const rest = sorted.filter(c => !favorites.has(c.id));
+      if (favList.length) {
+        gridEl.appendChild(el('div', { className: 'envelope-group-label' }, '★ Favorites'));
+        favList.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: true })));
+      }
+      if (rest.length) {
+        gridEl.appendChild(el('div', { className: 'envelope-group-label' }, 'All envelopes'));
+        rest.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: false })));
+      }
+      return;
+    }
+    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: favorites.has(cat.id) })));
   }
 
   sortSelect.addEventListener('change', e => {
@@ -285,7 +323,20 @@ function goalBlock(cat) {
   );
 }
 
-function envelopeCard(cat, focusId = null) {
+function toggleFavorite(categoryId) {
+  store.update(s => {
+    const list = Array.isArray(s.settings.favoriteCategoryIds)
+      ? [...s.settings.favoriteCategoryIds]
+      : [];
+    const i = list.indexOf(categoryId);
+    if (i >= 0) list.splice(i, 1);
+    else list.push(categoryId);
+    s.settings.favoriteCategoryIds = list;
+  });
+  window.appRefresh();
+}
+
+function envelopeCard(cat, focusId = null, opts = {}) {
   const spent = store.getCategorySpent(cat.id);
   const remaining = store.getCategoryRemaining(cat.id);
   const budgeted = Number(cat.monthlyBudget) || 0;
@@ -296,6 +347,8 @@ function envelopeCard(cat, focusId = null) {
   const txCount = store.getCategoryTransactions(cat.id).length;
   const overCap = store.isOverSoftCap(cat.id);
   const isFocused = focusId && cat.id === focusId;
+  const isFav = !!opts.favorite || (store.getState().settings?.favoriteCategoryIds || []).includes(cat.id);
+  const hasNote = !!(cat.note && String(cat.note).trim());
   // Same formula for every card: spent / available pool (budget + carry)
   const pool = budgeted + carry;
   let usedPct = 0;
@@ -304,7 +357,7 @@ function envelopeCard(cat, focusId = null) {
   if (isOver) usedPct = 100;
 
   const card = el('div', {
-    className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable${isFocused ? ' envelope-card-focus' : ''}`,
+    className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable${isFocused ? ' envelope-card-focus' : ''}${isFav ? ' envelope-card-fav' : ''}`,
     'data-category-id': cat.id,
     title: isFocused ? 'Focused from Advisor' : 'Click to see transactions for this envelope',
     onClick: (e) => {
@@ -320,8 +373,15 @@ function envelopeCard(cat, focusId = null) {
           cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
           healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
           overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
+          hasNote ? el('span', { className: 'envelope-badge-mini', title: cat.note }, '📝') : null,
         ),
         el('div', { className: 'btn-group' },
+          el('button', {
+            type: 'button',
+            className: `btn btn-sm btn-secondary${isFav ? ' fav-on' : ''}`,
+            title: isFav ? 'Unpin favorite' : 'Pin favorite',
+            onClick: (e) => { e.stopPropagation(); toggleFavorite(cat.id); },
+          }, isFav ? '★' : '☆'),
           el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
           el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×'),
         )

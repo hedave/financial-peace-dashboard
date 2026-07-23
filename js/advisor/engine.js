@@ -22,18 +22,39 @@ function r2(n) {
  * }} AdvisorAnswer
  */
 
-export const ADVISOR_CHIPS = [
-  { id: 'situation', label: "What's our situation this month?" },
-  { id: 'payday', label: 'Payday brief' },
-  { id: 'after_snowball', label: 'Cash left if we snowball surplus' },
-  { id: 'afford', label: 'Can we afford $___?' },
-  { id: 'surplus_split', label: 'How should we split surplus?' },
-  { id: 'snowball', label: 'If surplus goes to the snowball…' },
-  { id: 'cut_envelope', label: 'What if we cut ___ by ___%?' },
-  { id: 'month_close', label: 'Explain month-close status' },
-  { id: 'hot_envelopes', label: 'Which envelopes are hot right now?' },
-  { id: 'fund_first', label: 'Vacation vs Christmas — fund first?' },
+export const ADVISOR_CHIP_GROUPS = [
+  {
+    id: 'cash',
+    label: 'Cash',
+    chips: [
+      { id: 'situation', label: "Situation this month" },
+      { id: 'payday', label: 'Payday brief' },
+      { id: 'after_snowball', label: 'Cash if we snowball' },
+    ],
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    chips: [
+      { id: 'surplus_split', label: 'Split surplus' },
+      { id: 'snowball', label: 'Snowball plan' },
+      { id: 'cut_envelope', label: 'Cut envelope %' },
+      { id: 'afford', label: 'Afford $___' },
+    ],
+  },
+  {
+    id: 'month',
+    label: 'Month',
+    chips: [
+      { id: 'month_close', label: 'Month-close status' },
+      { id: 'hot_envelopes', label: 'Hot envelopes' },
+      { id: 'fund_first', label: 'Vacation vs Christmas' },
+    ],
+  },
 ];
+
+/** Flat list (compat) */
+export const ADVISOR_CHIPS = ADVISOR_CHIP_GROUPS.flatMap(g => g.chips);
 
 /**
  * @param {string} chipId

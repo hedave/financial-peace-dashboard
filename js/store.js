@@ -237,6 +237,21 @@ function normalizeState(state) {
   if (state.settings.lastBackupAt != null && typeof state.settings.lastBackupAt !== 'string') {
     state.settings.lastBackupAt = null;
   }
+  if (state.settings.surplusCashBuffer == null || !Number.isFinite(Number(state.settings.surplusCashBuffer))) {
+    state.settings.surplusCashBuffer = 50;
+  }
+  if (state.settings.familySize == null || !Number.isFinite(Number(state.settings.familySize))) {
+    state.settings.familySize = 7;
+  }
+  if (!Array.isArray(state.settings.favoriteCategoryIds)) {
+    state.settings.favoriteCategoryIds = [];
+  }
+  if (state.settings.lastExpenseCategoryId != null && typeof state.settings.lastExpenseCategoryId !== 'string') {
+    state.settings.lastExpenseCategoryId = null;
+  }
+  if (state.settings.dismissMonthChecklist != null && typeof state.settings.dismissMonthChecklist !== 'string') {
+    state.settings.dismissMonthChecklist = null;
+  }
   if (!state.settings.advisorAliases || typeof state.settings.advisorAliases !== 'object') {
     state.settings.advisorAliases = { dining: null, vacation: null, christmas: null };
   } else {
@@ -1765,9 +1780,11 @@ class Store {
   /** Remove a transaction and reverse checking / debt / earmark impact. */
   deleteTransaction(id) {
     let removed = false;
+    let snapshot = null;
     this.update(s => {
       const tx = s.transactions.find(x => x.id === id);
       if (!tx) return;
+      snapshot = JSON.parse(JSON.stringify(tx));
       const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
       this.applyCheckingDelta(s, -this.getCheckingDelta(tx.type, tx.amount, status));
       if (tx.type === 'debt_payment' && tx.debtId) {
@@ -1777,7 +1794,80 @@ class Store {
       s.transactions = s.transactions.filter(x => x.id !== id);
       removed = true;
     });
+    if (removed && snapshot) {
+      this._lastUndo = { type: 'restore_tx', tx: snapshot, at: Date.now() };
+    }
     return removed;
+  }
+
+  /** Re-insert a previously deleted transaction (undo). */
+  restoreDeletedTransaction(txSnapshot) {
+    if (!txSnapshot?.id) return false;
+    let ok = false;
+    this.update(s => {
+      if (s.transactions.some(t => t.id === txSnapshot.id)) return;
+      const tx = JSON.parse(JSON.stringify(txSnapshot));
+      s.transactions.unshift(tx);
+      const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+      this.applyCheckingDelta(s, this.getCheckingDelta(tx.type, tx.amount, status));
+      if (tx.type === 'debt_payment' && tx.debtId) {
+        this.adjustDebtForPayment(s, tx.debtId, Math.abs(Number(tx.amount) || 0));
+      }
+      if (tx.earmarkedEnvelope && tx.type === 'income' && tx.categoryId) {
+        this.reverseEarmarkCarry(s, tx, +1);
+      }
+      ok = true;
+    });
+    if (ok) this._lastUndo = null;
+    return ok;
+  }
+
+  undoLastAction() {
+    const u = this._lastUndo;
+    if (!u || (Date.now() - (u.at || 0)) > 60000) {
+      this._lastUndo = null;
+      return { ok: false, reason: 'expired' };
+    }
+    if (u.type === 'restore_tx') {
+      const ok = this.restoreDeletedTransaction(u.tx);
+      return { ok, type: 'restore_tx' };
+    }
+    if (u.type === 'snowball') {
+      const ok = this.undoSnowballAllocate(u);
+      return { ok, type: 'snowball' };
+    }
+    return { ok: false, reason: 'unknown' };
+  }
+
+  undoSnowballAllocate(payload) {
+    if (!payload?.txId || !(payload.pay > 0)) return false;
+    let ok = false;
+    this.update(s => {
+      const tx = s.transactions.find(t => t.id === payload.txId);
+      if (tx) {
+        const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+        this.applyCheckingDelta(s, -this.getCheckingDelta(tx.type, tx.amount, status));
+        s.transactions = s.transactions.filter(t => t.id !== payload.txId);
+      } else {
+        // Tx gone — still reverse checking if we recorded pay
+        s.balances.checking = (Number(s.balances.checking) || 0) + payload.pay;
+      }
+      const debt = s.debts.find(d => d.id === payload.debtId);
+      if (debt) {
+        debt.balance = (Number(debt.balance) || 0) + payload.pay;
+        debt.archived = false;
+        delete debt.paidOffDate;
+      }
+      if (payload.categoryId && payload.budgetBump) {
+        const cat = s.categories.find(c => c.id === payload.categoryId);
+        if (cat) {
+          cat.monthlyBudget = Math.max(0, (Number(cat.monthlyBudget) || 0) - payload.budgetBump);
+        }
+      }
+      ok = true;
+    });
+    if (ok) this._lastUndo = null;
+    return ok;
   }
 
   removeCategory(id) {
@@ -2023,6 +2113,7 @@ class Store {
     if (!target) return null;
     const num = Number(amount) || this.getSurplusForSnowball();
     if (!(num > 0)) return null;
+    let resultMeta = null;
     this.update(s => {
       const debt = s.debts.find(d => d.id === target.id);
       if (!debt || debt.paused) return;
@@ -2030,15 +2121,18 @@ class Store {
       if (!(pay > 0)) return;
       debt.balance = Math.max(0, (Number(debt.balance) || 0) - pay);
       s.balances.checking = (Number(s.balances.checking) || 0) - pay;
+      let budgetBump = 0;
       // Give those dollars a budget job so To Allocate / surplus don't stay free to re-spend
       if (debt.categoryId) {
         const cat = s.categories.find(c => c.id === debt.categoryId);
         if (cat) {
+          budgetBump = pay;
           cat.monthlyBudget = Math.round(((Number(cat.monthlyBudget) || 0) + pay) * 100) / 100;
         }
       }
+      const txId = generateId();
       s.transactions.unshift({
-        id: generateId(),
+        id: txId,
         date: todayISO(),
         amount: pay,
         type: 'debt_payment',
@@ -2047,6 +2141,14 @@ class Store {
         description: `Snowball payment to ${debt.name}`,
         clearingStatus: 'cleared',
       });
+      resultMeta = {
+        name: debt.name,
+        pay,
+        txId,
+        debtId: debt.id,
+        categoryId: debt.categoryId || null,
+        budgetBump,
+      };
       if (debt.balance <= 0) {
         debt.balance = 0;
         debt.archived = true;
@@ -2072,7 +2174,15 @@ class Store {
         });
       }
     });
-    return target;
+    if (resultMeta) {
+      this._lastUndo = {
+        type: 'snowball',
+        ...resultMeta,
+        at: Date.now(),
+      };
+      return { name: resultMeta.name, pay: resultMeta.pay, id: resultMeta.debtId };
+    }
+    return null;
   }
 
   /**
@@ -2315,6 +2425,7 @@ class Store {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
       matchedPending: 0, parsed: rows.length,
+      expenseAmount: 0, incomeAmount: 0,
       incomeIdsForReturnMatch: [],
     };
     const autoPaidBillIds = new Set();
@@ -2360,9 +2471,11 @@ class Store {
             this.applyImportedIncome(s, pendingMatch);
             stats.incomeLinked++;
             stats.income++;
+            stats.incomeAmount += Math.abs(Number(pendingMatch.amount) || 0);
             stats.incomeIdsForReturnMatch.push(pendingMatch.id);
           } else if (pendingMatch.type === 'expense') {
             stats.expense++;
+            stats.expenseAmount += Math.abs(Number(pendingMatch.amount) || 0);
             if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
             if (!this.applyAutoPayBillIfMatched(pendingMatch, s, stats, autoPaidBillIds)) {
               if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
@@ -2415,6 +2528,7 @@ class Store {
         if (tx.type === 'expense') {
           s.balances.checking -= tx.amount;
           stats.expense++;
+          stats.expenseAmount += Math.abs(Number(tx.amount) || 0);
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
           if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
             if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
@@ -2422,6 +2536,7 @@ class Store {
         } else {
           s.balances.checking += tx.amount;
           stats.income++;
+          stats.incomeAmount += Math.abs(Number(tx.amount) || 0);
           stats.incomeIdsForReturnMatch.push(newTx.id);
         }
         stats.count++;

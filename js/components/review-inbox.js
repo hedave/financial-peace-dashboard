@@ -1,6 +1,6 @@
 import { el, formatCurrency, formatDate } from '../utils.js';
 import { store } from '../store.js';
-import { showModal, showToast, confirmDialog } from './modal.js';
+import { showModal, showToast, showUndoToast, confirmDialog } from './modal.js';
 import { guessMerchantPattern } from '../category-rules.js';
 
 function duplicateGroupDateLabel(items) {
@@ -31,7 +31,13 @@ function confirmDeleteTransaction(t, { onDone, label = 'this transaction' } = {}
     `Remove ${label}? Checking balance is updated if this was already cleared.`,
     () => {
       if (store.deleteTransaction(t.id)) {
-        showToast('Transaction deleted');
+        showUndoToast('Transaction deleted', () => {
+          const u = store.undoLastAction();
+          if (u.ok) {
+            showToast('Transaction restored', 'success');
+            window.appRefresh();
+          }
+        });
         onDone?.();
         window.appRefresh();
       }

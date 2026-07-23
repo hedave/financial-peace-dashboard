@@ -101,6 +101,12 @@ export function createDefaultState() {
        * Safe surplus ≤ checking − bills − this buffer. Default $50.
        */
       surplusCashBuffer: 50,
+      /** Last envelope used on a new expense (QoL). */
+      lastExpenseCategoryId: null,
+      /** Dismiss new-month checklist for this YYYY-MM */
+      dismissMonthChecklist: null,
+      /** Favorite envelope ids for Budget pin row */
+      favoriteCategoryIds: [],
       /** Advisor named envelopes — category ids (null = auto-match by name). */
       advisorAliases: {
         dining: null,
