@@ -1,6 +1,7 @@
 import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
+import { createEnvelopePicker } from '../components/envelope-picker.js';
 import { openTransactionForm } from './transactions.js';
 
 const SORT_OPTIONS = [
@@ -11,6 +12,11 @@ const SORT_OPTIONS = [
   { key: 'name', dir: 'asc', label: 'Name (A to Z)' },
   { key: 'name', dir: 'desc', label: 'Name (Z to A)' },
 ];
+
+/** Survives modal close / soft appRefresh so sort doesn’t snap back mid-session. */
+let budgetSortKey = 'budgeted';
+let budgetSortDir = 'desc';
+let budgetViewFilter = 'all';
 
 function sortOptionValue(key, dir) {
   return `${key}:${dir}`;
@@ -59,7 +65,10 @@ export function renderBudget(container, arg) {
   const budgeted = store.getTotalBudgeted();
   const unallocated = store.getToAllocate();
   const focusId = arg?.focusId || arg?.categoryId || null;
-  let viewFilter = (arg && arg.filter === 'attention') ? 'attention' : 'all';
+  // Deep-link filters win for this visit; otherwise keep last UI choice (e.g. after activity modal refresh)
+  let viewFilter = (arg && arg.filter === 'attention')
+    ? 'attention'
+    : (budgetViewFilter || 'all');
   // Focusing a specific envelope: show all so the card is visible
   if (focusId) viewFilter = 'all';
 
@@ -113,8 +122,8 @@ export function renderBudget(container, arg) {
   toolsList.appendChild(el('button', {
     type: 'button',
     className: 'page-tools-item',
-    onClick: () => { toolsMenu.removeAttribute('open'); fundAllEnvelopes(); },
-  }, 'Assign To Allocate evenly'));
+    onClick: () => { toolsMenu.removeAttribute('open'); openMoveBetweenEnvelopes(); },
+  }, 'Move between envelopes'));
   if (hasSnapshot) {
     toolsList.appendChild(el('button', {
       type: 'button',
@@ -139,7 +148,11 @@ export function renderBudget(container, arg) {
   container.appendChild(el('div', { className: 'btn-group section budget-actions' },
     el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
     el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
-    el('button', { className: 'btn btn-secondary budget-action-secondary', onClick: fundAllEnvelopes }, 'Assign To Allocate evenly'),
+    el('button', {
+      className: 'btn btn-secondary budget-action-secondary',
+      onClick: () => openMoveBetweenEnvelopes(),
+      title: 'Shift leftover room this month only — does not change next month’s plan',
+    }, 'Move between envelopes'),
     hasSnapshot ? el('button', {
       className: 'btn btn-secondary budget-action-secondary',
       onClick: () => {
@@ -158,8 +171,8 @@ export function renderBudget(container, arg) {
     toolsMenu,
   ));
 
-  let sortKey = 'budgeted';
-  let sortDir = 'desc';
+  let sortKey = budgetSortKey;
+  let sortDir = budgetSortDir;
 
   const sortSelect = el('select', { id: 'env-sort' },
     ...SORT_OPTIONS.map(opt => el('option', {
@@ -186,7 +199,12 @@ export function renderBudget(container, arg) {
       filterBar.appendChild(el('button', {
         type: 'button',
         className: `chip${viewFilter === opt.id ? ' active' : ''}`,
-        onClick: () => { viewFilter = opt.id; renderFilterChips(); renderGrid(); },
+        onClick: () => {
+          viewFilter = opt.id;
+          budgetViewFilter = opt.id;
+          renderFilterChips();
+          renderGrid();
+        },
       }, opt.label));
     });
   }
@@ -266,6 +284,8 @@ export function renderBudget(container, arg) {
 
   sortSelect.addEventListener('change', e => {
     ({ key: sortKey, dir: sortDir } = parseSortValue(e.target.value));
+    budgetSortKey = sortKey;
+    budgetSortDir = sortDir;
     renderGrid();
   });
 
@@ -341,6 +361,7 @@ function envelopeCard(cat, focusId = null, opts = {}) {
   const remaining = store.getCategoryRemaining(cat.id);
   const budgeted = Number(cat.monthlyBudget) || 0;
   const carry = Number(cat.carryOver) || 0;
+  const moveDelta = store.getEnvelopeMoveDelta(cat.id);
   const isOver = remaining < 0;
   const health = store.getEnvelopeHealth(cat.id);
   const healthLabel = store.getEnvelopeHealthLabel(health);
@@ -349,8 +370,8 @@ function envelopeCard(cat, focusId = null, opts = {}) {
   const isFocused = focusId && cat.id === focusId;
   const isFav = !!opts.favorite || (store.getState().settings?.favoriteCategoryIds || []).includes(cat.id);
   const hasNote = !!(cat.note && String(cat.note).trim());
-  // Same formula for every card: spent / available pool (budget + carry)
-  const pool = budgeted + carry;
+  // Pool = budget + carry + month-only moves (not permanent plan)
+  const pool = store.getCategoryPool(cat.id);
   let usedPct = 0;
   if (pool > 0.005) usedPct = Math.min(100, (spent / pool) * 100);
   else if (spent > 0) usedPct = 100; // spent with no plan still shows full bar (over)
@@ -407,6 +428,14 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         el('span', {}, 'Remaining'),
         el('span', { className: 'amount' }, formatCurrency(remaining))
       ),
+      Math.abs(moveDelta) > 0.005
+        ? el('div', {
+          className: 'envelope-move-delta',
+          title: 'Month-only moves between envelopes (plan budget unchanged)',
+        }, moveDelta > 0
+          ? `+${formatCurrency(moveDelta)} moved in this month`
+          : `${formatCurrency(moveDelta)} moved out this month`)
+        : null,
       // Fixed-height track on every card so bars line up and look even
       el('div', {
         className: 'progress-bar envelope-progress',
@@ -434,6 +463,10 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         className: 'btn btn-sm btn-secondary', style: 'width:100%',
         onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
       }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
+      el('button', {
+        className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
+        onClick: (e) => { e.stopPropagation(); openMoveBetweenEnvelopes({ fromId: cat.id }); },
+      }, 'Move $'),
       el('button', {
         className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
         onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
@@ -665,6 +698,199 @@ function doFundEnvelope(cat, amt) {
   window.appRefresh();
 }
 
+/**
+ * Month-only envelope reallocation (rob Peter to pay Paul).
+ * Does not change monthlyBudget plan or bank checking.
+ */
+function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
+  const month = getCurrentMonth();
+  const cats = store.getState().categories.filter(c => !c.parentId);
+  if (cats.length < 2) {
+    showToast('Need at least two envelopes to move between', 'info');
+    return;
+  }
+
+  const fromPicker = createEnvelopePicker({
+    id: 'move-from-env',
+    value: fromId || '',
+    placeholder: 'From envelope…',
+    emptyLabel: '— From —',
+    showRemaining: true,
+    allowEmpty: true,
+  });
+  const toPicker = createEnvelopePicker({
+    id: 'move-to-env',
+    value: toId || '',
+    placeholder: 'To envelope…',
+    emptyLabel: '— To —',
+    showRemaining: true,
+    allowEmpty: true,
+  });
+  const amountIn = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: '0',
+    placeholder: '0.00',
+  });
+  const noteIn = el('input', {
+    type: 'text',
+    placeholder: 'Optional note (e.g. cover groceries overage)',
+  });
+  const hint = el('p', { className: 'tx-form-hint', style: 'margin-top:0.5rem;margin-bottom:0' }, '');
+  const historyHost = el('div', { className: 'envelope-move-history' });
+
+  function fromRemaining() {
+    const id = fromPicker.value;
+    if (!id) return 0;
+    return store.getCategoryRemaining(id, month);
+  }
+
+  function updateHint() {
+    const id = fromPicker.value;
+    if (!id) {
+      hint.textContent = 'Pick a source envelope with leftover room this month.';
+      return;
+    }
+    const rem = fromRemaining();
+    const cat = store.getState().categories.find(c => c.id === id);
+    const name = cat ? cat.name : 'Source';
+    if (rem > 0.005) {
+      hint.textContent = `${name} has ${formatCurrency(rem)} left this month — max you can move.`;
+      if (!amountIn.value || Number(amountIn.value) <= 0) {
+        amountIn.value = String(Math.round(rem * 100) / 100);
+      }
+    } else if (rem < -0.005) {
+      hint.textContent = `${name} is already over by ${formatCurrency(Math.abs(rem))} — pick an envelope with leftover.`;
+    } else {
+      hint.textContent = `${name} has nothing left to move this month.`;
+    }
+  }
+
+  function paintHistory() {
+    historyHost.innerHTML = '';
+    const moves = store.getEnvelopeMoves(month);
+    if (!moves.length) {
+      historyHost.appendChild(el('p', {
+        className: 'tx-form-hint',
+        style: 'margin:0.75rem 0 0',
+      }, 'No moves yet this month.'));
+      return;
+    }
+    historyHost.appendChild(el('div', {
+      className: 'section-title',
+      style: 'margin:1rem 0 0.5rem;font-size:0.85rem',
+    }, 'This month’s moves'));
+    const list = el('div', { className: 'envelope-move-list' });
+    [...moves].reverse().forEach(m => {
+      const from = store.getState().categories.find(c => c.id === m.fromId);
+      const to = store.getState().categories.find(c => c.id === m.toId);
+      list.appendChild(el('div', { className: 'envelope-move-row' },
+        el('div', { className: 'envelope-move-row-main' },
+          el('strong', {}, formatCurrency(m.amount)),
+          el('span', {}, ` ${from?.name || '?'} → ${to?.name || '?'}`),
+          m.note ? el('div', { className: 'tx-form-hint', style: 'margin:0.15rem 0 0' }, m.note) : null,
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => {
+            if (store.reverseEnvelopeTransfer(m.id, month)) {
+              showToast('Move undone', 'info');
+              updateHint();
+              paintHistory();
+              window.appRefresh();
+            }
+          },
+        }, 'Undo'),
+      ));
+    });
+    historyHost.appendChild(list);
+  }
+
+  fromPicker.addEventListener('change', updateHint);
+  updateHint();
+  paintHistory();
+
+  const modal = showModal({
+    title: 'Move between envelopes',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'Shift leftover room for ',
+        el('strong', {}, getMonthLabel(month)),
+        ' only — like covering an overspent envelope with Insurance leftover. ',
+        'Does not change next month’s budget plan or your bank balance.',
+      ),
+      el('div', { className: 'form-group' },
+        el('label', { for: 'move-from-env' }, 'From (has leftover)'),
+        fromPicker.element,
+      ),
+      el('div', { className: 'form-group' },
+        el('label', { for: 'move-to-env' }, 'To (needs room)'),
+        toPicker.element,
+      ),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'Amount'),
+        amountIn,
+        hint,
+      ),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'Note (optional)'),
+        noteIn,
+      ),
+      historyHost,
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          fromPicker.commitTyped?.();
+          toPicker.commitTyped?.();
+          const from = fromPicker.value;
+          const to = toPicker.value;
+          const amt = Math.round((Number(amountIn.value) || 0) * 100) / 100;
+          if (!from || !to) {
+            showToast('Pick both envelopes', 'info');
+            return;
+          }
+          if (from === to) {
+            showToast('Pick two different envelopes', 'info');
+            return;
+          }
+          if (!(amt > 0)) {
+            showToast('Enter an amount greater than zero', 'info');
+            return;
+          }
+          const rem = store.getCategoryRemaining(from, month);
+          if (amt > rem + 0.001) {
+            showToast(`Only ${formatCurrency(rem)} left in the source envelope`, 'info');
+            return;
+          }
+          const move = store.transferBetweenEnvelopes(from, to, amt, {
+            month,
+            note: noteIn.value,
+          });
+          if (!move) {
+            showToast('Could not move that amount', 'info');
+            return;
+          }
+          const fromName = store.getState().categories.find(c => c.id === from)?.name || 'envelope';
+          const toName = store.getState().categories.find(c => c.id === to)?.name || 'envelope';
+          showToast(`Moved ${formatCurrency(amt)} ${fromName} → ${toName} (this month only)`, 'success');
+          modal.close();
+          window.appRefresh();
+        },
+      }, 'Move'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
 function fundEnvelope(cat) {
   const toAllocate = store.getToAllocate();
   const goal = store.getCategoryGoal(cat.id);
@@ -723,40 +949,6 @@ function fundEnvelope(cat) {
       },
     }, 'Assign'),
   });
-}
-
-function fundAllEnvelopes() {
-  const unallocated = store.getUnallocatedFunds();
-  if (unallocated <= 0) {
-    showToast('Nothing left to allocate — To Allocate is already $0 or negative', 'info');
-    return;
-  }
-  const cats = store.getState().categories.filter(c => !c.parentId);
-  if (!cats.length) {
-    showToast('Add envelopes first', 'info');
-    return;
-  }
-  confirmDialog(
-    'Assign To Allocate evenly',
-    `Split ${formatCurrency(unallocated)} across ${cats.length} envelopes as monthly budget? Checking balance will not change.`,
-    () => {
-      // Cent-safe split so float dust doesn't leave $0.01–0.03 stuck in To Allocate
-      const cents = Math.round(unallocated * 100);
-      const n = cats.length;
-      const base = Math.floor(cents / n);
-      let rem = cents - base * n;
-      store.update(s => {
-        cats.forEach((c, i) => {
-          const cat = s.categories.find(x => x.id === c.id);
-          if (!cat) return;
-          const add = (base + (i < rem ? 1 : 0)) / 100;
-          cat.monthlyBudget = Math.round(((Number(cat.monthlyBudget) || 0) + add) * 100) / 100;
-        });
-      });
-      showToast('To Allocate assigned across envelopes');
-      window.appRefresh();
-    },
-  );
 }
 
 function sinkingFundToggle(checked) {

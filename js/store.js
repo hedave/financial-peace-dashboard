@@ -224,6 +224,9 @@ function normalizeState(state) {
   if (!state.monthBudgetSnapshots || typeof state.monthBudgetSnapshots !== 'object') {
     state.monthBudgetSnapshots = {};
   }
+  if (!state.monthEnvelopeMoves || typeof state.monthEnvelopeMoves !== 'object') {
+    state.monthEnvelopeMoves = {};
+  }
   if (!Array.isArray(state.monthCloseLog)) state.monthCloseLog = [];
   if (!state.reconciliation || typeof state.reconciliation !== 'object') {
     state.reconciliation = { bankBalance: null, asOfDate: null };
@@ -570,8 +573,10 @@ class Store {
       while (cursor && cursor < current && guard < 36) {
         this.saveMonthBudgetSnapshot(cursor, false);
         this.state.categories.forEach(cat => {
-          // remaining already = budget + prior carry − spent for that month.
-          // That amount IS the new carry — do NOT add it on top of old carry again.
+          // remaining = budget + prior carry + that month's envelope moves − spent.
+          // Bake the whole remaining into carry for the next month (moves are not
+          // re-applied later — getEnvelopeMoveDelta is month-scoped). Do NOT add
+          // remaining on top of old carry again.
           const remaining = this.getCategoryRemaining(cat.id, cursor);
           cat.carryOver = Math.round(remaining * 100) / 100;
         });
@@ -794,13 +799,96 @@ class Store {
     return this.getTotalIncomeLogged(month) > 0;
   }
 
+  /**
+   * Net $ moved into this envelope for the month (from month-only envelope transfers).
+   * Positive = received from other envelopes; negative = given away.
+   */
+  getEnvelopeMoveDelta(categoryId, month = getCurrentMonth()) {
+    const moves = this.state.monthEnvelopeMoves?.[month];
+    if (!Array.isArray(moves) || !moves.length) return 0;
+    let net = 0;
+    moves.forEach(m => {
+      if (!m || typeof m !== 'object') return;
+      const amt = Math.abs(Number(m.amount) || 0);
+      if (!(amt > 0)) return;
+      if (m.toId === categoryId) net += amt;
+      if (m.fromId === categoryId) net -= amt;
+    });
+    return Math.round(net * 100) / 100;
+  }
+
+  getEnvelopeMoves(month = getCurrentMonth()) {
+    const moves = this.state.monthEnvelopeMoves?.[month];
+    return Array.isArray(moves) ? [...moves] : [];
+  }
+
+  /**
+   * Move room from one envelope to another for this month only.
+   * Does not change monthlyBudget (plan stays the same next month).
+   * Checking is untouched — envelopes are labels on the same cash.
+   */
+  transferBetweenEnvelopes(fromId, toId, amount, { month = getCurrentMonth(), note = '' } = {}) {
+    const amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(amt > 0) || !fromId || !toId || fromId === toId) return null;
+    const from = this.state.categories.find(c => c.id === fromId);
+    const to = this.state.categories.find(c => c.id === toId);
+    if (!from || !to) return null;
+    const available = this.getCategoryRemaining(fromId, month);
+    if (available + 0.001 < amt) return null;
+
+    let move = null;
+    this.update(s => {
+      if (!s.monthEnvelopeMoves || typeof s.monthEnvelopeMoves !== 'object') {
+        s.monthEnvelopeMoves = {};
+      }
+      if (!Array.isArray(s.monthEnvelopeMoves[month])) {
+        s.monthEnvelopeMoves[month] = [];
+      }
+      move = {
+        id: generateId(),
+        fromId,
+        toId,
+        amount: amt,
+        note: String(note || '').trim(),
+        at: new Date().toISOString(),
+      };
+      s.monthEnvelopeMoves[month].push(move);
+    });
+    return move;
+  }
+
+  /** Undo a single month-only envelope move. */
+  reverseEnvelopeTransfer(moveId, month = getCurrentMonth()) {
+    let ok = false;
+    this.update(s => {
+      const list = s.monthEnvelopeMoves?.[month];
+      if (!Array.isArray(list)) return;
+      const next = list.filter(m => m.id !== moveId);
+      if (next.length === list.length) return;
+      s.monthEnvelopeMoves[month] = next;
+      ok = true;
+    });
+    return ok;
+  }
+
   getCategoryRemaining(categoryId, month = getCurrentMonth()) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
     const budgeted = Number(cat.monthlyBudget) || 0;
     const carry = Number(cat.carryOver) || 0;
+    const move = this.getEnvelopeMoveDelta(categoryId, month);
     const spent = this.getCategorySpent(categoryId, month);
-    return budgeted + carry - spent;
+    return Math.round((budgeted + carry + move - spent) * 100) / 100;
+  }
+
+  /** Available pool for progress bars (budget + carry + month moves). */
+  getCategoryPool(categoryId, month = getCurrentMonth()) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return 0;
+    const budgeted = Number(cat.monthlyBudget) || 0;
+    const carry = Number(cat.carryOver) || 0;
+    const move = this.getEnvelopeMoveDelta(categoryId, month);
+    return Math.round((budgeted + carry + move) * 100) / 100;
   }
 
   getTotalBudgeted() {
@@ -1147,12 +1235,13 @@ class Store {
   getEnvelopeHealth(categoryId, month = getCurrentMonth()) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 'none';
-    const budgeted = Number(cat.monthlyBudget) || 0;
-    const carry = Number(cat.carryOver) || 0;
-    const pool = budgeted + carry;
-    if (pool <= 0) return 'none';
+    const pool = this.getCategoryPool(categoryId, month);
+    if (pool <= 0) {
+      const remaining = this.getCategoryRemaining(categoryId, month);
+      return remaining < -0.005 ? 'over' : 'none';
+    }
     const spent = this.getCategorySpent(categoryId, month);
-    const remaining = pool - spent;
+    const remaining = this.getCategoryRemaining(categoryId, month);
     if (remaining < 0) return 'over';
     const pct = spent / pool;
     if (pct >= 1) return 'depleted';
@@ -1196,10 +1285,10 @@ class Store {
     const goal = Number(cat.goalAmount) || 0;
     if (goal <= 0) return null;
     const budgeted = Number(cat.monthlyBudget) || 0;
-    const carry = Number(cat.carryOver) || 0;
-    const pool = budgeted + carry;
+    // Include month-only envelope moves so “saved” tracks remaining after rob-Peter moves
+    const pool = this.getCategoryPool(categoryId);
     const over = budgeted > goal + 0.005;
-    const pct = Math.min(100, Math.round((pool / goal) * 100));
+    const pct = Math.min(100, Math.round((Math.max(0, pool) / goal) * 100));
     return {
       goal,
       budgeted,

@@ -2,6 +2,7 @@ import { el, formatCurrency, formatDate } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from './modal.js';
 import { guessMerchantPattern } from '../category-rules.js';
+import { createEnvelopePicker } from './envelope-picker.js';
 
 function duplicateGroupDateLabel(items) {
   const dates = [...new Set(items.map(t => t.date))].sort();
@@ -17,12 +18,11 @@ const TX_TYPE_LABELS = {
   celebration: 'Celebration',
 };
 
-function buildCategorySelect(state, id = 'bulk-cat') {
-  const select = el('select', { id },
-    el('option', { value: '' }, '— Choose envelope —'),
-    ...state.categories.map(c => el('option', { value: c.id }, `${c.icon || ''} ${c.name}`.trim())),
-  );
-  return select;
+/** Envelope remaining for option labels / hints (current month). */
+function envelopeRemainingText(categoryId) {
+  const rem = store.getCategoryRemaining(categoryId);
+  if (rem < -0.005) return `${formatCurrency(Math.abs(rem))} over`;
+  return `${formatCurrency(rem)} left`;
 }
 
 function confirmDeleteTransaction(t, { onDone, label = 'this transaction' } = {}) {
@@ -434,18 +434,68 @@ export function openUncategorizedReview() {
   }
 
   const selected = new Set();
-  const catSelect = buildCategorySelect(state);
+  const envelopePicker = createEnvelopePicker({
+    id: 'bulk-cat',
+    placeholder: 'Type to find envelope (e.g. P for Pets)…',
+    emptyLabel: '— Choose envelope —',
+    showRemaining: true,
+    allowEmpty: true,
+  });
+  const remainingHint = el('p', {
+    className: 'tx-form-hint review-envelope-remaining',
+    style: 'margin-top:0.4rem;margin-bottom:0',
+  }, 'Pick an envelope to see what’s left this month.');
   const alwaysUse = el('input', { type: 'checkbox' });
   alwaysUse.checked = true;
   const list = el('div', { className: 'review-list' });
   let modal;
 
+  function selectedAmountSum() {
+    let sum = 0;
+    const all = store.getState().transactions || [];
+    selected.forEach(id => {
+      const t = all.find(x => x.id === id);
+      if (t) sum += Math.abs(Number(t.amount) || 0);
+    });
+    return Math.round(sum * 100) / 100;
+  }
+
+  function updateRemainingHint() {
+    const catId = envelopePicker.value;
+    if (!catId) {
+      remainingHint.textContent = 'Pick an envelope to see what’s left this month.';
+      remainingHint.style.color = '';
+      return;
+    }
+    const cat = store.getState().categories.find(c => c.id === catId);
+    const rem = store.getCategoryRemaining(catId);
+    const name = cat ? `${cat.icon || ''} ${cat.name}`.trim() : 'Envelope';
+    const nSel = selected.size;
+    const sum = selectedAmountSum();
+    let line = `${name}: ${envelopeRemainingText(catId)} this month`;
+    if (nSel > 0 && sum > 0) {
+      const after = rem - sum;
+      const afterTxt = after < -0.005
+        ? `${formatCurrency(Math.abs(after))} over`
+        : `${formatCurrency(after)} left`;
+      line += ` · after ${nSel} selected (${formatCurrency(sum)}): ${afterTxt}`;
+      remainingHint.style.color = after < -0.005 ? 'var(--negative)' : '';
+    } else {
+      remainingHint.style.color = rem < -0.005 ? 'var(--negative)' : '';
+    }
+    remainingHint.textContent = line;
+  }
+
+  envelopePicker.addEventListener('change', updateRemainingHint);
+
   function paint() {
     txs = store.getReviewInbox().uncategorized;
     selected.clear();
+    envelopePicker.refresh();
     list.innerHTML = '';
     if (!txs.length) {
       list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'Nothing left to categorize.'));
+      updateRemainingHint();
       return;
     }
     txs.slice(0, 50).forEach(t => {
@@ -453,6 +503,7 @@ export function openUncategorizedReview() {
       cb.addEventListener('change', () => {
         if (cb.checked) selected.add(t.id);
         else selected.delete(t.id);
+        updateRemainingHint();
       });
       list.appendChild(el('div', { className: 'review-item' },
         el('label', { className: 'review-item-check' }, cb),
@@ -494,6 +545,7 @@ export function openUncategorizedReview() {
         ),
       ));
     });
+    updateRemainingHint();
   }
 
   paint();
@@ -502,7 +554,7 @@ export function openUncategorizedReview() {
     title: 'Review uncategorized',
     body: el('div', {},
       el('p', { className: 'tx-form-hint' },
-        'Select transactions and assign an envelope, edit individually, or delete mistakes/duplicates.',
+        'Select transactions and assign an envelope, edit individually, or delete mistakes/duplicates. Type in the envelope box to jump (e.g. P → Pets).',
       ),
       el('button', {
         type: 'button',
@@ -518,8 +570,9 @@ export function openUncategorizedReview() {
       }, 'Apply saved rules'),
       list,
       el('div', { className: 'form-group', style: 'margin-top:1rem' },
-        el('label', {}, 'Assign selected to envelope'),
-        catSelect,
+        el('label', { for: 'bulk-cat' }, 'Assign selected to envelope'),
+        envelopePicker.element,
+        remainingHint,
       ),
       el('div', { className: 'form-option remember-rule', style: 'margin-top:0.75rem' },
         el('div', { className: 'form-option-text' },
@@ -565,12 +618,13 @@ export function openUncategorizedReview() {
             showToast('Select at least one transaction', 'info');
             return;
           }
-          if (!catSelect.value) {
+          envelopePicker.commitTyped?.();
+          if (!envelopePicker.value) {
             showToast('Choose an envelope', 'info');
             return;
           }
           const ids = [...selected];
-          const categoryId = catSelect.value;
+          const categoryId = envelopePicker.value;
           store.bulkCategorizeTransactions(ids, categoryId);
           let rulesSaved = 0;
           if (alwaysUse.checked) {

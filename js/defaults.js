@@ -151,6 +151,12 @@ export function createDefaultState() {
     removedDefaultCategories: [],
     categoryRules: [],
     monthBudgetSnapshots: {},
+    /**
+     * Rob-Peter-to-pay-Paul moves for a given month only.
+     * { 'YYYY-MM': [{ id, fromId, toId, amount, note, at }] }
+     * Does not change monthlyBudget; remaining = budget + carry + netMoves − spent.
+     */
+    monthEnvelopeMoves: {},
     monthCloseLog: [],
     reconciliation: { bankBalance: null, asOfDate: null },
     lastMonthProcessed: null,

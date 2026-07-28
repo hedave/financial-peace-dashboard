@@ -2,6 +2,7 @@ import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.j
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
+import { createEnvelopePicker } from '../components/envelope-picker.js';
 import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
 import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-match-ui.js';
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
@@ -123,16 +124,10 @@ function transactionMatchesSearch(tx, query) {
   return false;
 }
 
-function buildCategorySelect(state, { value = '', includeUncategorized = true } = {}) {
-  const select = el('select');
-  if (includeUncategorized) {
-    select.appendChild(el('option', { value: '' }, '— No category —'));
-  }
-  state.categories.forEach(c => {
-    select.appendChild(el('option', { value: c.id }, `${c.icon || ''} ${c.name}`.trim()));
-  });
-  if (value) select.value = value;
-  return select;
+function envelopeRemainingShort(categoryId) {
+  const rem = store.getCategoryRemaining(categoryId);
+  if (rem < -0.005) return `${formatCurrency(Math.abs(rem))} over`;
+  return `${formatCurrency(rem)} left`;
 }
 
 export function renderTransactions(container, arg) {
@@ -655,13 +650,61 @@ export function openTransactionForm({
   );
 
   const lastCat = state.settings?.lastExpenseCategoryId || '';
+  const initialCatId = transaction?.categoryId || presetCategoryId || (!isEdit && type === 'expense' ? lastCat : '') || '';
+  const envelopePicker = createEnvelopePicker({
+    id: 'tx-envelope',
+    value: initialCatId,
+    placeholder: 'Type to find envelope (e.g. P for Pets)…',
+    emptyLabel: '— No category —',
+    showRemaining: true,
+    allowEmpty: true,
+  });
+  const catRemainingHint = el('p', {
+    className: 'tx-form-hint',
+    style: 'margin-top:0.35rem;margin-bottom:0',
+  }, '');
+  function updateCatRemainingHint() {
+    const id = envelopePicker.value;
+    if (!id) {
+      catRemainingHint.textContent = '';
+      catRemainingHint.hidden = true;
+      return;
+    }
+    const cat = store.getState().categories.find(c => c.id === id);
+    const rem = store.getCategoryRemaining(id);
+    const amt = Math.abs(Number(amountIn.value) || 0);
+    const txType = typeSelect?.value || 'expense';
+    let line = `${cat?.name || 'Envelope'}: ${envelopeRemainingShort(id)} this month`;
+    // Preview only for expenses (spending reduces remaining)
+    if (txType === 'expense' && amt > 0) {
+      // Editing: if already on this envelope, remaining already includes this spend
+      const alreadyHere = transaction?.categoryId === id
+        && transaction?.type === 'expense'
+        && !store.isSplitTransaction(transaction);
+      const priorAmt = alreadyHere ? Math.abs(Number(transaction.amount) || 0) : 0;
+      const after = rem + priorAmt - amt;
+      const afterTxt = after < -0.005
+        ? `${formatCurrency(Math.abs(after))} over`
+        : `${formatCurrency(after)} left`;
+      line += ` · after this $${amt.toFixed(2)}: ${afterTxt}`;
+      catRemainingHint.style.color = after < -0.005 ? 'var(--negative)' : '';
+    } else {
+      catRemainingHint.style.color = rem < -0.005 ? 'var(--negative)' : '';
+    }
+    catRemainingHint.textContent = line;
+    catRemainingHint.hidden = false;
+  }
   const catGroup = el('div', { className: 'form-group' },
-    el('label', {}, 'Envelope / Category'),
-    buildCategorySelect(state, {
-      value: transaction?.categoryId || presetCategoryId || (!isEdit && type === 'expense' ? lastCat : '') || '',
-    }),
+    el('label', { for: 'tx-envelope' }, 'Envelope / Category'),
+    envelopePicker.element,
+    catRemainingHint,
   );
-  const catSelect = catGroup.querySelector('select');
+  // Compat shim for existing code that treats catSelect like a <select>
+  const catSelect = envelopePicker.selectLike;
+  envelopePicker.addEventListener('change', updateCatRemainingHint);
+  amountIn.addEventListener('input', updateCatRemainingHint);
+  typeSelect.addEventListener('change', updateCatRemainingHint);
+  updateCatRemainingHint();
 
   const debtGroup = el('div', { className: 'form-group', style: 'display:none' },
     el('label', {}, 'Debt'),
@@ -850,6 +893,9 @@ export function openTransactionForm({
             showToast('Select a debt for debt payments', 'info');
             return;
           }
+
+          // Flush typeahead text → id before reading (blur→click race)
+          if (!useSplit) envelopePicker.commitTyped?.();
 
           if (useSplit) {
             if (!splitEditor.isValid()) {

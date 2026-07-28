@@ -773,6 +773,61 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(30,107,92,0.15);
 }
 
+/* Type-ahead envelope picker */
+.envelope-picker {
+  position: relative;
+  width: 100%;
+}
+
+.envelope-picker-input {
+  width: 100%;
+  /* match form inputs */
+}
+
+.envelope-picker-list {
+  /* left/top/width set in JS (fixed) so modal overflow doesn't clip */
+  z-index: 320;
+  max-height: min(16rem, 50vh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.12));
+  padding: 0.25rem;
+}
+
+.envelope-picker-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.envelope-picker-option:hover,
+.envelope-picker-option.is-active {
+  background: rgba(30, 107, 92, 0.12);
+}
+
+.envelope-picker-option.is-selected {
+  font-weight: 600;
+}
+
+.envelope-picker-empty {
+  padding: 0.65rem 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+
+
 /* Keyboard focus rings (mouse clicks keep cleaner chrome) */
 :focus-visible {
   outline: 2px solid var(--primary);
@@ -1112,6 +1167,36 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 
 .envelope-card-fav {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--primary)) 35%, transparent);
+}
+
+.envelope-move-delta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin: 0.2rem 0 0.35rem;
+  line-height: 1.35;
+}
+
+.envelope-move-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.envelope-move-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.88rem;
+}
+
+.envelope-move-row-main {
+  min-width: 0;
+  flex: 1;
 }
 
 .btn.fav-on {
@@ -2180,12 +2265,29 @@ html[data-reduce-motion="true"] .sticky-note {
   display: grid;
   grid-template-columns: 1fr 7rem auto;
   gap: 0.5rem;
-  align-items: center;
+  align-items: start;
 }
 
+.split-row-category,
+.split-row-category .envelope-picker,
 .split-row-category select,
 .split-row-amount input {
   width: 100%;
+  min-width: 0;
+}
+
+.split-row-category .envelope-picker-input {
+  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+}
+
+@media (max-width: 768px) {
+  .split-row {
+    grid-template-columns: 1fr;
+  }
+  .split-row-amount input {
+    max-width: 10rem;
+  }
 }
 
 .split-remove {

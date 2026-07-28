@@ -1,14 +1,5 @@
 import { el, formatCurrency } from '../utils.js';
-
-function buildCategorySelect(categories, value = '') {
-  const select = el('select');
-  select.appendChild(el('option', { value: '' }, '— Envelope —'));
-  categories.forEach(c => {
-    select.appendChild(el('option', { value: c.id }, `${c.icon || ''} ${c.name}`.trim()));
-  });
-  if (value) select.value = value;
-  return select;
-}
+import { createEnvelopePicker } from './envelope-picker.js';
 
 export function createSplitEditor(categories, {
   totalAmount = 0,
@@ -56,7 +47,7 @@ export function createSplitEditor(categories, {
   function syncRow(index) {
     const row = rows[index];
     if (!row) return;
-    splitData[index].categoryId = row.catSelect.value;
+    splitData[index].categoryId = row.picker.value || '';
     splitData[index].amount = row.amountIn.value;
     updateRemainder();
   }
@@ -66,7 +57,13 @@ export function createSplitEditor(categories, {
     rows = [];
 
     splitData.forEach((row, index) => {
-      const catSelect = buildCategorySelect(categories, row.categoryId);
+      const picker = createEnvelopePicker({
+        value: row.categoryId || '',
+        placeholder: 'Type envelope…',
+        emptyLabel: '— Envelope —',
+        showRemaining: true,
+        allowEmpty: true,
+      });
       const amountIn = el('input', {
         type: 'number',
         step: '0.01',
@@ -75,7 +72,7 @@ export function createSplitEditor(categories, {
         value: row.amount,
       });
 
-      catSelect.addEventListener('change', () => syncRow(index));
+      picker.addEventListener('change', () => syncRow(index));
       amountIn.addEventListener('input', () => syncRow(index));
 
       const removeBtn = splitData.length > 2
@@ -91,12 +88,12 @@ export function createSplitEditor(categories, {
         : null;
 
       const rowEl = el('div', { className: 'split-row' },
-        el('div', { className: 'split-row-category' }, catSelect),
+        el('div', { className: 'split-row-category' }, picker.element),
         el('div', { className: 'split-row-amount' }, amountIn),
         removeBtn,
       );
 
-      rows.push({ catSelect, amountIn });
+      rows.push({ picker, amountIn });
       host.appendChild(rowEl);
     });
 
@@ -142,12 +139,25 @@ export function createSplitEditor(categories, {
       updateRemainder();
     },
     getSplits() {
+      // Sync from live pickers before read (commit typed names first)
+      rows.forEach((row, i) => {
+        if (!splitData[i]) return;
+        row.picker.commitTyped?.();
+        splitData[i].categoryId = row.picker.value || '';
+        splitData[i].amount = row.amountIn.value;
+      });
       return splitData.map(row => ({
         categoryId: row.categoryId || null,
         amount: Math.abs(Number(row.amount)) || 0,
       }));
     },
     isValid() {
+      rows.forEach((row, i) => {
+        if (!splitData[i]) return;
+        row.picker.commitTyped?.();
+        splitData[i].categoryId = row.picker.value || '';
+        splitData[i].amount = row.amountIn.value;
+      });
       const total = getTotal();
       if (!total) return false;
       return splitData.every(row => row.categoryId && Number(row.amount) > 0)
