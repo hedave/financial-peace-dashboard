@@ -16,13 +16,18 @@ export function renderDebt(container) {
   const surplusCap = store.getSurplusCapInfo();
   const toAllocate = store.getPlannedSnowballSurplus();
   const basis = store.getSurplusBasis();
-  const surplusNote = basis === 'pay_bridge'
-    ? `Safe after bills before next pay${surplusCap.nextPayDate ? ` (${surplusCap.nextPayDate})` : ''}: held ${formatCurrency(surplusCap.billsTotal)}`
-    : basis === 'unallocated' && toAllocate > 0
-      ? `Matches To Allocate (${formatCurrency(toAllocate)}) from your envelope budget`
-      : basis === 'cashflow'
-        ? 'Based on income minus spending this month'
-        : '';
+  const fc = surplusCap.forecast || store.getMonthEndSnowballForecast();
+  const surplusNote = basis === 'month_end' || surplus > 0
+    ? `Month-end forecast (+${formatCurrency(fc.incomeLeft || 0)} income left · −${formatCurrency(fc.billsLeft || 0)} bills · −${formatCurrency(fc.envelopeLeft || 0)} envelopes)`
+    : basis === 'pay_bridge'
+      ? `Safe after bills before next pay${surplusCap.nextPayDate ? ` (${surplusCap.nextPayDate})` : ''}: held ${formatCurrency(surplusCap.billsTotal)}`
+      : basis === 'bank'
+        ? `Checking − bills held − cushion`
+        : basis === 'unallocated' && toAllocate > 0
+          ? `Matches To Allocate (${formatCurrency(toAllocate)}) from your envelope budget`
+          : basis === 'cashflow'
+            ? 'Based on income minus spending this month'
+            : 'Month-end forecast is $0 with current plan';
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
@@ -54,7 +59,7 @@ export function renderDebt(container) {
         paused.length ? 'On-hold debts not in ETA' : 'At today’s surplus + mins'),
     ),
     el('div', { className: 'card' },
-      el('div', { className: 'card-title' }, 'Monthly Surplus'),
+      el('div', { className: 'card-title' }, 'Month-end snowball'),
       el('div', { className: 'card-value positive' }, formatCurrency(surplus)),
       surplusNote ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem;line-height:1.4' }, surplusNote) : null,
     )

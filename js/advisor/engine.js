@@ -1048,7 +1048,9 @@ export function pickDefaultChip(snap) {
 }
 
 function basisLabel(basis, usesLogged) {
+  if (basis === 'month_end') return 'month-end forecast after income, bills, and envelope plan';
   if (basis === 'pay_bridge') return 'capped for bills before next paycheck';
+  if (basis === 'bank') return 'from checking after bills before next pay + cushion';
   if (basis === 'unallocated') return 'from zero-based leftover';
   if (basis === 'cashflow') return usesLogged ? 'from logged income − spending' : 'from planned income − spending';
   return 'none free yet';

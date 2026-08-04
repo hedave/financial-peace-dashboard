@@ -212,7 +212,7 @@ export function renderTransactions(container, arg) {
   txToolsList.appendChild(el('button', {
     type: 'button', className: 'page-tools-item',
     onClick: () => { txTools.removeAttribute('open'); openImportDialog(); },
-  }, 'Import CSV'));
+  }, 'Import bank data'));
   if (inbox.totalCount > 0) {
     txToolsList.appendChild(el('button', {
       type: 'button', className: 'page-tools-item',
@@ -231,7 +231,7 @@ export function renderTransactions(container, arg) {
     el('button', { className: 'btn btn-primary', onClick: () => openTransactionForm() }, '+ Add Transaction'),
     el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: () => openTransactionForm({ type: 'expense' }) }, '+ Log Expense'),
     el('button', { className: 'btn btn-accent tx-action-secondary', onClick: () => openTransactionForm({ type: 'income' }) }, '+ Log Income'),
-    el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: openImportDialog }, 'Import CSV'),
+    el('button', { className: 'btn btn-secondary tx-action-secondary', onClick: openImportDialog }, 'Import bank data'),
     inbox.totalCount > 0 ? el('button', {
       className: 'btn btn-accent tx-action-secondary',
       onClick: () => openReviewInbox(),
@@ -366,11 +366,6 @@ export function renderTransactions(container, arg) {
     listEl.appendChild(el('div', { className: 'tx-mobile-list' },
       ...visible.map(t => txCard(t, currentState, duplicateMeta)),
       moreNote
-    ));
-
-    const checking = store.getState().balances.checking;
-    listEl.appendChild(el('div', { className: 'card', style: 'margin-top:1rem;padding:0.75rem 1rem' },
-      el('strong', {}, `Checking balance after transactions: ${formatCurrency(checking)}`)
     ));
   }
 
@@ -608,6 +603,8 @@ export function openTransactionForm({
   splitMode = false,
   categoryId: presetCategoryId = null,
   rememberDefault = false,
+  /** Prefill date when logging a new expense (e.g. from a past-month envelope). */
+  date: presetDate = null,
   /** Called after a successful save (parent review modals re-paint and stay open). */
   onSaved = null,
 } = {}) {
@@ -627,7 +624,10 @@ export function openTransactionForm({
     )
     : el('div', { className: 'form-group' }, el('label', {}, 'Type'), typeSelect);
 
-  const dateIn = el('input', { type: 'date', value: transaction?.date || todayISO() });
+  const dateIn = el('input', {
+    type: 'date',
+    value: transaction?.date || presetDate || todayISO(),
+  });
   const amountIn = el('input', {
     type: 'number',
     step: '0.01',
@@ -800,16 +800,27 @@ export function openTransactionForm({
   const shouldDefaultRemember = rememberDefault
     || !!(transaction && (transaction.importCategory || !transaction.categoryId));
   if (shouldDefaultRemember) rememberRule.checked = true;
+  const rememberHint = el('span', { className: 'form-option-hint' },
+    'Auto-categorize this merchant on future CSV/PDF imports',
+  );
   const rememberGroup = el('div', { className: 'form-option remember-rule', style: 'display:none' },
     el('div', { className: 'form-option-text' },
       el('span', { className: 'form-option-label' }, 'Always use this envelope'),
-      el('span', { className: 'form-option-hint' }, 'Auto-categorize this merchant on future CSV/PDF imports'),
+      rememberHint,
     ),
     el('label', { className: 'toggle-switch' },
       rememberRule,
       el('span', { className: 'toggle-slider' }),
     ),
   );
+  function refreshRememberHint() {
+    const p = guessMerchantPattern(descIn.value);
+    rememberHint.textContent = p
+      ? `Will match “${p}” (longer rules beat shorter ones — e.g. ingles gas vs ingles markets)`
+      : 'Auto-categorize this merchant on future CSV/PDF imports';
+  }
+  descIn.addEventListener('input', refreshRememberHint);
+  refreshRememberHint();
 
   // Pending bank: default for new expense/income — does not move checking until CSV match
   const postToChecking = el('input', { type: 'checkbox' });
@@ -858,7 +869,14 @@ export function openTransactionForm({
       linkedDebtNote,
       el('div', { className: 'input-row' },
         typeField,
-        el('div', { className: 'form-group' }, el('label', {}, 'Date'), dateIn),
+        el('div', { className: 'form-group' },
+          el('label', {}, 'Date'),
+          dateIn,
+          el('p', {
+            className: 'tx-form-hint',
+            style: 'margin-top:0.35rem;margin-bottom:0;line-height:1.35',
+          }, 'Envelope month follows this date — use the purchase day for late bank posts.'),
+        ),
       ),
       el('div', { className: 'input-row' },
         el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
@@ -1062,10 +1080,10 @@ const BANK_IMPORT_TIPS = {
   usaa: {
     label: 'USAA',
     tips: [
-      'Best: USAA.com → Account → Export / Download transactions as CSV (Date, Description, Amount, Status).',
-      'App paste OK: if the phone export looks scrambled (Date Amount header, lots of commas), import it anyway — we reassemble rows from amounts + merchants.',
-      'PDF: transaction-history PDF with selectable text also works (parsed only on your device).',
-      'Pasted files may miss a few refunds if the copy was cut off — check the toast count vs your bank app.',
+      'No CSV download? On the USAA mobile site, open Checking → select the list → Copy → paste into the box below.',
+      'Desktop CSV still works: Account → Export transactions (Date, Description, Amount, Status).',
+      'PDF transaction history with selectable text also works (parsed only on this device).',
+      'Running balances and “Page 1 of 3” chrome are ignored. Check the preview count vs your bank.',
       'After import, assign envelopes; use “Always use this envelope” for recurring merchants.',
     ],
   },
@@ -1207,13 +1225,47 @@ function openImportSummary(stats) {
   sheet.modal.classList.add('modal-scrollable');
 }
 
+function paintImportPreview(previewEl, rows, { sourceLabel = 'Preview' } = {}) {
+  previewEl.innerHTML = '';
+  if (!rows?.length) {
+    previewEl.appendChild(el('p', {
+      style: 'margin:0;color:var(--warning)',
+    }, 'No transactions found yet. Paste more of the list, or try a CSV/PDF file.'));
+    return;
+  }
+  const pendingN = rows.filter(r => /pending/i.test(r.Status || r.status || '')).length;
+  previewEl.appendChild(el('p', {
+    style: 'margin:0 0 0.35rem;font-weight:600;color:var(--text)',
+  },
+    `${sourceLabel}: ${rows.length} transaction${rows.length === 1 ? '' : 's'}`,
+    pendingN ? ` (${pendingN} pending)` : '',
+  ));
+  const list = el('div', { className: 'import-preview-list' });
+  rows.slice(0, 10).forEach(r => {
+    list.appendChild(el('div', { className: 'import-preview-row' },
+      el('span', {}, r.Date || r.date || ''),
+      el('span', { className: 'import-preview-desc' }, r.Description || r.description || '—'),
+      el('span', {}, r.Amount != null ? String(r.Amount) : ''),
+    ));
+  });
+  previewEl.appendChild(list);
+  if (rows.length > 10) {
+    previewEl.appendChild(el('p', {
+      style: 'margin:0.35rem 0 0;color:var(--text-muted);font-size:0.8rem',
+    }, `…and ${rows.length - 10} more`));
+  }
+  previewEl.appendChild(el('p', {
+    style: 'margin:0.5rem 0 0;font-size:0.75rem;color:var(--text-muted)',
+  }, 'Parsed only on this device — nothing is uploaded to a bank or our servers.'));
+}
+
 function openImportDialog() {
   const fileIn = el('input', {
     type: 'file',
     accept: '.csv,.CSV,text/csv,.pdf,.PDF,application/pdf',
   });
-  // Default off — pending rows on phone PDFs are noisy; turn on if you want them
-  const includePendingIn = el('input', { type: 'checkbox', checked: false, id: 'import-pending' });
+  // Default on for mobile paste (pending is most of the recent activity)
+  const includePendingIn = el('input', { type: 'checkbox', checked: true, id: 'import-pending' });
   const bankSelect = el('select', { id: 'import-bank' },
     ...Object.entries(BANK_IMPORT_TIPS).map(([id, info]) =>
       el('option', { value: id }, info.label),
@@ -1222,6 +1274,13 @@ function openImportDialog() {
   bankSelect.value = 'usaa';
   const tipsEl = el('div', { className: 'import-bank-tips' });
   const previewEl = el('div', { className: 'import-file-preview', style: 'margin-top:0.75rem;font-size:0.85rem' });
+  const pasteArea = el('textarea', {
+    className: 'import-paste-area',
+    rows: 8,
+    placeholder: 'Paste USAA mobile transaction list here (select-all from the checking activity screen)…',
+    style: 'width:100%;min-height:8rem;font-family:inherit;font-size:0.85rem;line-height:1.35;resize:vertical',
+  });
+  let pasteTimer = null;
 
   function paintTips() {
     const info = BANK_IMPORT_TIPS[bankSelect.value] || BANK_IMPORT_TIPS.generic;
@@ -1233,89 +1292,104 @@ function openImportDialog() {
   bankSelect.addEventListener('change', paintTips);
   paintTips();
 
-  fileIn.addEventListener('change', async () => {
-    previewEl.innerHTML = '';
-    const file = fileIn.files[0];
-    if (!file) return;
-    const name = (file.name || '').toLowerCase();
-    if (!name.endsWith('.pdf')) {
-      // CSV: leave pending checkbox as user set it
-      previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' },
-        `CSV ready: ${file.name}`,
-      ));
+  function previewPaste() {
+    const text = pasteArea.value || '';
+    if (!text.trim()) {
+      if (!fileIn.files[0]) previewEl.innerHTML = '';
       return;
     }
-    // PDF exports are often full of pending — default exclude unless user opts in
-    includePendingIn.checked = false;
-    previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' }, 'Reading PDF on this device…'));
     try {
-      const parsed = await parseBankPdfFile(file);
-      const pendingN = parsed.filter(r => r.pending).length;
-      const objects = rowsToImportObjects(parsed, { includePending: includePendingIn.checked });
-      previewEl.innerHTML = '';
-      previewEl.appendChild(el('p', { style: 'margin:0 0 0.35rem;font-weight:600;color:var(--text)' },
-        `PDF preview: ${objects.length} transaction${objects.length === 1 ? '' : 's'}`,
-        pendingN ? ` (${pendingN} pending in file)` : '',
-      ));
-      if (!objects.length) {
-        previewEl.appendChild(el('p', { style: 'margin:0;color:var(--warning)' },
-          'No transactions found. Use a USAA transaction-history PDF with selectable text (not a photo scan).',
-        ));
-        return;
-      }
-      const list = el('div', { className: 'import-preview-list' });
-      objects.slice(0, 8).forEach(r => {
-        list.appendChild(el('div', { className: 'import-preview-row' },
-          el('span', {}, r.Date),
-          el('span', { className: 'import-preview-desc' }, r.Description),
-          el('span', {}, r.Amount),
-        ));
-      });
-      previewEl.appendChild(list);
-      if (objects.length > 8) {
-        previewEl.appendChild(el('p', {
-          style: 'margin:0.35rem 0 0;color:var(--text-muted);font-size:0.8rem',
-        }, `…and ${objects.length - 8} more`));
-      }
-      previewEl.appendChild(el('p', {
-        style: 'margin:0.5rem 0 0;font-size:0.75rem;color:var(--text-muted)',
-      }, 'Parsed only on this device. Account numbers are stripped and never uploaded.'));
+      const rows = parseBankCsvText(text);
+      paintImportPreview(previewEl, rows, { sourceLabel: 'Paste preview' });
     } catch (err) {
       console.error(err);
       previewEl.innerHTML = '';
       previewEl.appendChild(el('p', { style: 'margin:0;color:var(--destructive)' },
-        'Could not read that PDF. Try CSV if available, or a different export.',
+        'Could not parse that paste. Try copying a longer chunk from USAA.',
+      ));
+    }
+  }
+
+  pasteArea.addEventListener('input', () => {
+    clearTimeout(pasteTimer);
+    pasteTimer = setTimeout(previewPaste, 200);
+  });
+  pasteArea.addEventListener('paste', () => {
+    setTimeout(previewPaste, 50);
+  });
+
+  fileIn.addEventListener('change', async () => {
+    previewEl.innerHTML = '';
+    const file = fileIn.files[0];
+    if (!file) return;
+    // File path takes priority over leftover paste preview
+    const name = (file.name || '').toLowerCase();
+    if (!name.endsWith('.pdf')) {
+      try {
+        const text = await file.text();
+        const rows = parseBankCsvText(text);
+        paintImportPreview(previewEl, rows, { sourceLabel: `CSV: ${file.name}` });
+      } catch {
+        previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' },
+          `CSV ready: ${file.name}`,
+        ));
+      }
+      return;
+    }
+    includePendingIn.checked = false;
+    previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' }, 'Reading PDF on this device…'));
+    try {
+      const parsed = await parseBankPdfFile(file);
+      const objects = rowsToImportObjects(parsed, { includePending: includePendingIn.checked });
+      paintImportPreview(previewEl, objects, {
+        sourceLabel: `PDF: ${objects.length ? '' : ''}${file.name}`.replace(/^PDF: /, 'PDF '),
+      });
+      if (!objects.length) {
+        previewEl.appendChild(el('p', { style: 'margin:0.35rem 0 0;color:var(--warning)' },
+          'No rows from PDF. Use selectable-text history, or paste from the mobile site.',
+        ));
+      }
+    } catch (err) {
+      console.error(err);
+      previewEl.innerHTML = '';
+      previewEl.appendChild(el('p', { style: 'margin:0;color:var(--destructive)' },
+        'Could not read that PDF. Try paste or CSV instead.',
       ));
     }
   });
 
   includePendingIn.addEventListener('change', () => {
-    if (fileIn.files[0]?.name?.toLowerCase().endsWith('.pdf')) {
+    if (pasteArea.value.trim()) previewPaste();
+    else if (fileIn.files[0]?.name?.toLowerCase().endsWith('.pdf')) {
       fileIn.dispatchEvent(new Event('change'));
     }
   });
 
-  const preview = el('div', { style: 'margin-top:1rem;font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
-    el('div', { className: 'form-group' },
-      el('label', {}, 'I bank with…'),
-      bankSelect,
-    ),
-    tipsEl,
-    el('hr', { style: 'border:none;border-top:1px solid var(--border);margin:0.85rem 0' }),
-    el('label', { style: 'display:flex;align-items:center;gap:0.5rem;color:var(--text)' },
-      includePendingIn, ' Include pending/unposted bank rows'
-    ),
-    previewEl,
-  );
-
   const modal = showModal({
-    title: 'Import Transactions (CSV or PDF)',
+    title: 'Import bank transactions',
     body: el('div', {},
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
-        'Choose a bank CSV or a USAA transaction PDF. Files stay on your device.',
+        'Paste from USAA mobile, or choose a CSV/PDF. Everything stays on this device.',
       ),
-      fileIn,
-      preview,
+      el('div', { className: 'form-group' },
+        el('label', {}, 'I bank with…'),
+        bankSelect,
+      ),
+      tipsEl,
+      el('div', { className: 'form-group', style: 'margin-top:0.85rem' },
+        el('label', {}, 'Paste from bank (recommended for USAA mobile)'),
+        pasteArea,
+      ),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'Or choose a file (CSV / PDF)'),
+        fileIn,
+      ),
+      el('label', {
+        style: 'display:flex;align-items:center;gap:0.5rem;color:var(--text);margin:0.5rem 0',
+      },
+        includePendingIn, ' Include pending/unposted bank rows',
+      ),
+      previewEl,
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Cancel'),
@@ -1323,13 +1397,29 @@ function openImportDialog() {
         type: 'button',
         className: 'btn btn-primary',
         onClick: async () => {
+          const pasteText = (pasteArea.value || '').trim();
           const file = fileIn.files[0];
-          if (!file) {
-            showToast('Choose a CSV or PDF file first', 'info');
-            return;
-          }
-          const name = (file.name || '').toLowerCase();
           try {
+            // Prefer paste when present
+            if (pasteText) {
+              const rows = parseBankCsvText(pasteText);
+              if (!rows.length) {
+                showToast('No transactions found in the paste — copy a longer chunk from USAA', 'info');
+                return;
+              }
+              const stats = store.importTransactions(rows, {
+                includePending: includePendingIn.checked,
+              });
+              finishImport(stats, modal);
+              return;
+            }
+
+            if (!file) {
+              showToast('Paste bank text or choose a CSV/PDF file first', 'info');
+              return;
+            }
+
+            const name = (file.name || '').toLowerCase();
             if (name.endsWith('.pdf')) {
               const parsed = await parseBankPdfFile(file);
               const objects = rowsToImportObjects(parsed, {
@@ -1346,37 +1436,29 @@ function openImportDialog() {
               return;
             }
 
-            const reader = new FileReader();
-            reader.onload = e => {
-              try {
-                // Standard USAA/Chase CSV or mangled app-paste "Blank.csv" style
-                const rows = parseBankCsvText(e.target.result);
-                if (!rows.length) {
-                  showToast('No transactions found in that CSV — try the bank export or a full paste', 'info');
-                  return;
-                }
-                const stats = store.importTransactions(rows, {
-                  includePending: includePendingIn.checked,
-                });
-                finishImport(stats, modal);
-              } catch (err) {
-                console.error('CSV import failed', err);
-                const msg = err?.message?.includes('storage')
-                  ? err.message
-                  : 'Import failed. Please try again.';
-                showToast(msg, 'info');
-              }
-            };
-            reader.onerror = () => showToast('Could not read that file', 'info');
-            reader.readAsText(file);
+            const text = await file.text();
+            const rows = parseBankCsvText(text);
+            if (!rows.length) {
+              showToast('No transactions found in that file — try paste from USAA mobile', 'info');
+              return;
+            }
+            const stats = store.importTransactions(rows, {
+              includePending: includePendingIn.checked,
+            });
+            finishImport(stats, modal);
           } catch (err) {
             console.error('Import failed', err);
-            showToast(err?.message || 'Import failed. Please try again.', 'info');
+            const msg = err?.message?.includes('storage')
+              ? err.message
+              : (err?.message || 'Import failed. Please try again.');
+            showToast(msg, 'info');
           }
         },
       }, 'Import'),
     ],
   });
+  modal.modal.classList.add('modal-scrollable');
+  setTimeout(() => pasteArea.focus(), 50);
 }
 
 function deleteTransaction(id) {

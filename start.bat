@@ -1,5 +1,5 @@
 @echo off
-echo Starting Financial Peace Dashboard at http://localhost:8080
+echo Starting FigPig Financial at http://localhost:8080
 echo Press Ctrl+C to stop.
 cd /d "%~dp0"
 

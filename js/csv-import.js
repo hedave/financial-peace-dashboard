@@ -101,23 +101,224 @@ export function looksLikeStandardBankCsv(text) {
   return hasDate && hasAmount && hasDesc && /date\s*,/i.test(String(text || '').slice(0, 200));
 }
 
+/** Bank labels seen in USAA CSV + mobile web paste (longest match first when stripping). */
 const USAA_CATS = [
   'Electronics & Software',
   'Credit Card Payment',
+  'Gifts & Donations',
+  'Movies & DVDs',
+  'Food & Dining',
+  'Auto Payment',
+  'Gas & Transportation',
+  'Sporting Goods',
   'Category Pending',
   'Fast Food',
   'Shopping',
   'Hobbies',
   'Groceries',
-  'Gas & Transportation',
   'Utilities',
   'Insurance',
+  'Pharmacy',
   'Medical',
+  'Dentist',
   'Entertainment',
+  'Clothing',
+  'Financial',
+  'Paycheck',
+  'Charity',
   'Travel',
   'Transfer',
   'Income',
-];
+  'Gas',
+].sort((a, b) => b.length - a.length);
+
+const MONEY_TOKEN_RE = /-?\$[\d,]+\.\d{2}/g;
+// No leading \b — USAA mobile jams "BalanceAug 03, 2026" with no space/boundary
+const MOBILE_DATE_RE = /(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),\s+(\d{4})(?!\d)/gi;
+
+/** True when text looks like USAA mobile web “select all” paste (not a real CSV). */
+export function looksLikeUsaaMobileWebPaste(text) {
+  const s = String(text || '');
+  if (!s.trim()) return false;
+  const dateHits = (s.match(new RegExp(MOBILE_DATE_RE.source, 'gi')) || []).length;
+  // Explicit mobile chrome / header
+  if (/mobile\.usaa\.com/i.test(s) && dateHits >= 1) return true;
+  if (/amount\s*current\s*balance|amountcurrent\s*balance/i.test(s) && dateHits >= 1) return true;
+  // Jammed rows: "Aug 03, 2026…-$90.00$5,559.17" without CSV commas as structure
+  const moneyPairs = (s.match(/-?\$[\d,]+\.\d{2}\$[\d,]+\.\d{2}/g) || []).length;
+  if (dateHits >= 2 && moneyPairs >= 2 && !looksLikeStandardBankCsv(s)) return true;
+  return false;
+}
+
+/** Strip trailing USAA bank category labels (may run twice after other cleanups). */
+function stripTrailingUsaaCategory(text) {
+  let d = String(text || '').trim();
+  for (const cat of USAA_CATS) {
+    if (cat === 'Category Pending') continue;
+    const re = new RegExp(`${escapeRegExp(cat)}\\s*$`, 'i');
+    if (re.test(d)) {
+      d = d.replace(re, '').trim();
+      break;
+    }
+  }
+  return d;
+}
+
+/**
+ * Clean USAA mobile-web description: drop pending labels, bank categories,
+ * card masks, and obvious TitleCase+SCREAMING doubles.
+ */
+function cleanMobileWebDescription(raw) {
+  let d = String(raw || '')
+    .replace(/…/g, ' ')
+    .replace(/\u2026/g, ' ')
+    // Drop redacted account stars (codes like U0P3 stay; category strip cleans the rest)
+    .replace(/\*+/g, ' ')
+    .replace(/pending\s*category\s*pending/gi, ' ')
+    .replace(/category\s*pending/gi, ' ')
+    .replace(/\bpending\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  d = stripTrailingUsaaCategory(d);
+
+  // "CinemarkCINEMARK 1142…" → drop redundant Title Case prefix, keep rest of line
+  // Only when the CAPS block *starts with* the same merchant (not later in the line).
+  const jam = d.match(/^([A-Za-z][A-Za-z0-9 .,'&/-]{1,30}?)([A-Z]{3,}[\s\S]*)$/);
+  if (jam) {
+    const pretty = jam[1].replace(/[\s.'/-]/g, '').toLowerCase();
+    const restHead = jam[2].slice(0, 48).replace(/[\s.'/*-]/g, '').toLowerCase();
+    const keyLen = Math.min(pretty.length, 10);
+    if (pretty.length >= 3 && restHead.startsWith(pretty.slice(0, keyLen))) {
+      d = jam[2].trim();
+    }
+  }
+
+  d = stripTrailingUsaaCategory(d);
+  d = d.replace(/\s+/g, ' ').trim();
+  // Collapse exact "WORD WORD" duplicates
+  d = d.replace(/\b([A-Za-z0-9*&.'-]{3,})\s+\1\b/gi, '$1');
+  return d || 'Unknown';
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractMobileCategory(preAmount) {
+  const s = String(preAmount || '');
+  if (/pending/i.test(s)) {
+    return { category: 'Category Pending', status: 'Pending' };
+  }
+  for (const cat of USAA_CATS) {
+    if (cat === 'Category Pending') continue;
+    const re = new RegExp(`${escapeRegExp(cat)}\\s*$`, 'i');
+    if (re.test(s)) {
+      return { category: cat, status: 'Posted' };
+    }
+  }
+  return { category: '', status: 'Posted' };
+}
+
+/**
+ * Parse USAA mobile website copy/paste (select-all transaction list).
+ * Handles jammed rows without newlines, pending-before-desc, running balances.
+ * Returns row objects compatible with normalizeImportRow.
+ */
+export function parseUsaaMobileWebPaste(text) {
+  let raw = String(text || '').replace(/^\uFEFF/, '');
+  if (!raw.trim()) return [];
+
+  // Drop browser/chrome noise from multi-page selects
+  raw = raw
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4},\s*\d{1,2}:\d{2}\s*(AM|PM)\b/gi, ' ')
+    .replace(/\bPage\s+\d+\s+of\s+\d+\b/gi, ' ')
+    .replace(/Date\s*Description\s*Category\s*Amount\s*Current\s*Balance/gi, ' ')
+    .replace(/Amount\s*Current\s*Balance|AmountCurrent\s*Balance/gi, ' ')
+    .replace(/Current\s*Balance/gi, ' ');
+
+  const dateRe = new RegExp(MOBILE_DATE_RE.source, 'gi');
+  const hits = [];
+  let m;
+  while ((m = dateRe.exec(raw)) !== null) {
+    hits.push({
+      index: m.index,
+      end: m.index + m[0].length,
+      date: parseImportDate(m[0]),
+      rawDate: m[0],
+    });
+  }
+  if (!hits.length) return [];
+
+  const rows = [];
+  for (let i = 0; i < hits.length; i++) {
+    const hit = hits[i];
+    if (!hit.date) continue;
+    const bodyStart = hit.end;
+    const bodyEnd = i + 1 < hits.length ? hits[i + 1].index : raw.length;
+    let body = raw.slice(bodyStart, bodyEnd).trim();
+    if (!body) continue;
+
+    // Collect money tokens in order
+    const monies = [];
+    const moneyRe = new RegExp(MONEY_TOKEN_RE.source, 'g');
+    let mm;
+    while ((mm = moneyRe.exec(body)) !== null) {
+      monies.push({
+        raw: mm[0],
+        index: mm.index,
+        end: mm.index + mm[0].length,
+        value: parseMoneyValue(mm[0]),
+      });
+    }
+    if (monies.length < 1) continue;
+
+    // Last money = running balance (skip as amount). Tx amount is second-to-last when present.
+    let amountTok;
+    let balanceTok = null;
+    if (monies.length >= 2) {
+      balanceTok = monies[monies.length - 1];
+      amountTok = monies[monies.length - 2];
+      // Balance is almost always unsigned positive; if second-to-last is also unsigned
+      // and last is larger, still treat as amount+balance (income rows).
+    } else {
+      amountTok = monies[0];
+    }
+
+    if (!amountTok || amountTok.value === 0) continue;
+
+    const beforeAmt = body.slice(0, amountTok.index);
+    const betweenAmtBal = balanceTok
+      ? body.slice(amountTok.end, balanceTok.index)
+      : body.slice(amountTok.end);
+
+    const { category, status } = extractMobileCategory(beforeAmt);
+
+    // Description: text before amount, plus any merchant stuck between amount and balance
+    let descParts = [beforeAmt];
+    if (betweenAmtBal && /[A-Za-z]/.test(betweenAmtBal)) {
+      descParts.push(betweenAmtBal);
+    }
+    let description = cleanMobileWebDescription(descParts.join(' '));
+
+    // If description is still junk, try only the between-amount fragment (pending layout)
+    if (isJunkDesc(description) && betweenAmtBal) {
+      description = cleanMobileWebDescription(betweenAmtBal);
+    }
+
+    rows.push({
+      Date: hit.date,
+      Description: description,
+      'Original Description': description,
+      Category: category || '',
+      Amount: amountTok.value.toFixed(2),
+      Status: status || 'Posted',
+    });
+  }
+
+  return rows;
+}
 
 function cleanFunkyLine(line) {
   let s = String(line || '').replace(/^\uFEFF/, '').trim();
@@ -316,12 +517,18 @@ export function parseUsaaAppPasteCsv(text) {
 }
 
 /**
- * Parse any bank CSV: standard USAA/Chase export or mangled app paste.
+ * Parse any bank CSV: standard USAA/Chase export, mobile web paste, or mangled app paste.
  * Returns array of row objects for importTransactions / normalizeImportRow.
  */
 export function parseBankCsvText(text) {
   const raw = String(text || '');
   if (!raw.trim()) return [];
+
+  // USAA mobile site select-all (before CSV heuristics — no real columns)
+  if (looksLikeUsaaMobileWebPaste(raw)) {
+    const mobile = parseUsaaMobileWebPaste(raw);
+    if (mobile.length) return mobile;
+  }
 
   // Prefer standard when headers look complete
   if (looksLikeStandardBankCsv(raw)) {
@@ -333,6 +540,10 @@ export function parseBankCsvText(text) {
     });
     if (usable.length >= 1) return rows;
   }
+
+  // Try mobile paste even if detector was unsure
+  const mobileFallback = parseUsaaMobileWebPaste(raw);
+  if (mobileFallback.length >= 2) return mobileFallback;
 
   // "Date Amount" paste / Blank.csv style
   const funky = parseUsaaAppPasteCsv(raw);

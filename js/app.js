@@ -33,6 +33,72 @@ let currentPage = 'dashboard';
 let pageArg = null;
 let mainEl = null;
 let unlocked = false;
+/** Last non-zero scroll per page (survives a frame where the browser clamps to 0). */
+const lastScrollByPage = Object.create(null);
+let scrollTrackingBound = false;
+let restoreTimers = [];
+
+function captureScrollPos() {
+  const se = document.scrollingElement;
+  return {
+    win: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0,
+    doc: se ? se.scrollTop : 0,
+    main: mainEl ? mainEl.scrollTop : 0,
+  };
+}
+
+function applyScrollPos(pos) {
+  if (!pos) return;
+  const y = pos.win || pos.doc || 0;
+  window.scrollTo(0, y);
+  if (document.documentElement) document.documentElement.scrollTop = y;
+  if (document.body) document.body.scrollTop = y;
+  if (document.scrollingElement) document.scrollingElement.scrollTop = pos.doc || y;
+  if (mainEl) mainEl.scrollTop = pos.main || 0;
+}
+
+function trackScrollPos() {
+  const pos = captureScrollPos();
+  // Ignore zeros after content collapse — keep last meaningful position
+  if (pos.win > 0 || pos.doc > 0 || pos.main > 0) {
+    lastScrollByPage[currentPage] = pos;
+  }
+}
+
+function bindScrollTracking() {
+  if (scrollTrackingBound) return;
+  scrollTrackingBound = true;
+  const opts = { passive: true, capture: true };
+  window.addEventListener('scroll', trackScrollPos, opts);
+  document.addEventListener('scroll', trackScrollPos, opts);
+}
+
+function clearRestoreTimers() {
+  restoreTimers.forEach(id => clearTimeout(id));
+  restoreTimers = [];
+}
+
+/** Retry restore — content height (esp. async Settings) may land after first paint. */
+function restoreScrollPos(pos) {
+  if (!pos) return;
+  const meaningful = (pos.win || 0) > 0 || (pos.doc || 0) > 0 || (pos.main || 0) > 0;
+  if (!meaningful) return;
+  clearRestoreTimers();
+  const run = () => applyScrollPos(pos);
+  run();
+  requestAnimationFrame(() => {
+    run();
+    requestAnimationFrame(run);
+  });
+  [16, 50, 100, 200, 400].forEach(ms => {
+    restoreTimers.push(setTimeout(run, ms));
+  });
+}
+
+function scrollToTop() {
+  clearRestoreTimers();
+  applyScrollPos({ win: 0, doc: 0, main: 0 });
+}
 
 async function init() {
   const state = store.getState();
@@ -59,7 +125,11 @@ function softRefreshChrome() {
 function bootstrap() {
   const shell = document.getElementById('app');
   mainEl = renderLayout(shell, currentPage, navigate);
-  renderPage();
+  bindScrollTracking();
+  if (mainEl) {
+    mainEl.addEventListener('scroll', trackScrollPos, { passive: true });
+  }
+  renderPage({ reason: 'bootstrap' });
   store.subscribe(() => {
     // Notes auto-save silently; re-rendering would reset the textarea while typing
     if (!mainEl || currentPage === 'notes') {
@@ -72,7 +142,7 @@ function bootstrap() {
       softRefreshChrome();
       return;
     }
-    renderPage();
+    renderPage({ reason: 'store' });
   });
 }
 
@@ -80,20 +150,68 @@ function navigate(page, arg) {
   if (page === 'advisor' && currentPage !== 'advisor') {
     prepareAdvisorVisit();
   }
+  // Remember scroll on the page we’re leaving
+  trackScrollPos();
   currentPage = page;
   pageArg = arg || null;
   updateActiveNav(page);
-  renderPage();
+  renderPage({ reason: 'navigate', scrollTop: true });
 }
 
-function renderPage() {
+/**
+ * Re-render current page.
+ * - Same-page soft re-renders (rule delete, budget edits, etc.): restore scroll
+ * - Navigation: jump to top
+ */
+function renderPage(opts = {}) {
   if (!mainEl) return;
+  const navigating = !!opts.scrollTop;
+  const samePage = !navigating && renderPage._lastPage === currentPage;
+
+  // Prefer live capture; if browser already clamped to 0, use last known for this page
+  let pos = captureScrollPos();
+  if (samePage) {
+    const known = lastScrollByPage[currentPage];
+    if ((pos.win === 0 && pos.doc === 0 && pos.main === 0) && known) {
+      pos = known;
+    } else if (pos.win > 0 || pos.doc > 0 || pos.main > 0) {
+      lastScrollByPage[currentPage] = pos;
+    }
+  }
+
+  renderPage._lastPage = currentPage;
+
   mainEl.innerHTML = '';
   const renderer = PAGES[currentPage];
-  if (renderer) renderer(mainEl, pageArg);
-  pageArg = null;
-  updateNavBadges();
-  refreshSyncChip();
+  const finish = () => {
+    pageArg = null;
+    updateNavBadges();
+    refreshSyncChip();
+    if (navigating || !samePage) {
+      scrollToTop();
+      lastScrollByPage[currentPage] = { win: 0, doc: 0, main: 0 };
+      return;
+    }
+    restoreScrollPos(pos);
+  };
+
+  if (!renderer) {
+    finish();
+    return;
+  }
+  try {
+    const out = renderer(mainEl, pageArg);
+    if (out && typeof out.then === 'function') {
+      out.then(finish).catch(err => {
+        console.error(err);
+        finish();
+      });
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+  }
+  finish();
 }
 
 function showLockScreen() {
@@ -101,7 +219,7 @@ function showLockScreen() {
   lock.className = 'lock-screen';
   lock.innerHTML = `
     <div class="lock-card">
-      <h2>🔒 Financial Peace</h2>
+      <h2>🔒 FigPig Financial</h2>
       <p>Enter your password to continue</p>
       <div class="form-group">
         <input type="password" id="lock-pw" placeholder="Password" />
@@ -146,7 +264,8 @@ window.appRefresh = (opts = {}) => {
     softRefreshChrome();
     return;
   }
-  renderPage();
+  // Soft full re-render: keep scroll (same page)
+  renderPage({ reason: opts.force ? 'force' : 'refresh' });
 };
 
 /** Keep CSS dvh-ish layout stable when mobile browser chrome resizes. */
@@ -180,7 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260727a';
+const APP_BUILD = '20260806a';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

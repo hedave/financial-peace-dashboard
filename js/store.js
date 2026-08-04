@@ -871,11 +871,25 @@ class Store {
     return ok;
   }
 
+  /**
+   * Budgeted amount for an envelope in a given month.
+   * Current month = live monthlyBudget; past months use snapshot when available.
+   */
+  getCategoryBudgeted(categoryId, month = getCurrentMonth()) {
+    if (month === getCurrentMonth()) {
+      const cat = this.state.categories.find(c => c.id === categoryId);
+      return Number(cat?.monthlyBudget) || 0;
+    }
+    return Number(this.getBudgetForMonth(categoryId, month)) || 0;
+  }
+
   getCategoryRemaining(categoryId, month = getCurrentMonth()) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
-    const budgeted = Number(cat.monthlyBudget) || 0;
-    const carry = Number(cat.carryOver) || 0;
+    const budgeted = this.getCategoryBudgeted(categoryId, month);
+    // Carry-over only applies to the live (current) month
+    const isCurrent = month === getCurrentMonth();
+    const carry = isCurrent ? (Number(cat.carryOver) || 0) : 0;
     const move = this.getEnvelopeMoveDelta(categoryId, month);
     const spent = this.getCategorySpent(categoryId, month);
     return Math.round((budgeted + carry + move - spent) * 100) / 100;
@@ -885,14 +899,23 @@ class Store {
   getCategoryPool(categoryId, month = getCurrentMonth()) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
-    const budgeted = Number(cat.monthlyBudget) || 0;
-    const carry = Number(cat.carryOver) || 0;
+    const budgeted = this.getCategoryBudgeted(categoryId, month);
+    const isCurrent = month === getCurrentMonth();
+    const carry = isCurrent ? (Number(cat.carryOver) || 0) : 0;
     const move = this.getEnvelopeMoveDelta(categoryId, month);
     return Math.round((budgeted + carry + move) * 100) / 100;
   }
 
-  getTotalBudgeted() {
-    return this.state.categories.reduce((s, c) => s + (Number(c.monthlyBudget) || 0), 0);
+  getTotalBudgeted(month = getCurrentMonth()) {
+    return (this.state.categories || [])
+      .filter(c => !c.parentId)
+      .reduce((s, c) => s + this.getCategoryBudgeted(c.id, month), 0);
+  }
+
+  /** Whether we have a saved budget snapshot for this month (past months). */
+  hasMonthBudgetSnapshot(month) {
+    const snap = this.state.monthBudgetSnapshots?.[month];
+    return !!(snap && typeof snap === 'object' && Object.keys(snap).length);
   }
 
   getTotalSpent(month = getCurrentMonth()) {
@@ -918,12 +941,21 @@ class Store {
   /** Income minus envelope budgets — same number as Budget "To Allocate" (may be negative if over-budgeted) */
   getUnallocatedFunds(month = getCurrentMonth()) {
     const income = this.getAllocatableIncome(month);
-    const budgeted = this.getTotalBudgeted();
+    const budgeted = this.getTotalBudgeted(month);
     return income - budgeted;
   }
 
   getToAllocate() {
     return this.getUnallocatedFunds();
+  }
+
+  /** Envelope remaining still “spoken for” this month (not free for snowball). */
+  getStillAssignedEnvelopeCash(month = getCurrentMonth()) {
+    return Math.round(
+      (this.state.categories || [])
+        .filter(c => c && !c.parentId)
+        .reduce((s, c) => s + Math.max(0, this.getCategoryRemaining(c.id, month)), 0) * 100,
+    ) / 100;
   }
 
   getCashFlowSurplus(month = getCurrentMonth()) {
@@ -932,10 +964,18 @@ class Store {
     const debtPaid = this.getTotalDebtPaid(month);
     const remainingMins = this.getRemainingMinDebtPaymentsOutsideBudget(month);
     // Money still sitting in envelopes is already assigned — not free for snowball mid-month
-    const stillAssigned = (this.state.categories || [])
-      .filter(c => c && !c.parentId)
-      .reduce((s, c) => s + Math.max(0, this.getCategoryRemaining(c.id, month)), 0);
+    const stillAssigned = this.getStillAssignedEnvelopeCash(month);
     return income - totalSpent - debtPaid - remainingMins - stillAssigned;
+  }
+
+  /**
+   * Today-only free cash after bills before next pay + cushion (+ debt mins
+   * outside envelopes). Used for “can I snowball this amount *today*?” runway.
+   */
+  getBankSurplusForSnowball(month = getCurrentMonth()) {
+    const { freeCash } = this.getPayBridgeReserve(month);
+    const remainingMins = this.getRemainingMinDebtPaymentsOutsideBudget(month);
+    return Math.max(0, Math.round((freeCash - remainingMins) * 100) / 100);
   }
 
   /** Zero-based leftover: monthly income not assigned to envelopes (matches Budget "To Allocate") */
@@ -944,12 +984,75 @@ class Store {
   }
 
   /**
-   * Budget / cash-flow leftover before the “keep enough for bills until payday” cap.
+   * Month-end snowball forecast: cash after remaining income lands, unpaid bills
+   * and debt mins are paid, and the envelope plan is spent (still remaining).
+   * Leave cushion. This is what you can throw at debt the last week of the month.
+   */
+  getMonthEndSnowballForecast(month = getCurrentMonth()) {
+    const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+    const checking = r2(this.state.balances?.checking);
+    const buffer = this.getSurplusCashBuffer();
+
+    // Income still expected this month (checks not yet received)
+    let incomeLeft = 0;
+    const payStatus = this.getPaycheckStatus(month);
+    payStatus.forEach(p => {
+      (p.checks || []).forEach(c => {
+        if (c.status === 'received') return;
+        const amt = Number(c.amount) > 0 ? Number(c.amount) : (Number(p.perCheck) || 0);
+        incomeLeft += amt;
+      });
+    });
+    // Fallback when calendar empty: planned monthly income − already logged
+    if (incomeLeft < 0.005) {
+      const planned = this.getTotalIncome(month);
+      const logged = this.getTotalIncomeLogged(month);
+      incomeLeft = Math.max(0, planned - logged);
+    }
+    incomeLeft = r2(incomeLeft);
+
+    // Unpaid bills due this month or earlier (same board as Bills → This month)
+    const unpaidBills = (this.state.bills || []).filter(b => {
+      if (!b || b.status === 'paid') return false;
+      const due = String(b.dueDate || '').slice(0, 10);
+      if (!due) return true;
+      return due.slice(0, 7) <= month;
+    });
+    const billsLeft = r2(unpaidBills.reduce((s, b) => s + (Math.abs(Number(b.amount)) || 0), 0));
+    const undatedBillCount = unpaidBills.filter(b => !b.dueDate).length;
+
+    const debtMinsLeft = r2(this.getRemainingMinDebtPaymentsOutsideBudget(month));
+    const envelopeLeft = this.getStillAssignedEnvelopeCash(month);
+
+    const grossIn = r2(checking + incomeLeft);
+    const livingAndObligations = r2(billsLeft + debtMinsLeft + envelopeLeft);
+    // After income + after funding the plan + bills/mins, leave cushion
+    const projected = r2(grossIn - livingAndObligations - buffer);
+    const safe = Math.max(0, projected);
+
+    return {
+      month,
+      checking,
+      incomeLeft,
+      billsLeft,
+      debtMinsLeft,
+      envelopeLeft,
+      buffer,
+      undatedBillCount,
+      grossIn,
+      livingAndObligations,
+      projected,
+      safe,
+      toAllocate: r2(this.getToAllocate()),
+    };
+  }
+
+  /**
+   * Primary “safe snowball” number = month-end forecast (plan the last-week attack).
+   * Today’s free cash is still available via getBankSurplusForSnowball / runway.
    */
   getUncappedSurplusForSnowball(month = getCurrentMonth()) {
-    const toAllocate = this.getPlannedSnowballSurplus();
-    const cashAvailable = Math.max(0, this.getCashFlowSurplus(month));
-    return Math.max(toAllocate, cashAvailable);
+    return this.getMonthEndSnowballForecast(month).safe;
   }
 
   /** Cash cushion kept after bills / snowball (Settings → surplusCashBuffer, default $50). */
@@ -1067,23 +1170,34 @@ class Store {
   }
 
   getSurplusForSnowball(month = getCurrentMonth()) {
-    const raw = this.getUncappedSurplusForSnowball(month);
-    const { freeCash } = this.getPayBridgeReserve(month);
-    return Math.min(raw, freeCash);
+    // Month-end forecast (not “send everything today”)
+    return this.getMonthEndSnowballForecast(month).safe;
   }
 
-  /** Why surplus was reduced (for UI notes). */
+  /** Cap / runway / forecast breakdown for UI notes. */
   getSurplusCapInfo(month = getCurrentMonth()) {
-    const raw = this.getUncappedSurplusForSnowball(month);
+    const forecast = this.getMonthEndSnowballForecast(month);
     const reserve = this.getPayBridgeReserve(month);
-    const safe = Math.min(raw, reserve.freeCash);
-    const capped = raw > safe + 0.005;
+    const bankToday = this.getBankSurplusForSnowball(month);
+    const stillAssigned = forecast.envelopeLeft;
+    const safe = forecast.safe;
+    // “Raw” = forecast before cushion already applied inside forecast; use gross path
+    const raw = Math.max(0, Math.round((forecast.grossIn - forecast.livingAndObligations) * 100) / 100);
+    const capped = raw > safe + 0.005; // cushion held back
     return {
-      raw: Math.round(raw * 100) / 100,
-      safe: Math.round(safe * 100) / 100,
+      raw,
+      safe,
       capped,
       heldBack: Math.max(0, Math.round((raw - safe) * 100) / 100),
+      stillAssigned,
+      bankAvailable: bankToday,
+      bankToday,
+      forecast,
+      toAllocate: forecast.toAllocate,
+      planBlocksBank: forecast.toAllocate < -0.005,
       ...reserve,
+      // Prefer forecast free-cash story for “safe”
+      freeCash: bankToday,
     };
   }
 
@@ -1112,15 +1226,9 @@ class Store {
   }
 
   getSurplusBasis(month = getCurrentMonth()) {
-    const toAllocate = this.getPlannedSnowballSurplus();
-    const cashAvailable = Math.max(0, this.getCashFlowSurplus(month));
     const surplus = this.getSurplusForSnowball(month);
     if (surplus <= 0) return 'none';
-    const cap = this.getSurplusCapInfo(month);
-    if (cap.capped && (cap.billsTotal > 0 || cap.buffer > 0)) return 'pay_bridge';
-    if (toAllocate >= cashAvailable && toAllocate > 0) return 'unallocated';
-    if (cashAvailable > toAllocate) return 'cashflow';
-    return 'unallocated';
+    return 'month_end';
   }
 
   /** Soft warnings: undated bills, missing next pay, etc. */
@@ -1492,8 +1600,13 @@ class Store {
   }
 
   getBudgetForMonth(categoryId, month = getCurrentMonth()) {
-    const snap = this.state.monthBudgetSnapshots[month];
-    if (snap && snap[categoryId] != null) return snap[categoryId];
+    // Live plan for the open month — snapshots are frozen history for past months
+    if (month === getCurrentMonth()) {
+      const cat = this.state.categories.find(c => c.id === categoryId);
+      return Number(cat?.monthlyBudget) || 0;
+    }
+    const snap = this.state.monthBudgetSnapshots?.[month];
+    if (snap && snap[categoryId] != null) return Number(snap[categoryId]) || 0;
     const cat = this.state.categories.find(c => c.id === categoryId);
     return Number(cat?.monthlyBudget) || 0;
   }
@@ -2195,6 +2308,44 @@ class Store {
       if (!cat) return;
       cat.monthlyBudget = (Number(cat.monthlyBudget) || 0) + num;
     });
+  }
+
+  /**
+   * Zero carry-over on one envelope (forgive prior-month overspend or drop leftover).
+   * Does not change monthlyBudget, spending history, or checking.
+   */
+  resetEnvelopeCarryOver(categoryId) {
+    let prev = null;
+    this.update(s => {
+      const cat = s.categories.find(c => c.id === categoryId);
+      if (!cat) return;
+      prev = Number(cat.carryOver) || 0;
+      cat.carryOver = 0;
+    });
+    return prev;
+  }
+
+  /**
+   * Clear all negative carry-overs (start this month without “owing” last month).
+   * @returns {number} how many envelopes were cleared
+   */
+  clearNegativeCarryOvers() {
+    let n = 0;
+    this.update(s => {
+      (s.categories || []).forEach(cat => {
+        if (!cat || cat.parentId) return;
+        const c = Number(cat.carryOver) || 0;
+        if (c < -0.005) {
+          cat.carryOver = 0;
+          n++;
+        }
+      });
+    });
+    return n;
+  }
+
+  countNegativeCarryOvers() {
+    return (this.state.categories || []).filter(c => !c.parentId && (Number(c.carryOver) || 0) < -0.005).length;
   }
 
   allocateSurplusToDebt(amount) {

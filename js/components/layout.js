@@ -38,7 +38,7 @@ export function renderLayout(container, currentPage, onNavigate) {
 
   const sidebar = el('nav', { className: 'sidebar', id: 'sidebar' },
     el('div', { className: 'sidebar-header' },
-      el('h1', {}, 'FinPeace'),
+      el('h1', {}, 'FigPig Financial'),
       el('div', { className: 'tagline' }, 'Give every dollar a job')
     ),
     el('div', { className: 'nav-links' },

@@ -1,7 +1,7 @@
 {
-  "name": "Financial Peace Dashboard",
-  "short_name": "FinPeace",
-  "description": "Zero-based budgeting and debt snowball tracker",
+  "name": "FigPig Financial",
+  "short_name": "FigPig",
+  "description": "Zero-based budgeting and debt snowball tracker for your household",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#145246",
@@ -9,13 +9,13 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "icons/icon-192.png?v=20260727a",
+      "src": "icons/icon-192.png?v=20260806a",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icons/icon-512.png?v=20260727a",
+      "src": "icons/icon-512.png?v=20260806a",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

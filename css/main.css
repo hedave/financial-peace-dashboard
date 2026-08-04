@@ -2535,6 +2535,16 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .toolbar input, .toolbar select { width: auto; min-width: 180px; }
 
+/* Budget page: pick prior month to review envelopes / late posts */
+.budget-month-bar {
+  gap: 0.5rem;
+  align-items: center;
+}
+.budget-month-select {
+  min-width: 10.5rem;
+  font-weight: 600;
+}
+
 /* Section spacing */
 .section { margin-bottom: 2rem; }
 .section-title {

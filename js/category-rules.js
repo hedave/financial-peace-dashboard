@@ -4,7 +4,11 @@ export function normalizePattern(pattern) {
   return String(pattern || '').toLowerCase().trim();
 }
 
-/** Extract a stable merchant token for "always use this envelope" rules. */
+/**
+ * Extract a stable merchant token for "always use this envelope" rules.
+ * Uses up to 3 significant words so INGLES GAS EXPRESS ≠ INGLES MARKETS.
+ * (Old rules that saved only "ingles" still work but lose to longer matches.)
+ */
 export function guessMerchantPattern(description) {
   let text = String(description || '').trim();
   if (!text) return '';
@@ -14,9 +18,18 @@ export function guessMerchantPattern(description) {
     .replace(/\s+#\d+\b/g, ' ')
     .replace(/\s+\d{4,}\s*$/g, ' ')
     .trim();
-  const words = text.split(/\s+/).filter(w => w.replace(/[^a-zA-Z]/g, '').length >= 3);
-  const token = (words[0] || text).toLowerCase().replace(/[^a-z0-9*&'-]/gi, '');
-  return token.slice(0, 48);
+  // Words with 3+ letters/digits (keep gas/markets/express distinction)
+  const words = text
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z0-9*&'-]/gi, ''))
+    .filter(w => w.replace(/[^a-zA-Z0-9]/gi, '').length >= 3);
+  if (!words.length) {
+    const fallback = text.toLowerCase().replace(/[^a-z0-9*&'\s-]/gi, '').trim();
+    return fallback.slice(0, 64);
+  }
+  // Brand + up to 2 more tokens (e.g. "ingles gas express", "ingles markets")
+  const tokens = words.slice(0, 3).map(w => w.toLowerCase());
+  return tokens.join(' ').slice(0, 64);
 }
 
 export function descriptionMatchesPattern(description, pattern) {
@@ -25,8 +38,22 @@ export function descriptionMatchesPattern(description, pattern) {
   return String(description || '').toLowerCase().includes(p);
 }
 
+/**
+ * Prefer the most specific rule (longest pattern). Ties → newest createdAt.
+ * So "ingles gas" beats a broad legacy "ingles" for pump charges.
+ */
 export function findMatchingRule(description, rules = []) {
-  return rules.find(rule => descriptionMatchesPattern(description, rule.pattern)) || null;
+  const matches = (rules || []).filter(rule =>
+    descriptionMatchesPattern(description, rule.pattern)
+  );
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    const la = normalizePattern(a.pattern).length;
+    const lb = normalizePattern(b.pattern).length;
+    if (lb !== la) return lb - la;
+    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+  });
+  return matches[0];
 }
 
 /**

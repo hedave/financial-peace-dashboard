@@ -53,6 +53,21 @@ export function renderBills(container) {
 
   if (!['thisMonth', 'later', 'paid'].includes(billsTab)) billsTab = 'thisMonth';
 
+  const sumAmounts = (list) => Math.round(
+    list.reduce((s, b) => s + (Math.abs(Number(b.amount) || 0)), 0) * 100,
+  ) / 100;
+  const thisMonthTotal = sumAmounts(thisMonthBills);
+  const laterTotal = sumAmounts(laterBills);
+  const paidThisMonthTotal = Math.round(
+    paidThisMonth.reduce((s, b) => {
+      const amt = b.lastPaidAmount != null
+        ? b.lastPaidAmount
+        : (b.paidAmount != null ? b.paidAmount : b.amount);
+      return s + (Math.abs(Number(amt) || 0));
+    }, 0) * 100,
+  ) / 100;
+  const monthBillLoad = Math.round((thisMonthTotal + paidThisMonthTotal) * 100) / 100;
+
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Bills & Payments'),
@@ -69,6 +84,46 @@ export function renderBills(container) {
     container.appendChild(emptyState('📋', 'No bills yet', 'Add your recurring bills to stay on top of due dates.'));
     return;
   }
+
+  // Aggregate totals at top
+  container.appendChild(el('div', { className: 'grid grid-4 section bills-summary' },
+    el('div', { className: 'card' },
+      el('div', { className: 'card-title' }, 'Still due this month'),
+      el('div', {
+        className: `card-value money${thisMonthTotal > 0 ? ' accent' : ' positive'}`,
+      }, formatCurrency(thisMonthTotal)),
+      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+        thisMonthBills.length
+          ? `${thisMonthBills.length} bill${thisMonthBills.length === 1 ? '' : 's'}${overdueCount ? ` · ${overdueCount} overdue` : ''}`
+          : 'All caught up for this month',
+      ),
+    ),
+    el('div', { className: 'card' },
+      el('div', { className: 'card-title' }, `Paid in ${getMonthLabel(month).split(' ')[0]}`),
+      el('div', { className: 'card-value money positive' }, formatCurrency(paidThisMonthTotal)),
+      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+        paidThisMonth.length
+          ? `${paidThisMonth.length} payment${paidThisMonth.length === 1 ? '' : 's'} recorded`
+          : 'None marked paid yet',
+      ),
+    ),
+    el('div', { className: 'card' },
+      el('div', { className: 'card-title' }, 'This month’s bill load'),
+      el('div', { className: 'card-value money' }, formatCurrency(monthBillLoad)),
+      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+        'Still due + already paid this month',
+      ),
+    ),
+    el('div', { className: 'card' },
+      el('div', { className: 'card-title' }, 'Later (upcoming)'),
+      el('div', { className: 'card-value money' }, formatCurrency(laterTotal)),
+      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+        laterBills.length
+          ? `${laterBills.length} bill${laterBills.length === 1 ? '' : 's'} after this month`
+          : 'No future-dated bills',
+      ),
+    ),
+  ));
 
   const panel = el('div', { className: 'bills-tab-panel section' });
 

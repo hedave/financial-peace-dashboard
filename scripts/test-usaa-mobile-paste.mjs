@@ -1,0 +1,27 @@
+import {
+  parseBankCsvText,
+  looksLikeUsaaMobileWebPaste,
+  normalizeImportRow,
+} from '../js/csv-import.js';
+
+const sample = `Date Description Category AmountCurrent BalanceAug 03, 2026Spectrum BILL PMT 621500…Spectrum BILL PMT621500K0ASLDCategory Pending -$90.00$5,559.17Aug 03, 2026 AMAZON.COM*5N7129W70 …Pending Category Pending -$96.27$5,649.17Aug 03, 2026 AMAZON.COM*5N3OK0RB2…Pending Category Pending -$67.40$5,745.44Aug 03, 2026 Pending Category Pending -$440.36CANTERBURY CLASS SALE$5,812.84Aug 03, 2026 Pending Category Pending -$3,219.49CARRINGTON MORTGAGE *…$6,253.20Aug 03, 2026 MICROSOFT*MARKETPLAC …Pending Category Pending -$4.27$9,472.69Aug 03, 2026 Pending Category Pending -$10.00APPLE CASH SENT MONE 0…$9,476.96Aug 03, 2026 Pending Category Pending -$19.66LITTLE CAESARS 1162- 0801…$9,486.96Aug 03, 2026 NikePOS_US 080126Pending Category Pending -$52.44$9,506.62Aug 03, 2026 Pending Category Pending -$26.47CHICK-FIL-A #05018 080126$9,559.06Aug 03, 2026 AMAZON.COM*5N68H9BI0 …Pending Category Pending -$29.96$9,585.53Aug 03, 2026 Pending Category Pending -$248.57AMAZON MKTPLACE PMTS …$9,615.49Aug 03, 2026 Pending Category Pending -$69.00FASTMED CANDLER 080126$9,864.06Aug 03, 2026 Pending Category Pending -$510.00BILTMORE CHURCH 073126$9,933.06Jul 31, 2026Parabellumbjjavl ParabellumPARABELLUMBJJAVLPARABELLUM ***********U0P3Sporting Goods -$85.00$10,443.06Jul 31, 2026CinemarkCINEMARK 1142 RSTBAR AshevilleNCMovies & DVDs -$40.62$10,528.06Jul 31, 2026 Dollar TreeDOLLARTREE CANDLER NC Shopping -$17.08$10,568.68https://mobile.usaa.com/my/checking/?accountId=0002-VJ7wabMsN8NEkttBxiRGq1ud 8/3/26, 8:21 PMPage 1 of 3Jul 31, 2026 AmazonAMAZON MKTPL*5N9L88511Amzn.com/billWAShopping -$12.80$10,585.76Jul 31, 2026US Department Of Agricultu…AGRI TREAS 310 FED SAL***********4000Paycheck $2,571.64$10,598.56Jul 30, 2026Amazon Prime MembershipAMAZON PRIME*AP7TJ8LE3Amzn.com/billWAShopping -$73.83$8,026.92Jul 30, 2026Ingles MarketsINGLES MARKETS #134 CANDLERNCGroceries -$46.64$8,100.75Jul 30, 2026Chick-fil-ACHICK-FIL-A #04378 828-667-9770 NCFast Food -$16.12$8,147.39Jul 30, 2026CVSCVS/PHARMACY #03 03847-ASHEVILLE NCPharmacy -$10.00$8,163.51Jul 30, 2026Amazon Prime MembershipAMAZON PRIME*TM4FQ4BT3Amzn.com/billWAShopping -$8.01$8,173.51Jul 30, 2026Ingles MarketsINGLES MARKETS #134 CANDLERNCGroceries -$2.53$8,181.52Jul 30, 2026Amazon Prime MembershipAMAZON PRIME PMTSAmzn.com/billWAShopping $8.01$8,184.05Jul 30, 2026Education Benefits for Veter…VAED TREAS 310 XXVA EDUC***********3600Income $1,169.00$8,176.04Jul 30, 2026US Department Of Agricultu…AGRI TREAS 310 FED SAL***********4000Paycheck $1,000.00$7,007.04Jul 29, 2026ChosenchildrenministrieCHOSENCHILDRENMINISTRIE864-7067061 SCGifts & Donations -$86.52$6,007.04Jul 29, 2026FableticsIBI*FABLETICS.COM 844-3225384CAClothing -$78.07$6,093.56Jul 29, 2026WalmartWALMART.COM 8009256278BENTONVILLE ARShopping -$26.70$6,171.63Jul 29, 2026Chick-fil-ACHICK-FIL-A #04378 828-667-9770 NCFast Food -$9.26$6,198.33Jul 29, 2026US Department of Veterans …VACP TREAS 310 XXVA BENEF***********3600Income $2,378.45$6,207.59Jul 29, 2026Canterbury Class PayrollCANTERBURY CLASS PAYROLL***********0390Paycheck $1,849.75$3,829.14Jul 29, 2026Public Employee Retirement…PUB EMP RET SYS RET BENFT***********PERSIncome $1,126.20$1,979.39Jul 28, 2026LightStreamLIGHTSTREAM LOAN PMTS***********6108Financial -$495.96$853.19https://mobile.usaa.com/my/checking/?accountId=0002-VJ7wabMsN8NEkttBxiRGq1ud 8/3/26, 8:21 PMPage 2 of 3Jul 28, 2026 BridgecrestBridgecrest DT RETAIL***********4930Auto Payment -$380.00$1,349.15Jul 28, 2026Compassion InternationalCOMPASSION INTERNATIONWWW.COMPASSIOCOCharity -$43.00$1,729.15Jul 27, 2026 ICPaymentICPAYMENT Transfer -$287.39$1,772.15Jul 27, 2026Biltmore ChurchBILTMORE CHURCHhappy@simpledNCGifts & Donations -$230.00$2,059.54Jul 27, 2026Sam's ClubSAMS CLUB.COM BENTONVILLEARFood & Dining -$211.63$2,289.54Jul 27, 2026Obc OrthodonticsOBC*TS ORTHODONTICS 828-524-4602 NCDentist -$176.00$2,501.17Jul 27, 2026Wearpepper.comSP WEARPEPPER.COMWEARPEPPER.COCOClothing -$145.52$2,677.17Jul 27, 2026 WalmartWalmart.com Bentonville AR Shopping -$128.60$2,822.69Jul 27, 2026CinemarkCINEMARK 1142 ONLINEwww.cinemark.NCMovies & DVDs -$65.30$2,951.29Jul 27, 2026Ingles MarketsINGLES GAS EXPRESS #134CANDLER NCGas -$57.23$3,016.59Jul 27, 2026 AldiALDI 76071 ASHEVILLE NC Groceries -$56.87$3,073.82Jul 27, 2026 Sam's ClubSAMS CLUB #6452 ASHEVILLE NC Food & Dining -$32.44$3,130.69Jul 27, 2026Ingles MarketsINGLES MARKETS #134 CANDLERNCGroceries -$11.69$3,163.13Jul 27, 2026Transfer to Apple PayAPPLE CASH SENT MONEY1INFINITELOOPCATransfer -$10.00$3,174.82`;
+
+console.log('looksLike', looksLikeUsaaMobileWebPaste(sample));
+const rows = parseBankCsvText(sample);
+console.log('count', rows.length);
+const norm = rows.map(r => normalizeImportRow(r, { includePending: true })).filter(Boolean);
+console.log('normalized', norm.length);
+rows.forEach((r, i) => {
+  console.log(
+    String(i + 1).padStart(2),
+    r.Date,
+    r.Amount.padStart(10),
+    (r.Status || '').slice(0, 7).padEnd(7),
+    (r.Description || '').slice(0, 55),
+  );
+});
+const totalExp = norm.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+const totalInc = norm.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+console.log('expense total', totalExp.toFixed(2), 'income total', totalInc.toFixed(2));
+const pending = rows.filter(r => /pending/i.test(r.Status)).length;
+console.log('pending rows', pending);

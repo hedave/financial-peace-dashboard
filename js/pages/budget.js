@@ -1,4 +1,7 @@
-import { el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth, emptyState } from '../utils.js';
+import {
+  el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth,
+  emptyState, getRecentMonths, addMonths,
+} from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createEnvelopePicker } from '../components/envelope-picker.js';
@@ -17,6 +20,8 @@ const SORT_OPTIONS = [
 let budgetSortKey = 'budgeted';
 let budgetSortDir = 'desc';
 let budgetViewFilter = 'all';
+/** Which month’s envelopes are on screen (YYYY-MM). */
+let budgetViewMonth = getCurrentMonth();
 
 function sortOptionValue(key, dir) {
   return `${key}:${dir}`;
@@ -27,19 +32,19 @@ function parseSortValue(value) {
   return { key, dir };
 }
 
-function sortCategories(cats, sortKey, sortDir) {
+function sortCategories(cats, sortKey, sortDir, month) {
   const dir = sortDir === 'asc' ? 1 : -1;
   return [...cats].sort((a, b) => {
     let va;
     let vb;
     switch (sortKey) {
       case 'spent':
-        va = store.getCategorySpent(a.id);
-        vb = store.getCategorySpent(b.id);
+        va = store.getCategorySpent(a.id, month);
+        vb = store.getCategorySpent(b.id, month);
         break;
       case 'remaining':
-        va = store.getCategoryRemaining(a.id);
-        vb = store.getCategoryRemaining(b.id);
+        va = store.getCategoryRemaining(a.id, month);
+        vb = store.getCategoryRemaining(b.id, month);
         break;
       case 'name':
         va = a.name.toLowerCase();
@@ -47,8 +52,8 @@ function sortCategories(cats, sortKey, sortDir) {
         break;
       case 'budgeted':
       default:
-        va = Number(a.monthlyBudget) || 0;
-        vb = Number(b.monthlyBudget) || 0;
+        va = store.getCategoryBudgeted(a.id, month);
+        vb = store.getCategoryBudgeted(b.id, month);
         break;
     }
     if (va < vb) return -1 * dir;
@@ -59,11 +64,17 @@ function sortCategories(cats, sortKey, sortDir) {
 
 export function renderBudget(container, arg) {
   const state = store.getState();
-  const month = getCurrentMonth();
+  const liveMonth = getCurrentMonth();
+  // Keep view month valid; snap forward if calendar rolled
+  if (!budgetViewMonth || budgetViewMonth > liveMonth) budgetViewMonth = liveMonth;
+  if (arg?.month) budgetViewMonth = arg.month;
+
+  const month = budgetViewMonth;
+  const isCurrentMonth = month === liveMonth;
   const income = store.getTotalIncome(month);
-  const bonusLogged = store.getBonusIncomeLogged();
-  const budgeted = store.getTotalBudgeted();
-  const unallocated = store.getToAllocate();
+  const bonusLogged = store.getBonusIncomeLogged(month);
+  const budgeted = store.getTotalBudgeted(month);
+  const unallocated = store.getUnallocatedFunds(month);
   const focusId = arg?.focusId || arg?.categoryId || null;
   // Deep-link filters win for this visit; otherwise keep last UI choice (e.g. after activity modal refresh)
   let viewFilter = (arg && arg.filter === 'attention')
@@ -75,40 +86,113 @@ export function renderBudget(container, arg) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Envelope Budget'),
-    el('p', {}, 'Zero-based budgeting — every dollar has a job · Tap an envelope to see spending')
+    el('p', {}, isCurrentMonth
+      ? 'Zero-based budgeting — every dollar has a job · Tap an envelope to see spending'
+      : `Viewing ${getMonthLabel(month)} — spending uses each transaction’s date (edit the date to move a late post back)`),
   ));
+
+  // Month switcher
+  const monthOptions = getRecentMonths(8, liveMonth);
+  const monthSelect = el('select', {
+    className: 'budget-month-select',
+    onChange: (e) => {
+      budgetViewMonth = e.target.value;
+      window.appRefresh();
+    },
+  },
+    ...monthOptions.map(m => el('option', {
+      value: m,
+      selected: m === month ? true : undefined,
+    }, getMonthLabel(m) + (m === liveMonth ? ' (current)' : ''))),
+  );
+  if (monthSelect.value !== month) monthSelect.value = month;
+
+  container.appendChild(el('div', { className: 'toolbar section budget-month-bar' },
+    el('button', {
+      type: 'button',
+      className: 'btn btn-sm btn-secondary',
+      disabled: monthOptions[0] === month ? true : undefined,
+      onClick: () => {
+        budgetViewMonth = addMonths(month, -1);
+        window.appRefresh();
+      },
+    }, '← Prev'),
+    el('label', { style: 'font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:0.5rem' },
+      'Month',
+      monthSelect,
+    ),
+    el('button', {
+      type: 'button',
+      className: 'btn btn-sm btn-secondary',
+      disabled: month >= liveMonth ? true : undefined,
+      onClick: () => {
+        budgetViewMonth = addMonths(month, 1);
+        if (budgetViewMonth > liveMonth) budgetViewMonth = liveMonth;
+        window.appRefresh();
+      },
+    }, 'Next →'),
+    !isCurrentMonth
+      ? el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-primary',
+        onClick: () => {
+          budgetViewMonth = liveMonth;
+          window.appRefresh();
+        },
+      }, 'Jump to current')
+      : null,
+  ));
+
+  if (!isCurrentMonth && !store.hasMonthBudgetSnapshot(month)) {
+    container.appendChild(el('p', {
+      className: 'tx-form-hint section',
+      style: 'margin-top:0',
+    }, `No saved budget snapshot for ${getMonthLabel(month)} — budgeted amounts fall back to today’s plan. Spending still uses transactions dated in that month.`));
+  }
+
+  const allocatable = store.getAllocatableIncome(month);
+  const checkingNow = Number(store.getState().balances?.checking) || 0;
 
   container.appendChild(el('div', { className: 'grid grid-3 section' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, `Monthly Income — ${getMonthLabel(month)}`),
-      el('div', { className: 'card-value accent' }, formatCurrency(income)),
-      el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
-        'From pay-calendar dates & amounts this month'
+      el('div', { className: 'card-value accent' }, formatCurrency(allocatable)),
+      el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4' },
+        bonusLogged > 0
+          ? `Pay calendar ${formatCurrency(income)} + bonus logged ${formatCurrency(bonusLogged)}`
+          : 'From pay-calendar dates & amounts (not checking balance)',
       ),
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Total Budgeted'),
-      el('div', { className: 'card-value' }, formatCurrency(budgeted))
+      el('div', { className: 'card-value' }, formatCurrency(budgeted)),
+      el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+        isCurrentMonth ? 'Sum of envelope monthly budgets' : 'From snapshot or current plan',
+      ),
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'To Allocate'),
       el('div', { className: `card-value ${unallocated === 0 ? 'positive' : unallocated > 0 ? 'accent' : 'negative'}` },
         formatCurrency(unallocated)
       ),
-      bonusLogged > 0
-        ? el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
-          `Includes ${formatCurrency(bonusLogged)} bonus income this month`
-        )
-        : null,
-      unallocated === 0 ? el('p', { style: 'font-size:0.75rem;color:var(--positive)' }, '✓ Zero-based budget!') : null,
-      unallocated !== 0 && store.isDaveRamseyMode()
-        ? el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
-          unallocated > 0 ? 'Ramsey mode: assign the rest until $0' : 'Ramsey mode: over-assigned vs income')
-        : null,
-    )
+      el('p', {
+        style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.45',
+      },
+        `${formatCurrency(allocatable)} income − ${formatCurrency(budgeted)} budgeted`,
+      ),
+      unallocated === 0
+        ? el('p', { style: 'font-size:0.75rem;color:var(--positive)' }, '✓ Zero-based budget!')
+        : el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;line-height:1.4' },
+          unallocated > 0
+            ? 'Still needs a job — assign to envelopes'
+            : isCurrentMonth
+              ? `Over by ${formatCurrency(Math.abs(unallocated))} — lower some budgets. Checking (${formatCurrency(checkingNow)}) is cash on hand, not part of this formula.`
+              : `Over by ${formatCurrency(Math.abs(unallocated))} for this month’s plan.`,
+        ),
+    ),
   ));
 
-  const prevMonth = getPreviousMonth();
+  const prevMonth = getPreviousMonth(liveMonth);
   const hasSnapshot = !!store.getState().monthBudgetSnapshots[prevMonth];
 
   const toolsMenu = el('details', { className: 'page-tools-menu' });
@@ -124,6 +208,14 @@ export function renderBudget(container, arg) {
     className: 'page-tools-item',
     onClick: () => { toolsMenu.removeAttribute('open'); openMoveBetweenEnvelopes(); },
   }, 'Move between envelopes'));
+  const negCarryCount = store.countNegativeCarryOvers();
+  if (negCarryCount > 0) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); clearAllNegativeCarry(); },
+    }, `Clear negative carry (${negCarryCount})`));
+  }
   if (hasSnapshot) {
     toolsList.appendChild(el('button', {
       type: 'button',
@@ -145,31 +237,45 @@ export function renderBudget(container, arg) {
   }
   toolsMenu.appendChild(toolsList);
 
-  container.appendChild(el('div', { className: 'btn-group section budget-actions' },
-    el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
-    el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
-    el('button', {
-      className: 'btn btn-secondary budget-action-secondary',
-      onClick: () => openMoveBetweenEnvelopes(),
-      title: 'Shift leftover room this month only — does not change next month’s plan',
-    }, 'Move between envelopes'),
-    hasSnapshot ? el('button', {
-      className: 'btn btn-secondary budget-action-secondary',
-      onClick: () => {
-        confirmDialog(
-          'Copy Last Month\'s Budget',
-          `Replace current envelope amounts with ${getMonthLabel(prevMonth)}?`,
-          () => {
-            if (store.copyBudgetFromMonth(prevMonth)) {
-              showToast('Budget copied from last month!');
-              window.appRefresh();
-            }
-          },
-        );
-      },
-    }, 'Copy Last Month') : null,
-    toolsMenu,
-  ));
+  if (isCurrentMonth) {
+    container.appendChild(el('div', { className: 'btn-group section budget-actions' },
+      el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
+      el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
+      el('button', {
+        className: 'btn btn-secondary budget-action-secondary',
+        onClick: () => openMoveBetweenEnvelopes(),
+        title: 'Shift leftover room this month only — does not change next month’s plan',
+      }, 'Move between envelopes'),
+      negCarryCount > 0
+        ? el('button', {
+          className: 'btn btn-secondary budget-action-secondary',
+          onClick: clearAllNegativeCarry,
+          title: 'Forgive prior-month overspending so envelopes don’t start in the red',
+        }, `Clear negative carry (${negCarryCount})`)
+        : null,
+      hasSnapshot ? el('button', {
+        className: 'btn btn-secondary budget-action-secondary',
+        onClick: () => {
+          confirmDialog(
+            'Copy Last Month\'s Budget',
+            `Replace current envelope amounts with ${getMonthLabel(prevMonth)}?`,
+            () => {
+              if (store.copyBudgetFromMonth(prevMonth)) {
+                showToast('Budget copied from last month!');
+                window.appRefresh();
+              }
+            },
+          );
+        },
+      }, 'Copy Last Month') : null,
+      toolsMenu,
+    ));
+  } else {
+    container.appendChild(el('p', {
+      className: 'tx-form-hint section',
+      style: 'margin-top:0',
+    }, `Viewing ${getMonthLabel(month)} (read-only plan). Late bank posts: open a transaction → edit its date to the purchase month so it hits that month’s envelopes.`));
+  }
 
   let sortKey = budgetSortKey;
   let sortDir = budgetSortDir;
@@ -220,11 +326,15 @@ export function renderBudget(container, arg) {
   container.appendChild(gridEl);
 
   function needsAttention(cat) {
-    const health = store.getEnvelopeHealth(cat.id);
-    const remaining = store.getCategoryRemaining(cat.id);
+    const health = store.getEnvelopeHealth(cat.id, month);
+    const remaining = store.getCategoryRemaining(cat.id, month);
+    // Soft cap is plan-level; only surface for live month
+    const overCap = isCurrentMonth && store.isOverSoftCap(cat.id);
     return health === 'over' || health === 'depleted' || health === 'warning'
-      || remaining < 0 || store.isOverSoftCap(cat.id);
+      || remaining < 0 || overCap;
   }
+
+  const cardOptsBase = { month, isCurrentMonth };
 
   function renderGrid() {
     const favorites = favIds();
@@ -232,7 +342,7 @@ export function renderBudget(container, arg) {
     if (viewFilter === 'attention') parents = parents.filter(needsAttention);
     else if (viewFilter === 'favorites') parents = parents.filter(c => favorites.has(c.id));
     else if (viewFilter === 'kids') parents = parents.filter(isKidsEnvelope);
-    let sorted = sortCategories(parents, sortKey, sortDir);
+    let sorted = sortCategories(parents, sortKey, sortDir, month);
     // Favorites first when viewing all
     if (viewFilter === 'all' && favorites.size) {
       sorted = [
@@ -271,15 +381,15 @@ export function renderBudget(container, arg) {
       const rest = sorted.filter(c => !favorites.has(c.id));
       if (favList.length) {
         gridEl.appendChild(el('div', { className: 'envelope-group-label' }, '★ Favorites'));
-        favList.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: true })));
+        favList.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { ...cardOptsBase, favorite: true })));
       }
       if (rest.length) {
         gridEl.appendChild(el('div', { className: 'envelope-group-label' }, 'All envelopes'));
-        rest.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: false })));
+        rest.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { ...cardOptsBase, favorite: false })));
       }
       return;
     }
-    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { favorite: favorites.has(cat.id) })));
+    sorted.forEach(cat => gridEl.appendChild(envelopeCard(cat, focusId, { ...cardOptsBase, favorite: favorites.has(cat.id) })));
   }
 
   sortSelect.addEventListener('change', e => {
@@ -357,25 +467,29 @@ function toggleFavorite(categoryId) {
 }
 
 function envelopeCard(cat, focusId = null, opts = {}) {
-  const spent = store.getCategorySpent(cat.id);
-  const remaining = store.getCategoryRemaining(cat.id);
-  const budgeted = Number(cat.monthlyBudget) || 0;
-  const carry = Number(cat.carryOver) || 0;
-  const moveDelta = store.getEnvelopeMoveDelta(cat.id);
+  const month = opts.month || getCurrentMonth();
+  const isCurrentMonth = opts.isCurrentMonth !== false && month === getCurrentMonth();
+  const spent = store.getCategorySpent(cat.id, month);
+  const remaining = store.getCategoryRemaining(cat.id, month);
+  const budgeted = store.getCategoryBudgeted(cat.id, month);
+  const carry = isCurrentMonth ? (Number(cat.carryOver) || 0) : 0;
+  const moveDelta = store.getEnvelopeMoveDelta(cat.id, month);
   const isOver = remaining < 0;
-  const health = store.getEnvelopeHealth(cat.id);
+  const health = store.getEnvelopeHealth(cat.id, month);
   const healthLabel = store.getEnvelopeHealthLabel(health);
-  const txCount = store.getCategoryTransactions(cat.id).length;
-  const overCap = store.isOverSoftCap(cat.id);
+  const txCount = store.getCategoryTransactions(cat.id, { month, range: 'month' }).length;
+  const overCap = isCurrentMonth && store.isOverSoftCap(cat.id);
   const isFocused = focusId && cat.id === focusId;
   const isFav = !!opts.favorite || (store.getState().settings?.favoriteCategoryIds || []).includes(cat.id);
   const hasNote = !!(cat.note && String(cat.note).trim());
   // Pool = budget + carry + month-only moves (not permanent plan)
-  const pool = store.getCategoryPool(cat.id);
+  const pool = store.getCategoryPool(cat.id, month);
   let usedPct = 0;
   if (pool > 0.005) usedPct = Math.min(100, (spent / pool) * 100);
   else if (spent > 0) usedPct = 100; // spent with no plan still shows full bar (over)
   if (isOver) usedPct = 100;
+
+  const openActivity = () => openEnvelopeActivity(cat, { month });
 
   const card = el('div', {
     className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable${isFocused ? ' envelope-card-focus' : ''}${isFav ? ' envelope-card-fav' : ''}`,
@@ -383,7 +497,7 @@ function envelopeCard(cat, focusId = null, opts = {}) {
     title: isFocused ? 'Focused from Advisor' : 'Click to see transactions for this envelope',
     onClick: (e) => {
       if (e.target.closest('button, a, input, select, textarea, label, summary')) return;
-      openEnvelopeActivity(cat);
+      openActivity();
     },
   },
     el('div', { className: 'envelope-card-top' },
@@ -403,8 +517,12 @@ function envelopeCard(cat, focusId = null, opts = {}) {
             title: isFav ? 'Unpin favorite' : 'Pin favorite',
             onClick: (e) => { e.stopPropagation(); toggleFavorite(cat.id); },
           }, isFav ? '★' : '☆'),
-          el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️'),
-          el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×'),
+          isCurrentMonth
+            ? el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️')
+            : null,
+          isCurrentMonth
+            ? el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×')
+            : null,
         )
       ),
       el('div', { className: 'envelope-stats' },
@@ -419,10 +537,17 @@ function envelopeCard(cat, focusId = null, opts = {}) {
             ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
             : null,
         ),
-        el('div', { className: 'envelope-stat' },
-          el('label', {}, 'Carry-over'),
-          el('span', {}, formatCurrency(carry))
-        ),
+        isCurrentMonth
+          ? el('div', { className: 'envelope-stat' },
+            el('label', {}, 'Carry-over'),
+            el('span', {
+              style: carry < -0.005 ? 'color:var(--negative);font-weight:600' : '',
+            }, formatCurrency(carry)),
+          )
+          : el('div', { className: 'envelope-stat' },
+            el('label', {}, 'Month'),
+            el('span', { style: 'font-size:0.8rem' }, getMonthLabel(month)),
+          ),
       ),
       el('div', { className: `envelope-remaining ${isOver ? 'over' : 'ok'}` },
         el('span', {}, 'Remaining'),
@@ -454,23 +579,45 @@ function envelopeCard(cat, focusId = null, opts = {}) {
           : 'No budget set',
       ),
       el('div', { className: 'envelope-card-mid' },
-        goalBlock(cat),
+        isCurrentMonth ? goalBlock(cat) : null,
         linkedItems(cat),
       ),
     ),
     el('div', { className: 'envelope-card-footer' },
       el('button', {
         className: 'btn btn-sm btn-secondary', style: 'width:100%',
-        onClick: (e) => { e.stopPropagation(); openEnvelopeActivity(cat); },
+        onClick: (e) => { e.stopPropagation(); openActivity(); },
       }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
-      el('button', {
-        className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
-        onClick: (e) => { e.stopPropagation(); openMoveBetweenEnvelopes({ fromId: cat.id }); },
-      }, 'Move $'),
-      el('button', {
-        className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
-        onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
-      }, 'Allocate'),
+      isCurrentMonth
+        ? el('button', {
+          className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
+          onClick: (e) => { e.stopPropagation(); openMoveBetweenEnvelopes({ fromId: cat.id }); },
+        }, 'Move $')
+        : null,
+      isCurrentMonth && Math.abs(carry) > 0.005
+        ? el('button', {
+          className: 'btn btn-sm btn-secondary',
+          style: 'width:100%;margin-top:0.5rem',
+          title: carry < 0
+            ? 'Forgive prior-month overspend — start this month at $0 carry (budget plan unchanged)'
+            : 'Drop leftover carry-over from prior months (budget plan unchanged)',
+          onClick: (e) => {
+            e.stopPropagation();
+            resetEnvelopeCarry(cat);
+          },
+        }, carry < 0
+          ? `Clear overspend (${formatCurrency(carry)})`
+          : `Reset carry (${formatCurrency(carry)})`)
+        : null,
+      isCurrentMonth
+        ? el('button', {
+          className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
+          onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
+        }, 'Allocate')
+        : el('p', {
+          className: 'tx-form-hint',
+          style: 'margin:0.5rem 0 0;font-size:0.75rem;line-height:1.35',
+        }, 'Past month — edit a transaction’s date to move a late post here.'),
       cat.note && String(cat.note).trim()
         ? el('div', { className: 'envelope-note' },
           el('span', { className: 'envelope-note-label' }, 'Note'),
@@ -489,13 +636,21 @@ const ACTIVITY_RANGES = [
   { id: 'all', label: 'All time' },
 ];
 
-function rangeLabel(range) {
+function rangeLabel(range, month = getCurrentMonth()) {
   if (range === '30d') return 'Last 30 days';
   if (range === 'all') return 'All time';
-  return getMonthLabel(getCurrentMonth());
+  return getMonthLabel(month);
 }
 
-export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}) {
+/**
+ * Envelope activity modal.
+ * @param {{ range?: string, month?: string }} opts
+ *   month — which budget month’s “month” range to show (defaults to current).
+ */
+export function openEnvelopeActivity(cat, { range: initialRange = 'month', month: viewMonth } = {}) {
+  const liveMonth = getCurrentMonth();
+  const activityMonth = viewMonth && viewMonth <= liveMonth ? viewMonth : liveMonth;
+  const isPastMonth = activityMonth !== liveMonth;
   let range = initialRange;
   let editingNote = false;
   const bodyHost = el('div', {});
@@ -511,7 +666,10 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
   }
 
   function paint() {
-    const txs = store.getCategoryTransactions(cat.id, { range });
+    const txs = store.getCategoryTransactions(cat.id, {
+      range,
+      month: activityMonth,
+    });
     // Activity total: spending only (gifts listed separately as income rows)
     const spendTotal = txs
       .filter(t => t.type === 'expense' || t.type === 'debt_payment')
@@ -552,6 +710,9 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
           el('button', {
             type: 'button',
             className: 'btn btn-sm btn-secondary',
+            title: isPastMonth
+              ? 'Edit date to keep a late post in this month, or change envelope'
+              : 'Edit transaction',
             onClick: () => {
               modal?.close();
               openTransactionForm({ transaction: t });
@@ -565,12 +726,15 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
       ));
     }
 
+    const monthChipLabel = isPastMonth
+      ? getMonthLabel(activityMonth)
+      : 'This month';
     const chips = el('div', { className: 'chip-bar' },
       ...ACTIVITY_RANGES.map(opt => el('button', {
         type: 'button',
         className: `chip${range === opt.id ? ' active' : ''}`,
         onClick: () => { range = opt.id; paint(); },
-      }, opt.label)),
+      }, opt.id === 'month' ? monthChipLabel : opt.label)),
     );
 
     const live = store.getState().categories.find(c => c.id === cat.id) || cat;
@@ -650,9 +814,15 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
 
     bodyHost.innerHTML = '';
     bodyHost.appendChild(noteBox);
+    if (isPastMonth && range === 'month') {
+      bodyHost.appendChild(el('p', {
+        className: 'tx-form-hint',
+        style: 'margin:0 0 0.65rem;line-height:1.4',
+      }, `Showing ${getMonthLabel(activityMonth)}. A purchase that posted this month but belongs here: Edit → set the date to the purchase day so it leaves the new month and hits this envelope.`));
+    }
     bodyHost.appendChild(chips);
     bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
-      `${rangeLabel(range)} · spent ${formatCurrency(spendTotal)} · ${txs.length} item${txs.length === 1 ? '' : 's'}`,
+      `${rangeLabel(range, activityMonth)} · spent ${formatCurrency(spendTotal)} · ${txs.length} item${txs.length === 1 ? '' : 's'}`,
     ));
     bodyHost.appendChild(list);
   }
@@ -660,7 +830,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
   paint();
 
   modal = showModal({
-    title: `${cat.icon || '✉️'} ${cat.name}`,
+    title: `${cat.icon || '✉️'} ${cat.name}${isPastMonth ? ` · ${getMonthLabel(activityMonth)}` : ''}`,
     body: bodyHost,
     footer: [
       el('button', {
@@ -676,7 +846,13 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month' } = {}
         className: 'btn btn-primary',
         onClick: () => {
           modal.close();
-          openTransactionForm({ type: 'expense', categoryId: cat.id });
+          // Default new expense to the viewed month (1st) so late posts can be dated correctly
+          const defaultDate = isPastMonth ? `${activityMonth}-01` : undefined;
+          openTransactionForm({
+            type: 'expense',
+            categoryId: cat.id,
+            ...(defaultDate ? { date: defaultDate } : {}),
+          });
         },
       }, '+ Log expense'),
       el('button', {
@@ -696,6 +872,51 @@ function doFundEnvelope(cat, amt) {
   store.fundEnvelope(cat.id, amt);
   showToast(`Assigned ${formatCurrency(amt)} to ${cat.name}`);
   window.appRefresh();
+}
+
+function resetEnvelopeCarry(cat) {
+  const carry = Number(cat.carryOver) || 0;
+  if (Math.abs(carry) < 0.005) {
+    showToast('No carry-over on this envelope', 'info');
+    return;
+  }
+  const isNeg = carry < 0;
+  confirmDialog(
+    isNeg ? 'Clear prior overspend?' : 'Reset carry-over?',
+    isNeg
+      ? `${cat.name} is carrying ${formatCurrency(carry)} from prior months. Clear it so this month isn’t starting in the hole? Monthly budget plan stays the same; bank checking is unchanged.`
+      : `${cat.name} has ${formatCurrency(carry)} carry-over. Zero it out? Monthly budget plan stays the same; bank checking is unchanged.`,
+    () => {
+      store.resetEnvelopeCarryOver(cat.id);
+      showToast(
+        isNeg
+          ? `Cleared ${formatCurrency(carry)} overspend on ${cat.name}`
+          : `Reset carry on ${cat.name}`,
+        'success',
+      );
+    },
+  );
+}
+
+function clearAllNegativeCarry() {
+  const n = store.countNegativeCarryOvers();
+  if (!n) {
+    showToast('No envelopes with negative carry-over', 'info');
+    return;
+  }
+  confirmDialog(
+    'Clear all negative carry-over?',
+    `${n} envelope${n === 1 ? '' : 's'} still “owe” from prior months. Zero those carry balances so this month starts clean? Does not change budget plans or checking.`,
+    () => {
+      const cleared = store.clearNegativeCarryOvers();
+      showToast(
+        cleared
+          ? `Cleared negative carry on ${cleared} envelope${cleared === 1 ? '' : 's'}`
+          : 'Nothing to clear',
+        cleared ? 'success' : 'info',
+      );
+    },
+  );
 }
 
 /**

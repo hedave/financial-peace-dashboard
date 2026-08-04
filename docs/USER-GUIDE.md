@@ -1,4 +1,4 @@
-# Financial Peace Dashboard — User Guide
+# FigPig Financial — User Guide
 
 A practical guide for you and your spouse. Written for **how the app actually works**, not marketing copy.
 
@@ -33,7 +33,7 @@ This file is a local reference document (not an in-app help page). Keep a copy w
 
 ## 1. What this app is
 
-**Financial Peace Dashboard** is a household budgeting app inspired by Dave Ramsey’s **zero-based budgeting** and **debt snowball**:
+**FigPig Financial** is a household budgeting app inspired by Dave Ramsey’s **zero-based budgeting** and **debt snowball**:
 
 - Every dollar of planned income should get a job (an envelope).
 - Checking balance is the real bank number you maintain (or sync via imports).

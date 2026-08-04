@@ -9,6 +9,9 @@ import { openEnvelopeActivity } from './budget.js';
 import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
 import { refreshSyncChip } from '../components/layout.js';
 
+/** Keep Home “More” panel open across soft refreshes. */
+let dashMoreOpen = false;
+
 export function renderDashboard(container) {
   const state = store.getState();
   const month = getCurrentMonth();
@@ -19,27 +22,29 @@ export function renderDashboard(container) {
   const surplus = store.getSurplusForSnowball();
   const surplusBasis = store.getSurplusBasis();
   const surplusCap = store.getSurplusCapInfo();
-  // Always explain source + pay-bridge (not only when capped — otherwise it looks “ignored”)
-  const surplusSourceLine = surplusBasis === 'pay_bridge' || surplusBasis === 'unallocated'
-    ? (surplusCap.raw > 0 && surplusCap.capped
-      ? `Budget leftover ${formatCurrency(surplusCap.raw)}; safe after bills ${formatCurrency(surplus)}`
-      : 'From zero-based budget (income minus envelope totals)')
-    : surplusBasis === 'cashflow'
-      ? (store.usesLoggedIncomeForSurplus()
-        ? 'From income received minus spending this month'
-        : 'From planned income minus spending this month')
-      : surplus > 0
-        ? 'From zero-based budget (income minus envelope totals)'
-        : 'Assign income to envelopes or log transactions to build surplus';
-  const buf = surplusCap.buffer || 0;
-  const payBridgeLine = surplusCap.billsTotal > 0.005 || buf > 0
-    ? (surplusCap.capped
-      ? `Holds bills ${formatCurrency(surplusCap.billsTotal)} + ${formatCurrency(buf)} cushion through ${surplusCap.nextPayDate || 'next pay'} — snowball capped`
-      : `Bills ${formatCurrency(surplusCap.billsTotal)} + ${formatCurrency(buf)} cushion by ${surplusCap.nextPayDate || 'next pay'}; surplus fits`)
-    : (surplusCap.nextPayDate
-      ? `Next pay ${surplusCap.nextPayDate} · ${formatCurrency(buf)} cushion · no bills held`
-      : `No next pay on calendar · ${formatCurrency(buf)} cushion · 14-day bill window`);
-  const surplusIncomeNote = `${surplusSourceLine}. ${payBridgeLine}. Tap for details.`;
+  // Month-end forecast breakdown (primary snowball number)
+  const fc = surplusCap.forecast || store.getMonthEndSnowballForecast(month);
+  const bankToday = surplusCap.bankToday != null
+    ? surplusCap.bankToday
+    : store.getBankSurplusForSnowball(month);
+  const surplusSourceLine = surplus > 0.005
+    ? 'Month-end forecast: after remaining income, unpaid bills, debt mins, and envelope plan'
+    : 'Month-end forecast is $0 — income left, bills, envelopes, or cushion use up the cash path';
+  const forecastLine = [
+    `Now ${formatCurrency(fc.checking || 0)}`,
+    (fc.incomeLeft || 0) > 0.005 ? `+ income left ${formatCurrency(fc.incomeLeft)}` : null,
+    (fc.billsLeft || 0) > 0.005 ? `− bills due ${formatCurrency(fc.billsLeft)}` : '− bills $0',
+    (fc.debtMinsLeft || 0) > 0.005 ? `− debt mins ${formatCurrency(fc.debtMinsLeft)}` : null,
+    (fc.envelopeLeft || 0) > 0.005 ? `− envelope plan ${formatCurrency(fc.envelopeLeft)}` : null,
+    (fc.buffer || 0) > 0.005 ? `− cushion ${formatCurrency(fc.buffer)}` : null,
+  ].filter(Boolean).join(' ');
+  const todayLine = bankToday > 0.005
+    ? `Today (if you snowball now): ~${formatCurrency(bankToday)} after bills before next pay + cushion.`
+    : 'Today: nothing free after bills before next pay + cushion — wait for income or pay down holds.';
+  const toAllocNote = (fc.toAllocate || 0) < -0.005
+    ? ` To Allocate ${formatCurrency(fc.toAllocate)} means the plan is over income — forecast still runs; fix budgets if the plan is wrong.`
+    : '';
+  const surplusIncomeNote = `${surplusSourceLine}. ${forecastLine}. ${todayLine}${toAllocNote} Tap to send (runway checks today).`;
   const runway = store.getCashRunway();
   const billWarnings = store.getBillScheduleWarnings();
   const babyStep = store.detectBabyStep();
@@ -155,12 +160,14 @@ export function renderDashboard(container) {
   container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
     statCard('Checking', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking'), false, 'Tap to update'),
     statCard(
-      'Safe snowball',
+      'Month-end snowball',
       formatCurrency(surplus),
       surplus > 0 ? 'positive' : '',
       () => allocateSurplus(),
       true,
-      surplus > 0 ? 'Tap to send to debt · runway below' : 'Nothing safe after bills + cushion',
+      surplus > 0
+        ? 'Forecast · last-week attack · tap to send'
+        : 'Forecast $0 after income, bills & plan',
     ),
     statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
     statCard(
@@ -169,7 +176,11 @@ export function renderDashboard(container) {
       Math.abs(toAllocate) < 0.01 ? 'positive' : toAllocate > 0 ? 'accent' : 'negative',
       () => window.appNavigate('budget'),
       false,
-      Math.abs(toAllocate) < 0.01 ? 'Every dollar has a job' : 'Tap Budget to assign',
+      Math.abs(toAllocate) < 0.01
+        ? 'Every dollar has a job'
+        : toAllocate < 0
+          ? 'Over-budgeted — lower some envelopes'
+          : 'Tap Budget to assign',
     ),
   ));
 
@@ -253,10 +264,13 @@ export function renderDashboard(container) {
     ));
   }
 
-  container.appendChild(el('details', { className: 'section dash-details' },
+  const moreDetails = el('details', { className: 'section dash-details' },
     el('summary', { className: 'dash-details-summary' }, 'More: paychecks, recon, income, backup'),
     detailsBody,
-  ));
+  );
+  moreDetails.open = !!dashMoreOpen;
+  moreDetails.addEventListener('toggle', () => { dashMoreOpen = moreDetails.open; });
+  container.appendChild(moreDetails);
 
   if (topEnvelopes.length) {
     container.appendChild(el('div', { className: 'section' },
@@ -803,30 +817,35 @@ const reconModal = showModal({
 
 /** Shared with Advisor — open the snowball surplus allocation modal. */
 export function allocateSurplus() {
-  const surplus = store.getSurplusForSnowball();
+  const forecast = store.getMonthEndSnowballForecast();
+  const surplus = forecast.safe; // month-end target
+  const todayMax = store.getBankSurplusForSnowball(); // can send now
   const cap = store.getSurplusCapInfo();
   const target = store.getSnowballTarget();
   if (!target) {
     showToast('No active debts in your snowball!', 'info');
     return;
   }
-  if (surplus <= 0) {
-    if (cap.raw > 0.02) {
-      showToast(
-        `Budget leftover ${formatCurrency(cap.raw)}, but safe snowball is $0 after bills`
-        + (cap.billsTotal ? ` (${formatCurrency(cap.billsTotal)})` : '')
-        + (cap.buffer ? ` + ${formatCurrency(cap.buffer)} cushion` : '')
-        + ` through ${cap.nextPayDate || 'next pay'}`,
-        'info',
-        6000,
-      );
-    } else {
-      showToast('No surplus available to allocate', 'info');
-    }
+  if (surplus <= 0 && todayMax <= 0) {
+    showToast(
+      'Month-end snowball forecast is $0 with current income left, bills, and envelope plan. Update Income calendar or lower envelope budgets if that looks wrong.',
+      'info',
+      7000,
+    );
     return;
   }
 
-  const input = el('input', { type: 'number', step: '0.01', value: surplus, min: 0 });
+  // Prefill: what you can send today, or the forecast if today is already free enough
+  const prefill = Math.min(
+    surplus > 0 ? surplus : todayMax,
+    todayMax > 0 ? todayMax : surplus,
+  );
+  const input = el('input', {
+    type: 'number',
+    step: '0.01',
+    value: String(Math.round((prefill || 0) * 100) / 100),
+    min: 0,
+  });
   const preview = el('div', { className: 'snowball-runway-preview tx-form-hint' });
 
   function paintPreview() {
@@ -834,14 +853,18 @@ export function allocateSurplus() {
     const r = store.getCashRunway(amt);
     preview.innerHTML = '';
     preview.appendChild(el('div', {},
-      `If you send ${formatCurrency(amt)} → checking ${formatCurrency(r.afterSnowball)}`
+      `If you send ${formatCurrency(amt)} *today* → checking ${formatCurrency(r.afterSnowball)}`
       + ` → after bills ${formatCurrency(r.afterBills)}`
-      + (r.buffer > 0 ? ` (includes ${formatCurrency(r.buffer)} cushion target)` : '')
+      + (r.buffer > 0 ? ` (cushion target ${formatCurrency(r.buffer)})` : '')
       + (r.nextPayDate && r.nextPayAmount
         ? ` → after ${formatDate(r.nextPayDate)} pay ~${formatCurrency(r.afterNextPay)}`
         : ''),
     ));
-    if (r.negative) {
+    if (amt > todayMax + 0.02) {
+      preview.appendChild(el('div', { style: 'color:var(--negative);margin-top:0.35rem' },
+        `Only ${formatCurrency(todayMax)} is free in checking today (month-end forecast is ${formatCurrency(surplus)}). Wait for paychecks or send less now.`,
+      ));
+    } else if (r.negative) {
       preview.appendChild(el('div', { style: 'color:var(--negative);margin-top:0.35rem' },
         'That amount would leave checking short of bills before next pay.',
       ));
@@ -859,16 +882,18 @@ export function allocateSurplus() {
     body: el('div', {},
       el('p', { style: 'margin-bottom:1rem' }, `Send extra money to ${target.name}`),
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        'Reduces checking and the debt balance. Linked debt envelopes get budget so To Allocate drops.',
+        'Month-end forecast assumes remaining income lands and you still cover unpaid bills + the envelope plan. '
+        + 'Sending money *today* is limited by cash free after bills before next pay.',
       ),
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        `Safe max: ${formatCurrency(surplus)}`
-        + (cap.capped ? ` (budget leftover was ${formatCurrency(cap.raw)})` : '')
-        + ` · Bills held: ${formatCurrency(cap.billsTotal)}`
-        + ` · Cushion: ${formatCurrency(cap.buffer || 0)}`
-        + (cap.nextPayDate ? ` · Next pay ${formatDate(cap.nextPayDate)}` : ''),
+        `Month-end forecast: ${formatCurrency(surplus)}`
+        + ` · Safe to send today: ${formatCurrency(todayMax)}`
+        + ` · Income left: ${formatCurrency(forecast.incomeLeft || 0)}`
+        + ` · Bills still due: ${formatCurrency(forecast.billsLeft || 0)}`
+        + ` · Envelope plan left: ${formatCurrency(forecast.envelopeLeft || 0)}`
+        + ` · Cushion: ${formatCurrency(forecast.buffer || 0)}`,
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), input),
+      el('div', { className: 'form-group' }, el('label', {}, 'Amount to send now'), input),
       preview,
     ),
     footer: el('button', {
@@ -880,8 +905,12 @@ export function allocateSurplus() {
           showToast('Enter an amount', 'info');
           return;
         }
-        if (amt > surplus + 0.02) {
-          showToast(`Only ${formatCurrency(surplus)} is safe to snowball right now`, 'info');
+        if (amt > todayMax + 0.02) {
+          showToast(
+            `Only ${formatCurrency(todayMax)} is free today. Month-end forecast is ${formatCurrency(surplus)} — wait for income or pay less now.`,
+            'info',
+            6000,
+          );
           return;
         }
         const r = store.getCashRunway(amt);

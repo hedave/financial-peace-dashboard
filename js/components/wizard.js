@@ -57,7 +57,7 @@ export function renderWizard(onComplete) {
 }
 
 function welcomeStep(card, data, nav) {
-  card.appendChild(el('h2', {}, 'Welcome to Financial Peace'));
+  card.appendChild(el('h2', {}, 'Welcome to FigPig Financial'));
   card.appendChild(el('p', { className: 'subtitle' }, 'Let\'s set up your Total Money Makeover in just a few minutes. We\'ll walk through your income, balances, debts, and budget envelopes.'));
   card.appendChild(el('div', { className: 'banner banner-motivation', style: 'margin-bottom:1.5rem' },
     el('div', { className: 'banner-text' },
@@ -239,7 +239,7 @@ function budgetStep(card, data, nav) {
 
 function doneStep(card, data, nav) {
   card.appendChild(el('h2', {}, 'You\'re All Set! 🎉'));
-  card.appendChild(el('p', { className: 'subtitle' }, 'Your Financial Peace Dashboard is ready. Remember: give every dollar a job, attack the smallest debt first, and celebrate every win along the way.'));
+  card.appendChild(el('p', { className: 'subtitle' }, 'FigPig Financial is ready. Remember: give every dollar a job, attack the smallest debt first, and celebrate every win along the way.'));
 
   const totalIncome = data.incomeSources.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const totalDebt = data.debts.reduce((s, d) => s + (Number(d.balance) || 0), 0);
