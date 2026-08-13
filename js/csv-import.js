@@ -582,10 +582,12 @@ function getField(map, ...aliases) {
 const BANK_TO_ENVELOPE = [
   [/^(income|deposit|payroll|salary|wages|credit|refund|interest)/, null],
   [/^(transfer|credit card payment)/, null],
+  // Loan / auto-pay labels are not gas — leave uncategorized for rules / Review
+  [/auto payment|automatic payment|auto loan|car payment|loan payment/, null],
   [/mortgage|home loan|housing|rent|hoa/, 'Mortgage'],
   [/groc/, 'Groceries'],
   [/restaurant|dining|food and drink|food & drink|fast food|coffee|cafe/, 'Eating Out / Fast Food'],
-  [/gas|fuel|automotive|auto|transportation|parking|toll/, 'Gas & Transportation'],
+  [/gas|fuel|transportation|parking|toll/, 'Gas & Transportation'],
   [/utilit|electric|water bill|sewer|trash|internet|cable|phone/, 'Utilities'],
   [/insurance/, 'Insurance'],
   [/health|medical|pharmacy|dental|doctor|hospital/, 'Medical / Health'],
@@ -708,7 +710,8 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
 
   const status = getField(map, 'status').toLowerCase();
   if (status === 'cancelled' || status === 'canceled') return null;
-  if (!includePending && (status === 'pending' || status.startsWith('pending '))) return null;
+  const pending = status === 'pending' || status.startsWith('pending ');
+  if (!includePending && pending) return null;
 
   // Statement exports with separate debit & credit columns
   const debitRaw = getField(map, 'debits', 'debit', 'withdrawal', 'withdrawals', 'money out');
@@ -716,7 +719,7 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
   const debit = Math.abs(parseMoneyValue(debitRaw));
   const credit = Math.abs(parseMoneyValue(creditRaw));
 
-  const base = { description, bankCategory };
+  const base = { description, bankCategory, pending };
 
   if (debit > 0 || credit > 0) {
     if (credit > 0 && debit === 0) {

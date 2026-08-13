@@ -1039,6 +1039,9 @@ export function pickDefaultChip(snap) {
   const incomplete = snap.monthClose?.incomplete?.length || 0;
   if (day >= 25 && incomplete > 0) return 'month_close';
 
+  // Early month: plan first. Don't open on "after snowball" from unreceived pay.
+  if (day <= 7) return 'situation';
+
   if ((snap.cashflow?.surplus || 0) > 0 && (snap.debts?.length || 0) > 0) {
     // Prefer cash runway over abstract split when money is on the line
     return 'after_snowball';

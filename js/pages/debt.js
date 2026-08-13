@@ -2,6 +2,7 @@ import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.j
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
+import { allocateSurplus } from './dashboard.js';
 
 export function renderDebt(container) {
   const snowball = store.getSnowballDebts();
@@ -451,7 +452,7 @@ function makePayment(debt) {
     step: '0.01',
     min: 0,
     max,
-    value: Math.min(max, store.getSnowballPayment(debt)),
+    value: Math.min(max, Number(debt.minPayment) || 0),
   });
   // Default on: CSV already hit checking (same as bill mark-paid)
   const alreadyInBank = el('input', { type: 'checkbox', checked: true });
@@ -500,9 +501,8 @@ function makePayment(debt) {
             categoryId: d.categoryId || null,
             debtId: d.id,
             description: `Payment to ${d.name}`,
-            // Already in bank → don't apply checking again via delta logic later
-            clearingStatus: skipChecking ? 'cleared' : 'cleared',
-            // Flag for honesty; checking already adjusted (or not) above
+            // Already in bank → pending so delete/undo cannot inflate checking
+            clearingStatus: skipChecking ? 'pending' : 'cleared',
             alreadyInBank: skipChecking,
           });
           // When already in bank, CSV already reduced checking — we only reduce debt balance.
@@ -547,24 +547,7 @@ function makePayment(debt) {
 }
 
 function allocateAllSurplus() {
-  const surplus = store.getSurplusForSnowball();
-  if (surplus <= 0) { showToast('No surplus to allocate', 'info'); return; }
-  const targetDebt = store.getSnowballTarget();
-  if (!targetDebt) {
-    showToast('No active debt target', 'info');
-    return;
-  }
-  confirmDialog(
-    'Allocate all surplus?',
-    `Send ${formatCurrency(surplus)} extra to ${targetDebt.name}? This reduces checking and the debt balance. Use dashboard “Snowball $” if you want a custom amount.`,
-    () => {
-      const target = store.allocateSurplusToDebt(surplus);
-      if (target) {
-        showToast(`Allocated ${formatCurrency(target.pay || surplus)} to ${target.name}!`, 'celebration');
-      }
-      window.appRefresh();
-    },
-  );
+  allocateSurplus();
 }
 
 function openDebtForm(debt = null) {

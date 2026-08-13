@@ -268,16 +268,29 @@ window.appRefresh = (opts = {}) => {
   renderPage({ reason: opts.force ? 'force' : 'refresh' });
 };
 
-/** Keep CSS dvh-ish layout stable when mobile browser chrome resizes. */
+/** Keep sheets inside the visible viewport (keyboard + mobile browser chrome). */
 function bindVisualViewport() {
-  const vv = window.visualViewport;
-  if (!vv) return;
   const apply = () => {
-    document.documentElement.style.setProperty('--vvh', `${vv.height}px`);
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    const w = vv ? vv.width : window.innerWidth;
+    const top = vv ? vv.offsetTop : 0;
+    const left = vv ? vv.offsetLeft : 0;
+    const root = document.documentElement;
+    root.style.setProperty('--vvh', `${Math.round(h)}px`);
+    root.style.setProperty('--vvw', `${Math.round(w)}px`);
+    root.style.setProperty('--vv-top', `${Math.round(top)}px`);
+    root.style.setProperty('--vv-left', `${Math.round(left)}px`);
+    const keyboard = vv && vv.height < window.innerHeight * 0.78;
+    document.body.classList.toggle('vv-keyboard', !!keyboard);
   };
   apply();
-  vv.addEventListener('resize', apply);
-  vv.addEventListener('scroll', apply);
+  window.addEventListener('resize', apply);
+  const vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+  }
 }
 
 bindVisualViewport();
@@ -299,7 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260806a';
+const APP_BUILD = '20260812e';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

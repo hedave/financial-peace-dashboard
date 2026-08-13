@@ -179,9 +179,11 @@ When the calendar rolls to a new month, the **first time you open the app** that
 For the **previous** month:
 
 ```
-remaining = monthlyBudget + carryOver − spent(previous month)
-newCarryOver = oldCarryOver + remaining
+remaining = monthlyBudget + openingCarry + that month’s envelope moves − spent
+newCarryOver = remaining
 ```
+
+(Opening carry is included. Do **not** add old carry on top of remaining — remaining already contains it.)
 
 Then the app marks the current calendar month as processed.
 
@@ -389,17 +391,22 @@ One purchase can split across envelopes (e.g. Walmart = Groceries + Household). 
 
 ---
 
-## 10. Bank import (CSV & PDF)
+## 10. Bank import (CSV, paste & PDF)
+
+### USAA mobile paste (recommended)
+
+Transactions → Import → paste the USAA mobile activity list (select-all copy). Handles jammed one-line pastes. Bank **Pending purchases** hit checking immediately (they already left the bank). **Pending refunds / bonus** stay off checking and out of the bonus pot until they post.
 
 ### CSV
 
 Transactions page → import bank CSV (USAA / common layouts supported). The app:
 
 - Parses dates, amounts, descriptions.
-- Skips true duplicates already in the log.
+- Skips true duplicates already in the log (including still-pending first imports).
 - Matches **pending** manual logs when possible.
-- Applies **category rules** and bank-category heuristics.
+- Applies **category rules** and bank-category heuristics (loan / “Auto Payment” is **not** mapped to Gas).
 - Flags bill matches and soft duplicate groups for review.
+- Home Review duplicates include **this month and last month**.
 
 ### PDF
 
@@ -464,8 +471,9 @@ Soft only — never hard-blocks:
 
 - Debts sorted **smallest balance first** (classic snowball).
 - **Minimums** should be covered in the budget (optionally linked to an envelope).
-- **Surplus for snowball** comes from leftover To Allocate and/or cash-flow logic on the Dashboard.
-- **Allocate surplus** pays the current target, reduces checking, logs a debt payment, and can celebrate payoffs.
+- **Month-end snowball** is a forecast: checking + income still expected − unpaid bills (not already in envelopes) − envelope remaining − cushion.
+- **Safe to send today** is checking after bills before next pay + cushion. Home Snowball $ uses that cap. Do not send the full forecast mid-month.
+- **Allocate surplus** (Home / Debt) opens the same confirm modal, reduces checking, logs a debt payment, and can celebrate payoffs.
 
 When a debt hits $0 it archives; the next smallest becomes the target.
 
@@ -496,10 +504,10 @@ If no paychecks are logged yet, some surplus views fall back to planned income �
 
 When **bonus** (or return-like) income is logged, the app can try to match a prior expense of the same amount:
 
-- On a confident match, it **returns dollars to the envelope** by increasing **carry-over** (so Remaining goes back up without deleting the original purchase).
-- If several candidates exist, you may be asked to pick.
-
-This keeps envelope history honest: you still spent at Amazon; the return restores availability.
+- Refunds and extra deposits stay in a **bonus pot** (Budget → **Bonus available**). They are **not** sent back to the original purchase envelope.
+- **Assign bonus** on any envelope draws any amount from that pot. Remaining goes up; the pot and To Allocate go down. The bonus transaction itself stays in the log as bonus.
+- Envelope activity shows **Bonus allocated** rows. Undo returns the dollars to the pot.
+- **+ New refund** is only if the money is not in the log yet.
 
 ---
 
@@ -526,7 +534,7 @@ Use boards for: month checklist, agreement notes, shopping lists, snowball motiv
 
 ### JSON backup (belt and suspenders)
 
-Settings → **Export Backup** downloads a full state file. Import restores it.
+Settings → **Export Backup** downloads a full state file. Import restores it and pushes the restored file to the cloud so a reload does not bring back the old remote copy.
 
 Do this:
 

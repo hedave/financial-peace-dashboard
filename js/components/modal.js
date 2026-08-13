@@ -38,10 +38,17 @@ export function isModalOpen() {
   return getOpenModalCount() > 0;
 }
 
+function isPhoneUi() {
+  return window.matchMedia('(max-width: 768px)').matches
+    || window.matchMedia('(pointer: coarse)').matches;
+}
+
 function lockBodyScroll() {
   if (document.body.classList.contains('modal-open')) return;
-  document.body.dataset.scrollY = String(window.scrollY || 0);
+  const y = window.scrollY || 0;
+  document.body.dataset.scrollY = String(y);
   document.body.classList.add('modal-open');
+  document.body.style.top = `-${y}px`;
 }
 
 function unlockBodyScroll() {
@@ -49,6 +56,7 @@ function unlockBodyScroll() {
   document.body.classList.remove('modal-open');
   const y = Number(document.body.dataset.scrollY || 0);
   delete document.body.dataset.scrollY;
+  document.body.style.top = '';
   if (y) window.scrollTo(0, y);
 }
 
@@ -95,11 +103,22 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
   backdrop.style.zIndex = String(z);
 
   let closed = false;
+  const onViewportChange = () => {
+    const active = document.activeElement;
+    if (modal.contains(active) && active.matches?.('input, select, textarea')) {
+      try {
+        active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+      } catch {
+        active.scrollIntoView(true);
+      }
+    }
+  };
   const close = () => {
     if (closed) return;
     closed = true;
     // Block ghost click-through to the sheet underneath (common on mobile)
     backdrop.style.pointerEvents = 'none';
+    window.visualViewport?.removeEventListener('resize', onViewportChange);
     backdrop.remove();
     onClose?.();
     afterModalStackChange();
@@ -147,13 +166,30 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
     modal.appendChild(footerEl);
   }
 
+  modal.classList.add('modal-scrollable');
+
   backdrop.appendChild(modal);
   document.body.appendChild(backdrop);
   syncModalCountFromDom();
   lockBodyScroll();
 
-  // Focus first useful control without scrolling the page behind
+  const keepFieldVisible = (target) => {
+    if (!target || !bodyEl.contains(target)) return;
+    if (!target.matches('input, select, textarea')) return;
+    requestAnimationFrame(() => {
+      try {
+        target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+      } catch {
+        target.scrollIntoView(true);
+      }
+    });
+  };
+  bodyEl.addEventListener('focusin', e => keepFieldVisible(e.target));
+  window.visualViewport?.addEventListener('resize', onViewportChange);
+
+  // Phone: don't pop the keyboard immediately — it shoves the sheet off-screen
   requestAnimationFrame(() => {
+    if (isPhoneUi()) return;
     const focusable = modal.querySelector('input, select, textarea, button:not(.close-btn)');
     if (focusable && typeof focusable.focus === 'function') {
       try { focusable.focus({ preventScroll: true }); } catch { focusable.focus(); }

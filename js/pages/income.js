@@ -117,18 +117,31 @@ function bonusIncomeCard(month, bonusLogged, state) {
       el('div', {},
         el('div', { className: 'card-title' }, BONUS_INCOME_NAME),
         el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:0.25rem 0 0' },
-          'Extra income from other sources — not part of your planned paychecks. Counts toward To Allocate so you can assign it freely.'
+          'Refunds and extra deposits sit in the bonus pot. Budget → Assign bonus sends any amount to any envelope. They are not sent back to the original purchase.'
         ),
       ),
       el('div', { className: 'card-value accent' }, formatCurrency(bonusLogged)),
     ),
     bonusTx.length
       ? el('div', { className: 'bonus-income-list' },
-        ...bonusTx.map(t => el('div', { className: 'bonus-income-item' },
-          el('span', {}, formatDate(t.date)),
-          el('span', { className: 'bonus-income-desc' }, t.description || '—'),
-          el('span', { style: 'font-weight:600;color:var(--positive)' }, `+${formatCurrency(t.amount)}`),
-        )),
+        ...bonusTx.map(t => {
+          const cat = t.categoryId
+            ? state.categories.find(c => c.id === t.categoryId)
+            : null;
+          const assigned = !!(t.earmarkedEnvelope || t.refundOfTxId || cat);
+          return el('div', { className: 'bonus-income-item' },
+            el('span', {}, formatDate(t.date)),
+            el('span', { className: 'bonus-income-desc' },
+              t.description || '—',
+              assigned
+                ? el('span', {
+                  style: 'display:block;font-size:0.75rem;color:var(--text-muted)',
+                }, cat ? `→ ${cat.name}` : 'Assigned to envelope')
+                : null,
+            ),
+            el('span', { style: 'font-weight:600;color:var(--positive)' }, `+${formatCurrency(t.amount)}`),
+          );
+        }),
       )
       : el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:0.5rem 0 0' },
         'No bonus income logged this month. Unmatched CSV deposits or manual income entries appear here.'

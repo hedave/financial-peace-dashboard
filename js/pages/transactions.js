@@ -4,7 +4,7 @@ import { showModal, showToast, showUndoToast, confirmDialog } from '../component
 import { createSplitEditor } from '../components/split-editor.js';
 import { createEnvelopePicker } from '../components/envelope-picker.js';
 import { openReviewInbox, openBillMatches, openDuplicateReview, openPendingReview } from '../components/review-inbox.js';
-import { handleBonusReturnMatch, handleBonusReturnsForIds } from '../return-match-ui.js';
+
 import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
 import { parseBankPdfFile, rowsToImportObjects } from '../pdf-import.js';
 import { guessMerchantPattern } from '../category-rules.js';
@@ -51,6 +51,8 @@ function categorySortName(t, state) {
 }
 
 function transactionNeedsCategory(t) {
+  // Income can be assigned to an envelope (refunds) but is not "uncategorized spend"
+  if (t.type === 'income') return false;
   if (!categoryUsesEnvelope(t.type)) return false;
   if (store.isSplitTransaction(t)) {
     return t.splits.some(s => !s.categoryId);
@@ -93,7 +95,7 @@ function sortTransactions(txs, state, sortKey, sortDir) {
 }
 
 function categoryUsesEnvelope(type) {
-  return type === 'expense' || type === 'debt_payment' || type === 'transfer';
+  return type === 'expense' || type === 'debt_payment' || type === 'transfer' || type === 'income';
 }
 
 function amountSearchStrings(amount) {
@@ -149,6 +151,7 @@ export function renderTransactions(container, arg) {
   let categoryFilter = initialCategory;
   let sortKey = 'date';
   let sortDir = 'desc';
+  let listLimit = 200;
 
   const filterCat = state.categories.find(c => c.id === categoryFilter);
   const filterBanner = filterCat
@@ -336,10 +339,20 @@ export function renderTransactions(container, arg) {
       return;
     }
 
-    const visible = txs.slice(0, 200);
-    const moreNote = txs.length > 200
-      ? el('p', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
-        `Showing 200 of ${txs.length} transactions`)
+    const visible = txs.slice(0, listLimit);
+    const moreNote = txs.length > listLimit
+      ? el('div', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
+        el('p', { style: 'margin:0 0 0.5rem' },
+          `Showing ${visible.length} of ${txs.length} transactions`),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => {
+            listLimit += 200;
+            renderList();
+          },
+        }, `Load 200 more`),
+      )
       : null;
 
     // Desktop: multi-column table
@@ -407,6 +420,11 @@ function categoryLabel(t, state) {
   }
   const cat = state.categories.find(c => c.id === t.categoryId);
   if (cat) return `${cat.icon || ''} ${cat.name}`.trim();
+  if (t.type === 'income') {
+    return t.earmarkedEnvelope || t.refundOfTxId
+      ? el('span', { className: 'tx-category-missing' }, 'Assigned')
+      : '—';
+  }
   if (!categoryUsesEnvelope(t.type)) return '—';
   if (t.importCategory) {
     return el('span', { className: 'tx-category-unmapped', title: 'Imported bank category — click Edit to assign an envelope' },
@@ -422,9 +440,13 @@ function incomeSourceLabel(t, state) {
   const source = state.incomeSources.find(s => s.id === t.incomeSourceId);
   if (!source) return null;
   if (isBonusIncomeSource(source)) {
-    return el('span', { className: 'tx-bonus-badge', title: 'Freely allocatable — counts toward To Allocate' },
-      BONUS_INCOME_NAME
-    );
+    const assigned = t.earmarkedEnvelope || t.refundOfTxId || t.categoryId;
+    return el('span', {
+      className: 'tx-bonus-badge',
+      title: assigned
+        ? 'Assigned to an envelope — remaining went up; not counted again in To Allocate'
+        : 'Freely allocatable — counts toward To Allocate until you assign an envelope',
+    }, assigned ? `${BONUS_INCOME_NAME} · envelope` : BONUS_INCOME_NAME);
   }
   return el('span', { className: 'tx-income-source', style: 'font-size:0.75rem;color:var(--text-muted)' },
     source.name
@@ -509,11 +531,21 @@ function txMoreMenu(t) {
 }
 
 function pendingBadge(t) {
-  if (!store.isPending(t)) return null;
-  return el('span', {
-    className: 'tx-pending-badge',
-    title: 'Logged manually — checking balance updates when this matches a CSV import',
-  }, 'Pending');
+  if (store.isPending(t)) {
+    return el('span', {
+      className: 'tx-pending-badge',
+      title: t.type === 'income'
+        ? 'Not in checking yet — refunds/bonus often post later than the bank shows Pending'
+        : 'Logged manually — checking updates when this matches a bank import',
+    }, 'Pending');
+  }
+  if (t.bankPending) {
+    return el('span', {
+      className: 'tx-pending-badge',
+      title: 'Still pending at the bank — already counted in checking',
+    }, 'Bank pending');
+  }
+  return null;
 }
 
 function txRow(t, state, duplicateMeta = new Map()) {
@@ -521,11 +553,11 @@ function txRow(t, state, duplicateMeta = new Map()) {
   const sourceTag = incomeSourceLabel(t, state);
   const dupCount = duplicateMeta.get(t.id);
   const isDuplicate = dupCount >= 2;
-  const isPending = store.isPending(t);
+  const isPending = store.isPending(t) || !!t.bankPending;
   return el('tr', { className: `${isDuplicate ? 'tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`.trim() },
     el('td', {},
       formatDate(t.date),
-      isPending ? el('div', {}, pendingBadge(t)) : null,
+      pendingBadge(t) ? el('div', {}, pendingBadge(t)) : null,
       isDuplicate ? el('div', {},
         el('span', {
           className: 'tx-duplicate-badge',
@@ -555,7 +587,7 @@ function txCard(t, state, duplicateMeta = new Map()) {
   const sourceTag = incomeSourceLabel(t, state);
   const dupCount = duplicateMeta.get(t.id);
   const isDuplicate = dupCount >= 2;
-  const isPending = store.isPending(t);
+  const isPending = store.isPending(t) || !!t.bankPending;
 
   return el('article', {
     className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`,
@@ -659,6 +691,10 @@ export function openTransactionForm({
     showRemaining: true,
     allowEmpty: true,
   });
+  const incomeEnvelopeHint = el('p', {
+    className: 'tx-form-hint',
+    style: 'margin-top:0.35rem;margin-bottom:0',
+  }, 'Pick the envelope this refund or extra cash belongs to. Remaining goes up; it will not count again in To Allocate.');
   const catRemainingHint = el('p', {
     className: 'tx-form-hint',
     style: 'margin-top:0.35rem;margin-bottom:0',
@@ -697,6 +733,7 @@ export function openTransactionForm({
   const catGroup = el('div', { className: 'form-group' },
     el('label', { for: 'tx-envelope' }, 'Envelope / Category'),
     envelopePicker.element,
+    incomeEnvelopeHint,
     catRemainingHint,
   );
   // Compat shim for existing code that treats catSelect like a <select>
@@ -779,11 +816,14 @@ export function openTransactionForm({
     const useSplit = canSplit && splitToggle.checked;
     splitOption.style.display = canSplit ? '' : 'none';
     catGroup.style.display = categoryUsesEnvelope(currentType) && !useSplit ? '' : 'none';
-    catGroup.querySelector('label').textContent = 'Envelope / Category';
+    catGroup.querySelector('label').textContent = currentType === 'income'
+      ? 'Assign to envelope (refund / extra)'
+      : 'Envelope / Category';
     splitSection.style.display = useSplit ? '' : 'none';
     const showDebt = currentType === 'debt_payment' && !isEdit;
     debtGroup.style.display = showDebt ? '' : 'none';
     incomeSourceGroup.style.display = currentType === 'income' && incomeSources.length ? '' : 'none';
+    incomeEnvelopeHint.style.display = currentType === 'income' ? '' : 'none';
     if (useSplit) {
       splitEditor.setTotalAmount(Number(amountIn.value) || 0);
     }
@@ -953,9 +993,6 @@ export function openTransactionForm({
                 store.update(s => { s.settings.lastExpenseCategoryId = categoryId; });
               }
               showToast(useSplit ? 'Split transaction saved!' : 'Transaction updated!');
-              if (txType === 'income') {
-                setTimeout(() => handleBonusReturnMatch(transaction.id), 50);
-              }
             } else {
               const newId = store.addTransaction({
                 date: dateIn.value,
@@ -968,15 +1005,13 @@ export function openTransactionForm({
                 splits,
                 clearingStatus,
                 incomeSourceId,
+                earmarkToEnvelope: txType === 'income' && !!categoryId,
               });
               if (txType === 'expense' && categoryId) {
                 store.update(s => { s.settings.lastExpenseCategoryId = categoryId; });
               }
               const pendingNote = clearingStatus === 'pending' ? ' (pending bank)' : '';
               showToast(useSplit ? `Split transaction logged!${pendingNote}` : `Transaction logged!${pendingNote}`);
-              if (txType === 'income' && newId) {
-                setTimeout(() => handleBonusReturnMatch(newId), 50);
-              }
             }
 
             if (rememberRule.checked && txType === 'expense') {
@@ -1118,9 +1153,6 @@ function finishImport(stats, modal) {
   modal.close();
   if (stats.count > 0 || stats.matchedPending > 0) {
     window.appRefresh();
-    if (stats.incomeIdsForReturnMatch?.length) {
-      setTimeout(() => handleBonusReturnsForIds(stats.incomeIdsForReturnMatch), 200);
-    }
     openImportSummary(stats);
   } else {
     showToast(formatImportToast(stats), 'info', 6000);

@@ -9,13 +9,13 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "icons/icon-192.png?v=20260806a",
+      "src": "icons/icon-192.png?v=20260812e",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icons/icon-512.png?v=20260806a",
+      "src": "icons/icon-512.png?v=20260812e",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

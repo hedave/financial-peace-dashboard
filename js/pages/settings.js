@@ -282,10 +282,15 @@ export async function renderSettings(container) {
                 confirmDialog(
                   'Replace all local data?',
                   `This fully replaces your current budget with the backup (${txCount} transactions, ${billCount} bills, ${debtCount} debts). Current data on this device will be overwritten.`,
-                  () => {
+                  async () => {
                     try {
                       store.replaceStateFromBackup(data);
                       applyTheme(store.getState().settings);
+                      try {
+                        await store.pushToCloud({ force: true });
+                      } catch {
+                        // Local restore still saved; cloud push can retry after reload
+                      }
                       showToast('Backup restored — reloading…');
                       window.location.reload();
                     } catch {
@@ -505,7 +510,7 @@ export async function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Household of ' + (state.settings.familySize || 7)
-      + ' · Build 20260806a'
+      + ' · Build 20260812e'
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));

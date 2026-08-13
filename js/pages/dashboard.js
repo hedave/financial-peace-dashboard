@@ -166,7 +166,7 @@ export function renderDashboard(container) {
       () => allocateSurplus(),
       true,
       surplus > 0
-        ? 'Forecast · last-week attack · tap to send'
+        ? 'If the rest of the month goes to plan · tap to send'
         : 'Forecast $0 after income, bills & plan',
     ),
     statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
@@ -183,6 +183,14 @@ export function renderDashboard(container) {
           : 'Tap Budget to assign',
     ),
   ));
+
+  container.appendChild(el('p', {
+    className: 'tx-form-hint section dash-forecast-line',
+    style: 'margin-top:0',
+  }, forecastLine + '.' + (bankToday > 0.005
+    ? ` Safe to send today: ${formatCurrency(bankToday)}.`
+    : ' Nothing free to send today after bills before next pay + cushion.')
+    + toAllocNote));
 
   container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
 
@@ -489,7 +497,7 @@ function cashRunwayCard(runway, target, onSnowball) {
     foot.push(`${formatCurrency(runway.buffer)} cushion kept after bills (Settings)`);
   }
   if (runway.surplus > 0) {
-    foot.push(`Safe snowball ${formatCurrency(runway.surplus)}`);
+    foot.push(`Safe to send today ${formatCurrency(runway.surplus)}`);
   }
   if (runway.capped && runway.heldBack > 0.02) {
     foot.push(`${formatCurrency(runway.heldBack)} held back from budget leftover`);
@@ -498,9 +506,9 @@ function cashRunwayCard(runway, target, onSnowball) {
   return el('div', { className: 'section card cash-runway-card' },
     el('div', { className: 'cash-runway-header' },
       el('div', {},
-        el('div', { className: 'card-title' }, 'Cash runway (if you snowball)'),
+        el('div', { className: 'card-title' }, 'Cash runway (if you snowball today)'),
         el('p', { className: 'tx-form-hint', style: 'margin:0.25rem 0 0' },
-          'Same checking account the whole way — envelopes are labels, not separate piles of cash.',
+          'Uses cash free today, not the month-end forecast. Envelopes are labels, not separate piles.',
         ),
       ),
       runway.surplus > 0

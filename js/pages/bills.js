@@ -495,7 +495,7 @@ function markPaid(bill) {
         el('div', { className: 'form-option-text' },
           el('span', { className: 'form-option-label' }, 'Already left my bank (CSV / import)'),
           el('span', { className: 'form-option-hint' },
-            'On by default — does not reduce checking again. Turn off only for cash / not in your bank log yet.',
+            'On by default — links a matching imported charge if one exists, otherwise logs a pending payment without touching checking. Turn off only for cash / not in your bank log yet.',
           ),
         ),
         el('label', { className: 'toggle-switch' },
@@ -509,15 +509,17 @@ function markPaid(bill) {
       className: 'btn btn-primary',
       onClick: () => {
         const amt = Number(amountIn.value);
-        store.markBillPaid(bill.id, amt, dateIn.value, {
+        const result = store.markBillPaid(bill.id, amt, dateIn.value, {
           alreadyInBank: alreadyInBank.checked,
         });
         modal.close();
         const updated = store.getState().bills.find(b => b.id === bill.id);
         const recurring = bill.recurring !== false;
-        let msg = alreadyInBank.checked
-          ? `${bill.name} marked paid (checking unchanged)`
-          : `${bill.name} marked paid — checking updated`;
+        let msg = result?.linked
+          ? `${bill.name} linked to the imported bank charge (no second expense)`
+          : alreadyInBank.checked
+            ? `${bill.name} marked paid (checking unchanged)`
+            : `${bill.name} marked paid — checking updated`;
         if (recurring && updated?.dueDate) {
           msg += ` · next due ${formatDate(updated.dueDate)}`;
         }

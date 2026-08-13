@@ -73,6 +73,9 @@ export function renderBudget(container, arg) {
   const isCurrentMonth = month === liveMonth;
   const income = store.getTotalIncome(month);
   const bonusLogged = store.getBonusIncomeLogged(month);
+  const bonusGross = store.getBonusIncomeGross(month);
+  const bonusUsed = store.getBonusAllocated(month);
+  const bonusAvailable = store.getBonusAvailable(month);
   const budgeted = store.getTotalBudgeted(month);
   const unallocated = store.getUnallocatedFunds(month);
   const focusId = arg?.focusId || arg?.categoryId || null;
@@ -153,13 +156,13 @@ export function renderBudget(container, arg) {
   const allocatable = store.getAllocatableIncome(month);
   const checkingNow = Number(store.getState().balances?.checking) || 0;
 
-  container.appendChild(el('div', { className: 'grid grid-3 section' },
+  container.appendChild(el('div', { className: `grid ${isCurrentMonth ? 'grid-4' : 'grid-3'} section` },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, `Monthly Income — ${getMonthLabel(month)}`),
       el('div', { className: 'card-value accent' }, formatCurrency(allocatable)),
       el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4' },
-        bonusLogged > 0
-          ? `Pay calendar ${formatCurrency(income)} + bonus logged ${formatCurrency(bonusLogged)}`
+        bonusLogged > 0.005
+          ? `Pay calendar ${formatCurrency(income)} + bonus still free ${formatCurrency(bonusLogged)}`
           : 'From pay-calendar dates & amounts (not checking balance)',
       ),
     ),
@@ -190,7 +193,36 @@ export function renderBudget(container, arg) {
               : `Over by ${formatCurrency(Math.abs(unallocated))} for this month’s plan.`,
         ),
     ),
+    isCurrentMonth
+      ? el('div', { className: 'card' },
+        el('div', { className: 'card-title' }, 'Bonus available'),
+        el('div', {
+          className: `card-value ${bonusAvailable > 0.005 ? 'accent' : ''}`,
+        }, formatCurrency(bonusAvailable)),
+        el('p', {
+          style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4',
+        },
+          bonusGross > 0.005
+            ? `${formatCurrency(bonusGross)} bonus in · ${formatCurrency(bonusUsed)} sent to envelopes`
+            : 'Refunds and extra deposits land here — Assign bonus on any envelope',
+        ),
+      )
+      : null,
   ));
+
+  const carryTotal = isCurrentMonth
+    ? (store.getState().categories || [])
+      .filter(c => !c.parentId)
+      .reduce((s, c) => s + (Number(c.carryOver) || 0), 0)
+    : 0;
+  if (isCurrentMonth && Math.abs(carryTotal) > 0.005) {
+    const carryCount = (store.getState().categories || [])
+      .filter(c => !c.parentId && Math.abs(Number(c.carryOver) || 0) > 0.005).length;
+    container.appendChild(el('p', {
+      className: 'tx-form-hint section',
+      style: 'margin-top:0',
+    }, `Carry-over from last month: ${formatCurrency(carryTotal)} across ${carryCount} envelope${carryCount === 1 ? '' : 's'}. That leftover is already in Remaining — To Allocate is only new income minus this month’s plan. Use Move to shift leftover this month; Allocate changes the ongoing plan.`));
+  }
 
   const prevMonth = getPreviousMonth(liveMonth);
   const hasSnapshot = !!store.getState().monthBudgetSnapshots[prevMonth];
@@ -561,6 +593,12 @@ function envelopeCard(cat, focusId = null, opts = {}) {
           ? `+${formatCurrency(moveDelta)} moved in this month`
           : `${formatCurrency(moveDelta)} moved out this month`)
         : null,
+      store.getBonusAllocationDelta(cat.id, month) > 0.005
+        ? el('div', {
+          className: 'envelope-move-delta',
+          title: 'Drawn from the free bonus pot this month',
+        }, `+${formatCurrency(store.getBonusAllocationDelta(cat.id, month))} bonus this month`)
+        : null,
       // Fixed-height track on every card so bars line up and look even
       el('div', {
         className: 'progress-bar envelope-progress',
@@ -608,6 +646,13 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         }, carry < 0
           ? `Clear overspend (${formatCurrency(carry)})`
           : `Reset carry (${formatCurrency(carry)})`)
+        : null,
+      isCurrentMonth
+        ? el('button', {
+          className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
+          title: 'Put unmatched bonus or leftover from other envelopes on this one',
+          onClick: (e) => { e.stopPropagation(); openAssignBonusToEnvelope(cat); },
+        }, 'Assign bonus')
         : null,
       isCurrentMonth
         ? el('button', {
@@ -674,56 +719,97 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
     const spendTotal = txs
       .filter(t => t.type === 'expense' || t.type === 'debt_payment')
       .reduce((s, t) => s + (Number(t.envelopeAmount) || 0), 0);
+    const refundTotal = txs
+      .filter(t => t.type === 'income')
+      .reduce((s, t) => s + (Number(t.envelopeAmount) || 0), 0);
     const list = el('div', { className: 'envelope-activity-list' });
 
     if (!txs.length) {
       list.appendChild(emptyState(
         '📝',
         'No activity yet',
-        `Nothing charged to ${cat.name} in this range. Log an expense, gift, or import a CSV.`,
+        `Nothing charged to ${cat.name} in this range. Log an expense, refund, gift, or import a CSV.`,
       ));
     } else {
       txs.forEach(t => {
         const isPending = store.isPending?.(t);
         const isSplit = store.isSplitTransaction(t);
+        const isIncome = t.type === 'income';
+        const isBonusAlloc = !!t.bonusAllocationId;
+        const isRefund = isIncome && !!t.refundOfTxId;
         const memo = String(t.memo || '').trim();
-        list.appendChild(el('div', { className: 'envelope-activity-row' },
+        const kind = t.type === 'debt_payment'
+          ? 'Debt payment'
+          : isBonusAlloc
+            ? 'Bonus allocated'
+            : isRefund
+              ? 'Refund / restored'
+              : isIncome
+                ? (t.earmarkedEnvelope ? 'Assigned to envelope' : 'Income / gift')
+                : 'Expense';
+        list.appendChild(el('div', {
+          className: `envelope-activity-row${isIncome ? ' envelope-activity-row-in' : ''}`,
+        },
           el('div', { className: 'envelope-activity-main' },
             el('div', { className: 'envelope-activity-top' },
               el('strong', {}, formatDate(t.date)),
-              el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.envelopeAmount)),
+              el('span', {
+                className: `envelope-activity-amt${isIncome ? ' positive' : ''}`,
+              }, `${isIncome ? '+' : ''}${formatCurrency(t.envelopeAmount)}`),
             ),
             el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
             memo
               ? el('div', { className: 'envelope-activity-memo' }, memo)
               : null,
             el('div', { className: 'envelope-activity-meta' },
-              t.type === 'debt_payment' ? 'Debt payment' : (t.type === 'income' ? 'Income / gift' : 'Expense'),
+              kind,
               isSplit ? ' · Split' : '',
               isPending ? ' · Pending' : '',
-              t.earmarkedEnvelope ? ' · Earmarked gift' : '',
               t.envelopeAmount !== Math.abs(Number(t.amount))
                 ? ` · of ${formatCurrency(t.amount)} total`
                 : '',
             ),
           ),
-          el('button', {
-            type: 'button',
-            className: 'btn btn-sm btn-secondary',
-            title: isPastMonth
-              ? 'Edit date to keep a late post in this month, or change envelope'
-              : 'Edit transaction',
-            onClick: () => {
-              modal?.close();
-              openTransactionForm({ transaction: t });
-            },
-          }, 'Edit'),
+          isBonusAlloc
+            ? el('button', {
+              type: 'button',
+              className: 'btn btn-sm btn-secondary',
+              title: 'Return this amount to the bonus pot',
+              onClick: () => {
+                if (store.reverseBonusAllocation(t.bonusAllocationId, t.bonusAllocationMonth || activityMonth)) {
+                  showToast('Bonus returned to the free pot', 'success');
+                  paint();
+                  window.appRefresh();
+                }
+              },
+            }, 'Undo')
+            : el('button', {
+              type: 'button',
+              className: 'btn btn-sm btn-secondary',
+              title: isPastMonth
+                ? 'Edit date to keep a late post in this month, or change envelope'
+                : 'Edit transaction',
+              onClick: () => {
+                modal?.close();
+                openTransactionForm({ transaction: t });
+              },
+            }, 'Edit'),
         ));
       });
       list.appendChild(el('div', { className: 'envelope-activity-total' },
         el('span', {}, 'Spent'),
         el('strong', {}, formatCurrency(spendTotal)),
       ));
+      if (refundTotal > 0.005) {
+        list.appendChild(el('div', { className: 'envelope-activity-total envelope-activity-total-in' },
+          el('span', {}, 'Bonus / refunds'),
+          el('strong', { className: 'positive' }, `+${formatCurrency(refundTotal)}`),
+        ));
+        list.appendChild(el('div', { className: 'envelope-activity-total' },
+          el('span', {}, 'Net spent'),
+          el('strong', {}, formatCurrency(Math.max(0, spendTotal - refundTotal))),
+        ));
+      }
     }
 
     const monthChipLabel = isPastMonth
@@ -822,7 +908,9 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
     }
     bodyHost.appendChild(chips);
     bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
-      `${rangeLabel(range, activityMonth)} · spent ${formatCurrency(spendTotal)} · ${txs.length} item${txs.length === 1 ? '' : 's'}`,
+      `${rangeLabel(range, activityMonth)} · spent ${formatCurrency(spendTotal)}`
+      + (refundTotal > 0.005 ? ` · refunded ${formatCurrency(refundTotal)}` : '')
+      + ` · ${txs.length} item${txs.length === 1 ? '' : 's'}`,
     ));
     bodyHost.appendChild(list);
   }
@@ -855,6 +943,31 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
           });
         },
       }, '+ Log expense'),
+      !isPastMonth
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-secondary',
+          title: 'Put unmatched bonus or leftover from other envelopes here',
+          onClick: () => {
+            modal.close();
+            openAssignBonusToEnvelope(cat);
+          },
+        }, 'Assign bonus')
+        : null,
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        title: 'Log a new refund or extra cash and assign it to this envelope',
+        onClick: () => {
+          modal.close();
+          const defaultDate = isPastMonth ? `${activityMonth}-01` : undefined;
+          openTransactionForm({
+            type: 'income',
+            categoryId: cat.id,
+            ...(defaultDate ? { date: defaultDate } : {}),
+          });
+        },
+      }, '+ New refund'),
       el('button', {
         type: 'button',
         className: 'btn btn-secondary',
@@ -1107,6 +1220,135 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
           window.appRefresh();
         },
       }, 'Move'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
+function openAssignBonusToEnvelope(cat) {
+  const month = getCurrentMonth();
+  const gross = store.getBonusIncomeGross(month);
+  const used = store.getBonusAllocated(month);
+  const available = store.getBonusAvailable(month);
+  const here = store.getBonusAllocationDelta(cat.id, month);
+  const deposits = store.getUnassignedBonusTransactions(month, { includePrevious: false });
+  const prior = store.getBonusAllocations(month).filter(a => a.categoryId === cat.id);
+
+  const amountIn = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: 0,
+    value: available > 0.005 ? String(available) : '0',
+  });
+  const history = el('div', { className: 'assign-leftover-preview' });
+  let modal;
+
+  function paintHistory() {
+    history.innerHTML = '';
+    if (!prior.length) {
+      history.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+        'Nothing from the bonus pot on this envelope yet.'));
+      return;
+    }
+    prior.forEach(a => {
+      history.appendChild(el('div', { className: 'assign-leftover-row assign-leftover-row-static' },
+        el('span', { className: 'assign-leftover-row-main' },
+          el('strong', {}, formatDate(String(a.at || '').slice(0, 10))),
+          el('span', {}, a.note || 'Bonus allocated'),
+        ),
+        el('span', { className: 'assign-leftover-row-amt' }, formatCurrency(a.amount)),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => {
+            if (store.reverseBonusAllocation(a.id, month)) {
+              showToast('Returned to the bonus pot', 'success');
+              modal.close();
+              window.appRefresh();
+              openAssignBonusToEnvelope(cat);
+            }
+          },
+        }, 'Undo'),
+      ));
+    });
+  }
+  paintHistory();
+
+  modal = showModal({
+    title: 'Assign bonus → ' + cat.name,
+    body: el('div', {},
+      el('div', { className: 'card', style: 'margin-bottom:1rem' },
+        el('div', { className: 'card-title' }, 'Bonus available'),
+        el('div', { className: 'card-value accent' }, formatCurrency(available)),
+        el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0;line-height:1.4' },
+          formatCurrency(gross) + ' bonus in this month · '
+          + formatCurrency(used) + ' already sent to envelopes'
+          + (here > 0.005 ? ' · ' + formatCurrency(here) + ' already on ' + cat.name : '')
+          + '. Refunds stay in this pot — they are not sent back to the original purchase.',
+        ),
+      ),
+      deposits.length
+        ? el('div', { style: 'margin-bottom:1rem' },
+          el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.4rem' },
+            'Feeding the pot (not assigned to a specific envelope):'),
+          ...deposits.slice(0, 8).map(t => el('div', { className: 'assign-leftover-row assign-leftover-row-static' },
+            el('span', { className: 'assign-leftover-row-main' },
+              el('strong', {}, formatDate(t.date)),
+              el('span', {}, t.description || 'Bonus'),
+            ),
+            el('span', { className: 'assign-leftover-row-amt' }, formatCurrency(t.amount)),
+          )),
+          deposits.length > 8
+            ? el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+              '+' + (deposits.length - 8) + ' more')
+            : null,
+        )
+        : el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+          'No bonus deposits this month yet. Imported refunds and extra income land here automatically.',
+        ),
+      el('div', { className: 'form-group' },
+        el('label', {}, 'Amount for ' + cat.name),
+        amountIn,
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          style: 'margin-top:0.45rem',
+          disabled: available < 0.005 ? true : undefined,
+          onClick: () => { amountIn.value = String(available); },
+        }, 'Use all available'),
+      ),
+      el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.5rem' },
+        "This month only. Remaining on this envelope goes up. The bonus pot and To Allocate go down. Next month's plan is unchanged.",
+      ),
+      el('div', { className: 'section-title', style: 'margin-top:0.5rem' }, 'Already on this envelope'),
+      history,
+    ),
+    footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Cancel'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        disabled: available < 0.005 ? true : undefined,
+        onClick: () => {
+          const amt = Math.round((Number(amountIn.value) || 0) * 100) / 100;
+          if (!(amt > 0)) {
+            showToast('Enter an amount greater than zero', 'info');
+            return;
+          }
+          if (amt > available + 0.001) {
+            showToast('Only ' + formatCurrency(available) + ' bonus is free', 'info');
+            return;
+          }
+          const row = store.allocateBonusToEnvelope(cat.id, amt, { month });
+          modal.close();
+          if (row) {
+            showToast('Assigned ' + formatCurrency(amt) + ' bonus to ' + cat.name, 'success');
+          } else {
+            showToast('Could not assign that amount', 'info');
+          }
+          window.appRefresh();
+        },
+      }, 'Assign bonus'),
     ],
   });
   modal.modal.classList.add('modal-scrollable');

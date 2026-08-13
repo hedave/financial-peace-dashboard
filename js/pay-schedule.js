@@ -228,24 +228,24 @@ export function syncPaycheckFromImport(source, date, amount) {
   if (nearIdx >= 0) {
     sched.checks[nearIdx].amount = amt;
     sched.checks[nearIdx].date = iso;
-  } else {
+  } else if (sched.mode === 'dates') {
     sched.checks.push({ date: iso, amount: amt });
     sched.checks.sort((a, b) => a.date.localeCompare(b.date));
   }
-
-  sched.perCheckAmount = amt;
-  if (sched.checks.length) sched.mode = 'dates';
 
   const month = iso.slice(0, 7);
   const monthChecks = sched.checks.filter(c => c.date.startsWith(month));
   const perCheck = sched.perCheckAmount || amt;
   let monthlyAmount = source.amount;
 
-  if (monthChecks.length) {
-    monthlyAmount = monthChecks.reduce(
-      (sum, c) => sum + (Number(c.amount) > 0 ? Number(c.amount) : perCheck),
-      0,
-    );
+  if (sched.mode === 'dates') {
+    if (amt) sched.perCheckAmount = amt;
+    if (monthChecks.length) {
+      monthlyAmount = monthChecks.reduce(
+        (sum, c) => sum + (Number(c.amount) > 0 ? Number(c.amount) : perCheck),
+        0,
+      );
+    }
   }
 
   return { paySchedule: sched, monthlyAmount };

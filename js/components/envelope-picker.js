@@ -172,24 +172,52 @@ export function createEnvelopePicker(opts = {}) {
     });
   }
 
+  function viewBox() {
+    const vv = window.visualViewport;
+    if (vv) {
+      return {
+        top: vv.offsetTop,
+        bottom: vv.offsetTop + vv.height,
+        left: vv.offsetLeft,
+        width: vv.width,
+        height: vv.height,
+      };
+    }
+    return {
+      top: 0,
+      bottom: window.innerHeight,
+      left: 0,
+      width: window.innerWidth,
+      height: window.innerHeight,
+    };
+  }
+
   function positionList() {
     const r = input.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - r.bottom;
-    const maxH = Math.min(256, Math.max(120, window.innerHeight * 0.45));
-    const openUp = spaceBelow < Math.min(maxH, 180) && r.top > spaceBelow;
+    const v = viewBox();
+    const spaceBelow = v.bottom - r.bottom;
+    const spaceAbove = r.top - v.top;
+    const maxH = Math.min(220, Math.max(96, v.height * 0.38));
+    const openUp = spaceBelow < Math.min(maxH, 150) && spaceAbove > spaceBelow;
+    const height = openUp
+      ? Math.min(maxH, Math.max(80, spaceAbove - 10))
+      : Math.min(maxH, Math.max(80, spaceBelow - 10));
+    const top = openUp
+      ? Math.max(v.top + 8, r.top - height - 2)
+      : r.bottom + 2;
+    const width = Math.max(r.width, 160);
+    const left = Math.min(
+      Math.max(v.left + 8, r.left),
+      v.left + v.width - width - 8,
+    );
     list.style.position = 'fixed';
-    list.style.left = `${Math.max(8, r.left)}px`;
-    list.style.width = `${Math.max(r.width, 160)}px`;
+    list.style.left = `${left}px`;
+    list.style.width = `${width}px`;
     list.style.right = 'auto';
-    list.style.maxHeight = `${maxH}px`;
+    list.style.bottom = 'auto';
+    list.style.top = `${top}px`;
+    list.style.maxHeight = `${height}px`;
     list.style.zIndex = '400';
-    if (openUp) {
-      list.style.top = 'auto';
-      list.style.bottom = `${window.innerHeight - r.top + 2}px`;
-    } else {
-      list.style.bottom = 'auto';
-      list.style.top = `${r.bottom + 2}px`;
-    }
   }
 
   function openList() {
@@ -201,7 +229,11 @@ export function createEnvelopePicker(opts = {}) {
     positionList();
     paintList();
     // Attach only while open — avoid leaking resize handlers per picker instance
-    if (!wasOpen) window.addEventListener('resize', onResize);
+    if (!wasOpen) {
+      window.addEventListener('resize', onResize);
+      window.visualViewport?.addEventListener('resize', onResize);
+      window.visualViewport?.addEventListener('scroll', onResize);
+    }
   }
 
   function closeList({ commitDisplay = true } = {}) {
@@ -218,6 +250,8 @@ export function createEnvelopePicker(opts = {}) {
     list.style.right = '';
     list.style.maxHeight = '';
     window.removeEventListener('resize', onResize);
+    window.visualViewport?.removeEventListener('resize', onResize);
+    window.visualViewport?.removeEventListener('scroll', onResize);
     if (commitDisplay) input.value = displayForValue();
   }
 

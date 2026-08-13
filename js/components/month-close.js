@@ -38,7 +38,11 @@ export function openMonthCloseWizard() {
         action = el('button', {
           type: 'button',
           className: 'btn btn-sm btn-secondary month-close-action',
-          onClick: () => { modal?.close(); window.appNavigate('debt'); },
+          onClick: async () => {
+            modal?.close();
+            const { allocateSurplus } = await import('../pages/dashboard.js');
+            allocateSurplus();
+          },
         }, 'Snowball');
       }
 

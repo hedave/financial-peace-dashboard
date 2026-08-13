@@ -681,13 +681,25 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
       return;
     }
     next.forEach(({ transaction: t, bill }) => {
+      const txAmt = Math.abs(Number(t.amount)) || 0;
+      const billAmt = Math.abs(Number(bill.amount)) || 0;
+      const amtDiff = Math.round((txAmt - billAmt) * 100) / 100;
+      const amtNote = Math.abs(amtDiff) > 0.02
+        ? `Bank ${formatCurrency(txAmt)} vs planned ${formatCurrency(billAmt)} (${amtDiff > 0 ? '+' : ''}${formatCurrency(amtDiff)})`
+        : `Amount ${formatCurrency(txAmt)}`;
       list.appendChild(el('div', { className: 'review-item bill-match-item' },
         el('div', {},
           el('strong', {}, bill.name),
           bill.autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.35rem' }, 'Auto-pay') : null,
           el('div', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.2rem' },
-            `${formatDate(t.date)} · ${t.description || '—'} · ${formatCurrency(t.amount)}`
+            `${formatDate(t.date)} · ${t.description || '—'} · ${amtNote}`
           ),
+          Math.abs(amtDiff) > 0.02
+            ? el('div', {
+              className: 'tx-form-hint',
+              style: 'margin-top:0.35rem;margin-bottom:0',
+            }, 'Amount differs from the bill plan — linking still marks it paid using the bank amount.')
+            : null,
           bill.autoPay ? el('div', { className: 'tx-form-hint', style: 'margin-top:0.5rem;margin-bottom:0' },
             'Linking marks the bill paid without deducting checking again (CSV already did).'
           ) : null,

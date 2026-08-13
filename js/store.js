@@ -227,6 +227,9 @@ function normalizeState(state) {
   if (!state.monthEnvelopeMoves || typeof state.monthEnvelopeMoves !== 'object') {
     state.monthEnvelopeMoves = {};
   }
+  if (!state.monthBonusAllocations || typeof state.monthBonusAllocations !== 'object') {
+    state.monthBonusAllocations = {};
+  }
   if (!Array.isArray(state.monthCloseLog)) state.monthCloseLog = [];
   if (!state.reconciliation || typeof state.reconciliation !== 'object') {
     state.reconciliation = { bankBalance: null, asOfDate: null };
@@ -276,6 +279,14 @@ function normalizeState(state) {
     // Existing data: treat as bank-cleared so balances don't jump
     if (tx.clearingStatus !== 'pending' && tx.clearingStatus !== 'cleared') {
       tx.clearingStatus = 'cleared';
+    }
+    // Older refunds restored carry but never tagged the income to the envelope
+    if (tx.type === 'income' && tx.refundOfTxId && !tx.categoryId) {
+      const exp = (state.transactions || []).find(t => t.id === tx.refundOfTxId);
+      if (exp?.categoryId) {
+        tx.categoryId = exp.categoryId;
+        tx.earmarkedEnvelope = true;
+      }
     }
     if (tx.type !== 'income') return;
     // Re-resolve missing source, or Bonus that is clearly a scheduled paycheck
@@ -573,11 +584,13 @@ class Store {
       while (cursor && cursor < current && guard < 36) {
         this.saveMonthBudgetSnapshot(cursor, false);
         this.state.categories.forEach(cat => {
-          // remaining = budget + prior carry + that month's envelope moves − spent.
+          // remaining = budget + opening carry + that month's envelope moves − spent.
+          // Must pass includeCarry: cursor is already a past month, and remaining
+          // otherwise zeros carry (that's correct for *viewing* history, wrong here).
           // Bake the whole remaining into carry for the next month (moves are not
           // re-applied later — getEnvelopeMoveDelta is month-scoped). Do NOT add
           // remaining on top of old carry again.
-          const remaining = this.getCategoryRemaining(cat.id, cursor);
+          const remaining = this.getCategoryRemaining(cat.id, cursor, { includeCarry: true });
           cat.carryOver = Math.round(remaining * 100) / 100;
         });
         cursor = addMonths(cursor, 1);
@@ -610,15 +623,258 @@ class Store {
     return this.state.incomeSources.find(isBonusIncomeSource) || null;
   }
 
+  /** Bonus deposits this month still in the free pot (not earmarked gifts). */
+  getBonusIncomeGross(month = getCurrentMonth()) {
+    return this.getUnassignedBonusTransactions(month, { includePrevious: false })
+      .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+  }
+
+  /**
+   * Bonus still free to send to any envelope.
+   * Gross deposits minus pot draws. Used by To Allocate.
+   */
   getBonusIncomeLogged(month = getCurrentMonth()) {
+    return this.getBonusAvailable(month);
+  }
+
+  getBonusAllocations(month = getCurrentMonth()) {
+    const list = this.state.monthBonusAllocations?.[month];
+    return Array.isArray(list) ? [...list] : [];
+  }
+
+  getBonusAllocated(month = getCurrentMonth()) {
+    return Math.round(
+      this.getBonusAllocations(month).reduce((s, a) => s + (Math.abs(Number(a.amount)) || 0), 0) * 100,
+    ) / 100;
+  }
+
+  getBonusAvailable(month = getCurrentMonth()) {
+    const gross = this.getBonusIncomeGross(month);
+    const used = this.getBonusAllocated(month);
+    return Math.round(Math.max(0, gross - used) * 100) / 100;
+  }
+
+  getBonusAllocationDelta(categoryId, month = getCurrentMonth()) {
+    if (!categoryId) return 0;
+    return Math.round(
+      this.getBonusAllocations(month)
+        .filter(a => a.categoryId === categoryId)
+        .reduce((s, a) => s + (Math.abs(Number(a.amount)) || 0), 0) * 100,
+    ) / 100;
+  }
+
+  allocateBonusToEnvelope(categoryId, amount, { month = getCurrentMonth(), note = '' } = {}) {
+    const amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(amt > 0) || !categoryId) return null;
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return null;
+    const available = this.getBonusAvailable(month);
+    if (amt > available + 0.001) return null;
+    let row = null;
+    this.update(s => {
+      if (!s.monthBonusAllocations || typeof s.monthBonusAllocations !== 'object') {
+        s.monthBonusAllocations = {};
+      }
+      if (!Array.isArray(s.monthBonusAllocations[month])) {
+        s.monthBonusAllocations[month] = [];
+      }
+      row = {
+        id: generateId(),
+        categoryId,
+        amount: amt,
+        note: String(note || '').trim(),
+        at: new Date().toISOString(),
+      };
+      s.monthBonusAllocations[month].push(row);
+    });
+    return row;
+  }
+
+  reverseBonusAllocation(allocationId, month = getCurrentMonth()) {
+    let ok = false;
+    this.update(s => {
+      const list = s.monthBonusAllocations?.[month];
+      if (!Array.isArray(list)) return;
+      const next = list.filter(a => a.id !== allocationId);
+      if (next.length === list.length) return;
+      s.monthBonusAllocations[month] = next;
+      ok = true;
+    });
+    return ok;
+  }
+
+  getUnassignedBonusTransactions(month = getCurrentMonth(), { includePrevious = true } = {}) {
     const bonus = this.getBonusIncomeSource();
-    if (!bonus) return 0;
-    return this.getTransactionsForMonth(month)
-      .filter(t => t.type === 'income'
-        && t.incomeSourceId === bonus.id
-        // Gift/earmark already boosted envelope carry — don't also inflate To Allocate
-        && !t.earmarkedEnvelope)
-      .reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+    if (!bonus) return [];
+    const months = includePrevious ? [month, getPreviousMonth(month)] : [month];
+    const seen = new Set();
+    const out = [];
+    months.forEach(m => {
+      this.getTransactionsForMonth(m).forEach(t => {
+        if (!t?.id || seen.has(t.id)) return;
+        if (t.type !== 'income') return;
+        if (t.incomeSourceId !== bonus.id) return;
+        if (t.earmarkedEnvelope || t.refundOfTxId) return;
+        // Unposted refunds are not in the bank yet — keep them out of the pot
+        if (t.clearingStatus === 'pending') return;
+        seen.add(t.id);
+        out.push(t);
+      });
+    });
+    return out.sort((a, b) =>
+      String(b.date || '').localeCompare(String(a.date || ''))
+      || String(b.id).localeCompare(String(a.id)),
+    );
+  }
+
+  /**
+   * Whole bonus rows that fit `amount` without going over (smallest first).
+   */
+  pickBonusTransactionsForAmount(amount, month = getCurrentMonth()) {
+    const need = Math.round((Number(amount) || 0) * 100) / 100;
+    const txs = this.getUnassignedBonusTransactions(month)
+      .slice()
+      .sort((a, b) =>
+        (Math.abs(Number(a.amount) || 0) - Math.abs(Number(b.amount) || 0))
+        || String(a.date || '').localeCompare(String(b.date || '')),
+      );
+    const picked = [];
+    let left = need;
+    txs.forEach(t => {
+      const n = Math.round((Math.abs(Number(t.amount) || 0) * 100)) / 100;
+      if (!(n > 0) || n > left + 0.001) return;
+      picked.push(t);
+      left = Math.round((left - n) * 100) / 100;
+    });
+    return {
+      picked,
+      assigned: Math.round((need - Math.max(0, left)) * 100) / 100,
+      leftover: Math.max(0, left),
+    };
+  }
+
+  assignBonusTransactionsToEnvelope(categoryId, txIds = []) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return { assigned: 0, count: 0 };
+    const idSet = new Set((txIds || []).filter(Boolean));
+    if (!idSet.size) return { assigned: 0, count: 0 };
+    let assigned = 0;
+    let count = 0;
+    this.update(s => {
+      const category = s.categories.find(c => c.id === categoryId);
+      if (!category) return;
+      s.transactions.forEach(tx => {
+        if (!idSet.has(tx.id)) return;
+        if (tx.type !== 'income') return;
+        if (tx.earmarkedEnvelope || tx.refundOfTxId) return;
+        const num = Math.round((Math.abs(Number(tx.amount) || 0) * 100)) / 100;
+        if (!(num > 0)) return;
+        tx.categoryId = categoryId;
+        tx.earmarkedEnvelope = true;
+        category.carryOver = Math.round(((Number(category.carryOver) || 0) + num) * 100) / 100;
+        assigned += num;
+        count++;
+      });
+    });
+    return { assigned: Math.round(assigned * 100) / 100, count };
+  }
+
+  getEvenSkimDonors(toId, {
+    month = getCurrentMonth(),
+    includeSinkingFunds = false,
+  } = {}) {
+    return (this.state.categories || [])
+      .filter(c => c && !c.parentId && c.id !== toId)
+      .filter(c => includeSinkingFunds || !c.isSinkingFund)
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        remaining: this.getCategoryRemaining(c.id, month),
+      }))
+      .filter(d => d.remaining > 0.005)
+      .sort((a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Split `amount` evenly across leftover envelopes (capped by each remaining).
+   * Does not touch sinking funds unless includeSinkingFunds.
+   */
+  planEvenSkim(toId, amount, opts = {}) {
+    const need = Math.round((Number(amount) || 0) * 100) / 100;
+    const donors = this.getEvenSkimDonors(toId, opts).map(d => ({ ...d }));
+    const pool = Math.round(donors.reduce((s, d) => s + d.remaining, 0) * 100) / 100;
+    const target = Math.min(need, pool);
+    const shares = [];
+    if (!(target > 0) || !donors.length) {
+      return { shares, total: 0, available: pool, shortfall: Math.max(0, need - pool) };
+    }
+
+    let left = target;
+    let open = donors.filter(d => d.remaining > 0.005);
+    let guard = 0;
+    while (left > 0.005 && open.length && guard < 40) {
+      const even = Math.round((left / open.length) * 100) / 100;
+      let took = 0;
+      open.forEach(d => {
+        const take = Math.min(d.remaining, even, left - took);
+        const cents = Math.round(take * 100) / 100;
+        if (!(cents > 0)) return;
+        d.remaining = Math.round((d.remaining - cents) * 100) / 100;
+        d.take = Math.round(((d.take || 0) + cents) * 100) / 100;
+        took = Math.round((took + cents) * 100) / 100;
+      });
+      if (took < 0.005) break;
+      left = Math.round((left - took) * 100) / 100;
+      open = open.filter(d => d.remaining > 0.005);
+      guard++;
+    }
+
+    donors.forEach(d => {
+      if ((d.take || 0) > 0.005) {
+        shares.push({
+          id: d.id,
+          name: d.name,
+          amount: Math.round(d.take * 100) / 100,
+        });
+      }
+    });
+    const total = Math.round(shares.reduce((s, x) => s + x.amount, 0) * 100) / 100;
+    return {
+      shares,
+      total,
+      available: pool,
+      shortfall: Math.max(0, Math.round((need - total) * 100) / 100),
+    };
+  }
+
+  skimEvenlyToEnvelope(toId, amount, {
+    month = getCurrentMonth(),
+    includeSinkingFunds = false,
+    note = '',
+  } = {}) {
+    const plan = this.planEvenSkim(toId, amount, { month, includeSinkingFunds });
+    if (!plan.shares.length) return plan;
+    this.update(s => {
+      if (!s.monthEnvelopeMoves || typeof s.monthEnvelopeMoves !== 'object') {
+        s.monthEnvelopeMoves = {};
+      }
+      if (!Array.isArray(s.monthEnvelopeMoves[month])) {
+        s.monthEnvelopeMoves[month] = [];
+      }
+      const label = String(note || '').trim()
+        || `Even skim to ${s.categories.find(c => c.id === toId)?.name || 'envelope'}`;
+      plan.shares.forEach(share => {
+        s.monthEnvelopeMoves[month].push({
+          id: generateId(),
+          fromId: share.id,
+          toId,
+          amount: share.amount,
+          note: label,
+          at: new Date().toISOString(),
+        });
+      });
+    });
+    return plan;
   }
 
   getAllocatableIncome(month = getCurrentMonth()) {
@@ -684,11 +940,11 @@ class Store {
       pool = this.getTransactionsForMonth(month);
     }
 
-    return pool
+    const rows = pool
       .filter(t => {
         if (t.type === 'expense' || t.type === 'debt_payment') return true;
-        // Gifts / earmarked income tied to this envelope
-        if (t.type === 'income' && t.categoryId === categoryId) return true;
+        // Gifts, refunds, and bonus income assigned to this envelope
+        if (t.type === 'income' && this.incomeTouchesEnvelope(t, categoryId)) return true;
         return false;
       })
       .map(t => {
@@ -700,10 +956,41 @@ class Store {
         if (t.categoryId === categoryId) {
           return { ...t, envelopeAmount: Math.abs(Number(t.amount)) || 0 };
         }
+        if (t.type === 'income' && this.incomeTouchesEnvelope(t, categoryId)) {
+          return { ...t, envelopeAmount: Math.abs(Number(t.amount)) || 0 };
+        }
         return null;
       })
-      .filter(Boolean)
-      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
+      .filter(Boolean);
+
+    const bonusMonths = range === 'all'
+      ? Object.keys(this.state.monthBonusAllocations || {})
+      : range === '30d'
+        ? Object.keys(this.state.monthBonusAllocations || {})
+        : [month];
+    const cutoffIso = range === '30d'
+      ? formatLocalISODate((() => { const d = new Date(); d.setDate(d.getDate() - 30); return d; })())
+      : null;
+    bonusMonths.forEach(m => {
+      this.getBonusAllocations(m).forEach(a => {
+        if (a.categoryId !== categoryId) return;
+        const day = String(a.at || '').slice(0, 10) || `${m}-01`;
+        if (cutoffIso && day < cutoffIso) return;
+        rows.push({
+          id: `bonus-alloc:${a.id}`,
+          date: day,
+          type: 'income',
+          description: a.note || 'Bonus allocated',
+          amount: a.amount,
+          envelopeAmount: a.amount,
+          bonusAllocationId: a.id,
+          bonusAllocationMonth: m,
+          earmarkedEnvelope: true,
+        });
+      });
+    });
+
+    return rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id)));
   }
 
   getTopEnvelopesBySpend(limit = 5, month = getCurrentMonth()) {
@@ -883,16 +1170,18 @@ class Store {
     return Number(this.getBudgetForMonth(categoryId, month)) || 0;
   }
 
-  getCategoryRemaining(categoryId, month = getCurrentMonth()) {
+  getCategoryRemaining(categoryId, month = getCurrentMonth(), opts = {}) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
     const budgeted = this.getCategoryBudgeted(categoryId, month);
-    // Carry-over only applies to the live (current) month
+    // Carry-over only applies to the live month when *viewing* history.
+    // Rollover must pass includeCarry so stacked leftovers survive the flip.
     const isCurrent = month === getCurrentMonth();
-    const carry = isCurrent ? (Number(cat.carryOver) || 0) : 0;
+    const carry = (opts.includeCarry || isCurrent) ? (Number(cat.carryOver) || 0) : 0;
     const move = this.getEnvelopeMoveDelta(categoryId, month);
+    const bonus = this.getBonusAllocationDelta(categoryId, month);
     const spent = this.getCategorySpent(categoryId, month);
-    return Math.round((budgeted + carry + move - spent) * 100) / 100;
+    return Math.round((budgeted + carry + move + bonus - spent) * 100) / 100;
   }
 
   /** Available pool for progress bars (budget + carry + month moves). */
@@ -903,7 +1192,8 @@ class Store {
     const isCurrent = month === getCurrentMonth();
     const carry = isCurrent ? (Number(cat.carryOver) || 0) : 0;
     const move = this.getEnvelopeMoveDelta(categoryId, month);
-    return Math.round((budgeted + carry + move) * 100) / 100;
+    const bonus = this.getBonusAllocationDelta(categoryId, month);
+    return Math.round((budgeted + carry + move + bonus) * 100) / 100;
   }
 
   getTotalBudgeted(month = getCurrentMonth()) {
@@ -1018,7 +1308,24 @@ class Store {
       if (!due) return true;
       return due.slice(0, 7) <= month;
     });
-    const billsLeft = r2(unpaidBills.reduce((s, b) => s + (Math.abs(Number(b.amount)) || 0), 0));
+    // Don't subtract a bill AND the envelope that already holds that money
+    const remainingByCat = new Map();
+    const remainingFor = (catId) => {
+      if (!catId) return 0;
+      if (!remainingByCat.has(catId)) {
+        remainingByCat.set(catId, Math.max(0, this.getCategoryRemaining(catId, month)));
+      }
+      return remainingByCat.get(catId);
+    };
+    let billsLeftRaw = 0;
+    unpaidBills.forEach(b => {
+      const amt = Math.abs(Number(b.amount)) || 0;
+      const rem = remainingFor(b.categoryId);
+      const covered = Math.min(amt, rem);
+      if (b.categoryId) remainingByCat.set(b.categoryId, rem - covered);
+      billsLeftRaw += amt - covered;
+    });
+    const billsLeft = r2(billsLeftRaw);
     const undatedBillCount = unpaidBills.filter(b => !b.dueDate).length;
 
     const debtMinsLeft = r2(this.getRemainingMinDebtPaymentsOutsideBudget(month));
@@ -1208,7 +1515,7 @@ class Store {
     const cap = this.getSurplusCapInfo(month);
     const surplus = snowballAmount != null
       ? Math.max(0, Math.round(Number(snowballAmount) * 100) / 100)
-      : cap.safe;
+      : cap.bankToday;
     const afterSnowball = Math.round((cap.checking - surplus) * 100) / 100;
     const afterBills = Math.round((afterSnowball - cap.billsTotal) * 100) / 100;
     const afterNextPay = cap.nextPayAmount > 0
@@ -1262,13 +1569,37 @@ class Store {
     return !tx.categoryId;
   }
 
+  /** Income assigned to an envelope, or a refund linked to a spend in it. */
+  incomeTouchesEnvelope(tx, categoryId) {
+    if (!tx || tx.type !== 'income' || !categoryId) return false;
+    if (tx.categoryId === categoryId) return true;
+    if (!tx.refundOfTxId) return false;
+    const exp = (this.state.transactions || []).find(t => t.id === tx.refundOfTxId);
+    if (!exp) return false;
+    if (exp.categoryId === categoryId) return true;
+    if (this.isSplitTransaction(exp)) {
+      return (exp.splits || []).some(s => s.categoryId === categoryId);
+    }
+    return false;
+  }
+
   getUncategorizedTransactions(month = getCurrentMonth()) {
     return this.getTransactionsForMonth(month).filter(t => this.transactionNeedsReview(t));
   }
 
   getPendingBillMatches(month = getCurrentMonth()) {
     const unpaid = (this.state.bills || []).filter(b => b.status !== 'paid');
-    return this.getTransactionsForMonth(month)
+    const prev = getPreviousMonth(month);
+    const seen = new Set();
+    const txs = [
+      ...this.getTransactionsForMonth(month),
+      ...this.getTransactionsForMonth(prev),
+    ].filter(t => {
+      if (!t?.id || seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
+    return txs
       .filter(t => t.type === 'expense' && !t.billId)
       .map(t => {
         const bill = findBillForTransaction(t, unpaid);
@@ -1320,10 +1651,31 @@ class Store {
     return n;
   }
 
+  /**
+   * Duplicate groups that touch this month or last month (late-month twins
+   * like Jul 28 Bridgecrest still appear in August Home Review).
+   */
+  getReviewDuplicateTransactions(month = getCurrentMonth()) {
+    const prev = getPreviousMonth(month);
+    const groups = this.getDuplicateTransactionGroups(null);
+    const out = [];
+    const seen = new Set();
+    groups.forEach(items => {
+      const touches = items.some(t => isInMonth(t.date, month) || isInMonth(t.date, prev));
+      if (!touches) return;
+      items.forEach(t => {
+        if (!t?.id || seen.has(t.id)) return;
+        seen.add(t.id);
+        out.push(t);
+      });
+    });
+    return out;
+  }
+
   getReviewInbox(month = getCurrentMonth()) {
     const uncategorized = this.getUncategorizedTransactions(month);
     const billMatches = this.getPendingBillMatches(month);
-    const duplicates = this.getDuplicateTransactions(month);
+    const duplicates = this.getReviewDuplicateTransactions(month);
     const pending = this.getPendingTransactions();
     // Unique txs — one row can sit in multiple queues (e.g. uncategorized + duplicate)
     const uniqueIds = new Set();
@@ -1616,6 +1968,8 @@ class Store {
   }
 
   applyImportedIncome(s, tx) {
+    // Refunds / gifts already assigned to an envelope are not paychecks
+    if (tx?.earmarkedEnvelope || tx?.refundOfTxId) return false;
     const source = resolveIncomeSource(tx.description, s.incomeSources, {
       date: tx.date,
       amount: tx.amount,
@@ -1993,6 +2347,10 @@ class Store {
         this.adjustDebtForPayment(s, tx.debtId, -Math.abs(Number(tx.amount) || 0));
       }
       this.reverseEarmarkCarry(s, tx, -1);
+      if (tx.refundOfTxId) {
+        const exp = s.transactions.find(t => t.id === tx.refundOfTxId);
+        if (exp) delete exp.refundedByTxId;
+      }
       s.transactions = s.transactions.filter(x => x.id !== id);
       removed = true;
     });
@@ -2257,12 +2615,14 @@ class Store {
         tx.incomeSourceId = updates.incomeSourceId || null;
       }
 
-      // Drop earmark flag if no longer income-with-envelope
-      if (tx.type !== 'income' || !tx.categoryId) {
+      // Income with an envelope is a gift / refund assignment (carry, not To Allocate)
+      if (tx.type === 'income' && tx.categoryId) {
+        tx.earmarkedEnvelope = true;
+      } else {
         delete tx.earmarkedEnvelope;
       }
 
-      // Re-apply earmark carry if still gift-earmarked
+      // Re-apply earmark carry if still assigned to an envelope
       if (tx.earmarkedEnvelope && tx.type === 'income' && tx.categoryId) {
         this.reverseEarmarkCarry(s, tx, +1);
       }
@@ -2437,8 +2797,9 @@ class Store {
       ...createDefaultState(),
       ...data,
     });
-    // Never inherit cloud cursor from an old export (forces a clean re-push)
-    delete next._cloudUpdatedAt;
+    // Local restore is newer than whatever is in the cloud. Keep a fresh
+    // cursor so the next pull does not overwrite this file with remote.
+    next._cloudUpdatedAt = Date.now();
     this.state = next;
     this.writeLocal();
     this.notify();
@@ -2488,11 +2849,45 @@ class Store {
    * @param {{ alreadyInBank?: boolean }} opts
    * alreadyInBank (default true): payment already hit checking via CSV — do not deduct again.
    */
+  /**
+   * Unlinked bank expense that already matches this bill (import-first path).
+   * Prefer linking that row over inserting a second “Bill paid:” expense.
+   */
+  findUnlinkedExpenseForBill(bill, { amount, date } = {}) {
+    if (!bill) return null;
+    const targetAmt = Math.abs(Number(amount) || Number(bill.amount) || 0);
+    const paidDate = String(date || todayISO()).slice(0, 10);
+    const candidates = (this.state.transactions || []).filter(t =>
+      t.type === 'expense' && !t.billId && findBillForTransaction(t, [bill]),
+    );
+    if (!candidates.length) return null;
+    const dayDiff = (a, b) => {
+      const da = new Date(`${String(a || '').slice(0, 10)}T12:00:00`);
+      const db = new Date(`${String(b || '').slice(0, 10)}T12:00:00`);
+      return Math.abs(Math.round((da - db) / 86400000));
+    };
+    candidates.sort((a, b) => {
+      const aa = Math.abs(Math.abs(Number(a.amount) || 0) - targetAmt);
+      const ba = Math.abs(Math.abs(Number(b.amount) || 0) - targetAmt);
+      return aa - ba || dayDiff(a.date, paidDate) - dayDiff(b.date, paidDate);
+    });
+    return candidates[0];
+  }
+
   markBillPaid(billId, amount, date, { alreadyInBank = true } = {}) {
     const bill = this.state.bills.find(b => b.id === billId);
-    if (!bill) return;
+    if (!bill) return null;
     const paid = Number(amount) || Number(bill.amount);
     const paidDate = date || todayISO();
+
+    if (alreadyInBank) {
+      const existing = this.findUnlinkedExpenseForBill(bill, { amount: paid, date: paidDate });
+      if (existing) {
+        this.linkTransactionToBill(existing.id, billId);
+        return { linked: true, transactionId: existing.id };
+      }
+    }
+
     this.update(s => {
       const b = s.bills.find(x => x.id === billId);
       if (!b) return;
@@ -2514,6 +2909,7 @@ class Store {
       // Recurring → next cycle unpaid; one-time stays paid
       completeBillPaymentCycle(b, paidDate, paid);
     });
+    return { linked: false };
   }
 
   /**
@@ -2591,7 +2987,13 @@ class Store {
 
       income.refundOfTxId = expenseTxId;
       expense.refundedByTxId = incomeTxId;
-      cat.carryOver = (Number(cat.carryOver) || 0) + num;
+      const alreadyOnThis = !!(income.earmarkedEnvelope && income.categoryId === categoryId);
+      income.categoryId = categoryId;
+      income.earmarkedEnvelope = true;
+      // Manual assign already bumped carry — just link, don't double-count
+      if (!alreadyOnThis) {
+        cat.carryOver = (Number(cat.carryOver) || 0) + num;
+      }
       result = { categoryId, categoryName: cat.name, amount: num };
     });
     return result;
@@ -2610,7 +3012,11 @@ class Store {
     if (!isBonus) return null;
     if (income.refundOfTxId) return null;
 
-    const candidates = this.findReturnCandidates(income);
+    let candidates = this.findReturnCandidates(income);
+    // Manual envelope pick: only link a purchase in that same envelope
+    if (income.earmarkedEnvelope && income.categoryId) {
+      candidates = candidates.filter(c => c.categoryId === income.categoryId);
+    }
     if (!candidates.length) return null;
     if (candidates.length === 1) {
       const c = candidates[0];
@@ -2683,54 +3089,67 @@ class Store {
           type: tx.type,
           description: tx.description,
         };
+        const bankPending = !!tx.pending;
+        // Purchases already left checking. Pending refunds/bonus often have not.
+        const holdChecking = bankPending && tx.type === 'income';
 
-        // Match a pending manual log → clear in place (no second row)
-        const pendingMatch = findBestPendingMatch(s.transactions, candidate);
-        if (pendingMatch) {
-          pendingMatch.clearingStatus = 'cleared';
-          if (tx.date) pendingMatch.date = tx.date;
-          if (tx.description) {
-            // Keep user's category/splits; prefer bank description for the log
-            pendingMatch.description = tx.description;
-          }
-          if (tx.bankCategory && !pendingMatch.categoryId && !this.isSplitTransaction(pendingMatch)) {
-            pendingMatch.importCategory = tx.bankCategory;
+        const settleExisting = (existing) => {
+          if (tx.date) existing.date = tx.date;
+          if (tx.description) existing.description = tx.description;
+          if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
+            existing.importCategory = tx.bankCategory;
             const resolved = resolveCategoryId(
               tx.bankCategory,
               tx.description,
               s.categories,
               tx.type,
             );
-            if (resolved) pendingMatch.categoryId = resolved;
+            if (resolved) existing.categoryId = resolved;
           }
+          if (holdChecking) {
+            existing.bankPending = true;
+            stats.duplicates++;
+            return;
+          }
+          if (existing.bankPending) delete existing.bankPending;
+          if (!isTransactionPending(existing)) {
+            stats.duplicates++;
+            return;
+          }
+          existing.clearingStatus = 'cleared';
           this.applyCheckingDelta(
             s,
-            this.getCheckingDelta(pendingMatch.type, pendingMatch.amount, 'cleared'),
+            this.getCheckingDelta(existing.type, existing.amount, 'cleared'),
           );
-          if (pendingMatch.type === 'income') {
-            this.applyImportedIncome(s, pendingMatch);
+          if (existing.type === 'income') {
+            this.applyImportedIncome(s, existing);
             stats.incomeLinked++;
             stats.income++;
-            stats.incomeAmount += Math.abs(Number(pendingMatch.amount) || 0);
-            stats.incomeIdsForReturnMatch.push(pendingMatch.id);
-          } else if (pendingMatch.type === 'expense') {
+            stats.incomeAmount += Math.abs(Number(existing.amount) || 0);
+            stats.incomeIdsForReturnMatch.push(existing.id);
+          } else if (existing.type === 'expense') {
             stats.expense++;
-            stats.expenseAmount += Math.abs(Number(pendingMatch.amount) || 0);
-            if (pendingMatch.categoryId || this.isSplitTransaction(pendingMatch)) stats.categorized++;
-            if (!this.applyAutoPayBillIfMatched(pendingMatch, s, stats, autoPaidBillIds)) {
-              if (findBillForTransaction(pendingMatch, s.bills)) stats.billMatches++;
+            stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
+            if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
+            if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
+              if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
             }
           }
           stats.matchedPending++;
           stats.count++;
+        };
+
+        // Match a pending manual log → clear in place when the bank row posts
+        const pendingMatch = findBestPendingMatch(s.transactions, candidate);
+        if (pendingMatch) {
+          settleExisting(pendingMatch);
           return;
         }
 
-        // Skip only strong duplicates (exact row or same-day same amount).
-        // Cross-day same merchant/amount (e.g. two kids, same game) still imports.
-        const nonPending = s.transactions.filter(t => !isTransactionPending(t));
-        if (isImportDuplicateTransaction(nonPending, candidate)) {
-          stats.duplicates++;
+        // Pending-aware skip: same-day twins while the first row is still pending
+        const dupHit = (s.transactions || []).find(t => isImportDuplicateTransaction([t], candidate));
+        if (dupHit) {
+          settleExisting(dupHit);
           return;
         }
 
@@ -2749,7 +3168,8 @@ class Store {
           categoryId,
           description: tx.description,
           importCategory: tx.bankCategory || null,
-          clearingStatus: 'cleared',
+          clearingStatus: holdChecking ? 'pending' : 'cleared',
+          ...(bankPending ? { bankPending: true } : {}),
         };
 
         if (tx.type === 'expense' && !categoryId) {
@@ -2759,7 +3179,7 @@ class Store {
           }
         }
 
-        if (tx.type === 'income' && this.applyImportedIncome(s, newTx)) {
+        if (tx.type === 'income' && !holdChecking && this.applyImportedIncome(s, newTx)) {
           stats.incomeLinked++;
         }
 
@@ -2774,7 +3194,7 @@ class Store {
             if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
           }
         } else {
-          s.balances.checking += tx.amount;
+          if (!holdChecking) s.balances.checking += tx.amount;
           stats.income++;
           stats.incomeAmount += Math.abs(Number(tx.amount) || 0);
           stats.incomeIdsForReturnMatch.push(newTx.id);

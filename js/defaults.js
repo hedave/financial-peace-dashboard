@@ -157,6 +157,12 @@ export function createDefaultState() {
      * Does not change monthlyBudget; remaining = budget + carry + netMoves − spent.
      */
     monthEnvelopeMoves: {},
+    /**
+     * Bonus-pool draws for a given month.
+     * { 'YYYY-MM': [{ id, categoryId, amount, note, at }] }
+     * Does not retag the bonus transaction. Remaining += amount; pot shrinks.
+     */
+    monthBonusAllocations: {},
     monthCloseLog: [],
     reconciliation: { bankBalance: null, asOfDate: null },
     lastMonthProcessed: null,
