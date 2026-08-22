@@ -1086,6 +1086,7 @@ function formatImportToast(stats) {
     else if (stats.billMatches && stats.autoPayBills && stats.billMatches > stats.autoPayBills) {
       parts.push(`${stats.billMatches - stats.autoPayBills} bill matches to review`);
     }
+    if (stats.debtMatches) parts.push(`${stats.debtMatches} debt payment${stats.debtMatches === 1 ? '' : 's'} linked`);
     if (stats.duplicates) parts.push(`${stats.duplicates} duplicates skipped`);
     if (stats.skipped) parts.push(`${stats.skipped} rows skipped`);
     const stillPending = store.getPendingTransactions().length;

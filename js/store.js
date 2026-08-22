@@ -18,7 +18,7 @@ import {
   descriptionSimilarity,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
-import { findBillForTransaction, findAutoPayBillForTransaction } from './bill-matcher.js';
+import { findBillForTransaction, findAutoPayBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
 import {
   normalizePaySchedule,
   getScheduledChecksForMonth,
@@ -1865,6 +1865,25 @@ class Store {
     return true;
   }
 
+  /**
+   * Unique debt name in the bank description → record as a debt payment.
+   * Checking was already moved as an expense/import; only the debt balance changes.
+   */
+  applyImportedDebtPayment(tx, s = this.state, stats = null) {
+    if (!tx || tx.debtId) return false;
+    if (tx.type !== 'expense' && tx.type !== 'transfer') return false;
+    const debt = findDebtForTransaction(tx, s.debts || []);
+    if (!debt || debt.archived || !(Number(debt.balance) > 0)) return false;
+    const pay = Math.abs(Number(tx.amount) || 0);
+    if (!pay) return false;
+    tx.type = 'debt_payment';
+    tx.debtId = debt.id;
+    if (!tx.categoryId && debt.categoryId) tx.categoryId = debt.categoryId;
+    this.adjustDebtForPayment(s, debt.id, pay);
+    if (stats) stats.debtMatches = (stats.debtMatches || 0) + 1;
+    return true;
+  }
+
   isDaveRamseyMode() {
     return !!this.state.settings?.daveRamseyMode;
   }
@@ -3106,13 +3125,10 @@ class Store {
             );
             if (resolved) existing.categoryId = resolved;
           }
-          if (holdChecking) {
-            existing.bankPending = true;
-            stats.duplicates++;
-            return;
-          }
-          if (existing.bankPending) delete existing.bankPending;
-          if (!isTransactionPending(existing)) {
+          if (bankPending) existing.bankPending = true;
+          else delete existing.bankPending;
+          // Already in the log (cleared purchase, or still-pending refund). Don't add a twin.
+          if (holdChecking || !isTransactionPending(existing)) {
             stats.duplicates++;
             return;
           }
@@ -3127,12 +3143,13 @@ class Store {
             stats.income++;
             stats.incomeAmount += Math.abs(Number(existing.amount) || 0);
             stats.incomeIdsForReturnMatch.push(existing.id);
-          } else if (existing.type === 'expense') {
+          } else if (existing.type === 'expense' || existing.type === 'debt_payment' || existing.type === 'transfer') {
             stats.expense++;
             stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
             if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
             if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
               if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
+              else this.applyImportedDebtPayment(existing, s, stats);
             }
           }
           stats.matchedPending++;
@@ -3192,6 +3209,7 @@ class Store {
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
           if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
             if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
+            else this.applyImportedDebtPayment(newTx, s, stats);
           }
         } else {
           if (!holdChecking) s.balances.checking += tx.amount;

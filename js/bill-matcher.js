@@ -39,14 +39,22 @@ export function amountDelta(a, b) {
   return Math.round((Math.abs(Number(a) || 0) - Math.abs(Number(b) || 0)) * 100) / 100;
 }
 
-function billNameInDescription(billName, description) {
-  const name = String(billName || '').toLowerCase().trim();
+const GENERIC_NAME_WORDS = new Set([
+  'card', 'bill', 'payment', 'bank', 'credit', 'loan', 'auto', 'account',
+]);
+
+export function nameInDescription(entityName, description) {
+  const name = String(entityName || '').toLowerCase().trim();
   const desc = String(description || '').toLowerCase();
   if (!name || !desc) return false;
   if (desc.includes(name)) return true;
-  // Match significant words (4+ chars) from bill name
-  const words = name.split(/\s+/).filter(w => w.length >= 4);
+  // 3+ chars so "Citi" matches CITICARD / CITI CARD PAYMENT
+  const words = name.split(/\s+/).filter(w => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
   return words.some(w => desc.includes(w));
+}
+
+function billNameInDescription(billName, description) {
+  return nameInDescription(billName, description);
 }
 
 function unpaidBills(bills = []) {
@@ -100,23 +108,28 @@ export function findAutoPayBillForTransaction(tx, bills = []) {
   const amt = Math.abs(Number(tx.amount)) || 0;
   if (!amt) return null;
 
-  const candidates = unpaidBills(bills).filter(b => {
-    if (!b.autoPay) return false;
-    if (!billNameInDescription(b.name, tx.description)) return false;
-    if (!billDueNearTransaction(b, tx)) return false;
-    // Exact pennies OR close enough for variable utilities
-    return amountsMatch(b.amount, amt)
-      || amountsClose(b.amount, amt, { abs: AUTOPAY_CLOSE_ABS, pct: AUTOPAY_CLOSE_PCT });
-  });
+  const named = unpaidBills(bills).filter(b =>
+    b.autoPay
+    && billNameInDescription(b.name, tx.description)
+    && billDueNearTransaction(b, tx),
+  );
+  const amountOk = named.filter(b =>
+    amountsMatch(b.amount, amt)
+    || amountsClose(b.amount, amt, { abs: AUTOPAY_CLOSE_ABS, pct: AUTOPAY_CLOSE_PCT }),
+  );
 
-  if (candidates.length === 1) return candidates[0];
-  if (candidates.length > 1) {
-    // Closest amount wins
-    candidates.sort((a, b) =>
+  const pickClosest = (list) => {
+    if (!list.length) return null;
+    if (list.length === 1) return list[0];
+    const sorted = [...list].sort((a, b) =>
       Math.abs(Math.abs(a.amount) - amt) - Math.abs(Math.abs(b.amount) - amt)
     );
-    return candidates[0];
-  }
+    return sorted[0];
+  };
+
+  // Unique auto-pay merchant (Citi statement pay often ≠ planned bill amount)
+  if (named.length === 1) return named[0];
+  if (amountOk.length) return pickClosest(amountOk);
   return null;
 }
 
@@ -143,16 +156,31 @@ export function findBillForTransaction(tx, bills = []) {
 
   if (ranked.length) return ranked[0].bill;
 
-  // Name + due only when unique unpaid bill matches the merchant (amount way off still surfaces in review)
+  // Unique merchant + due: credit-card / loan payments rarely equal the planned bill $
   const byName = unpaid.filter(b =>
     billNameInDescription(b.name, tx.description) && billDueNearTransaction(b, tx)
   );
-  if (byName.length === 1) {
-    // Cap how far amount can drift for name-only (avoid random Spectrum-like word matches)
-    if (amountsClose(byName[0].amount, amt, { abs: 50, pct: 0.5 })) {
-      return byName[0];
-    }
-  }
+  if (byName.length === 1) return byName[0];
 
+  return null;
+}
+
+/**
+ * Unique active debt whose name appears in the bank description (Citi, LightStream, …).
+ */
+export function findDebtForTransaction(tx, debts = []) {
+  if (!tx || tx.debtId) return null;
+  if (tx.type !== 'expense' && tx.type !== 'debt_payment' && tx.type !== 'transfer') return null;
+  const active = (debts || []).filter(d => d && !d.archived && (Number(d.balance) || 0) > 0);
+  const matches = active.filter(d => nameInDescription(d.name, tx.description));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const amt = Math.abs(Number(tx.amount) || 0);
+    matches.sort((a, b) =>
+      Math.abs((Number(a.minPayment) || Number(a.balance) || 0) - amt)
+      - Math.abs((Number(b.minPayment) || Number(b.balance) || 0) - amt)
+    );
+    return matches[0];
+  }
   return null;
 }

@@ -787,6 +787,18 @@ export function normalizeMerchantDescription(description) {
   return s;
 }
 
+/** Brands too short for the 5-letter rule but still a real merchant. */
+const SHORT_BRANDS = new Set([
+  'citi', 'cvs', 'aldi', 'nike', 'amex', 'usaa', 'ikea', 'att', 'pnc',
+  'bbt', 'discover', 'kfc', 'hbo', 'lowes',
+]);
+
+function isWeakMerchantToken(t, weak) {
+  if (!t || weak.has(t)) return true;
+  if (SHORT_BRANDS.has(t)) return false;
+  return t.length < 5;
+}
+
 /** Shared “real” merchant word (amazon, walmart, …) — ignores city/state noise */
 export function shareStrongMerchantToken(a, b) {
   const ta = descriptionTokens(a);
@@ -797,8 +809,21 @@ export function shareStrongMerchantToken(a, b) {
     'us', 'wa', 'nc', 'ca', 'tx', 'ny', 'fl', 'ar', 'oh', 'pa', 'the', 'and',
   ]);
   for (const t of ta) {
-    if (t.length < 5 || weak.has(t)) continue;
+    if (isWeakMerchantToken(t, weak)) continue;
     if (tb.has(t)) return true;
+    // HUDSONNEWS vs HUDSON NEWS — jammed vs spaced merchant
+    for (const u of tb) {
+      if (isWeakMerchantToken(u, weak)) continue;
+      if (t.includes(u) || u.includes(t)) return true;
+    }
+  }
+  const ca = [...ta].join('');
+  const cb = [...tb].join('');
+  if (ca.length >= 6 && cb.length >= 6) {
+    if (ca === cb) return true;
+    const shorter = ca.length <= cb.length ? ca : cb;
+    const longer = ca.length <= cb.length ? cb : ca;
+    if (longer.includes(shorter)) return true;
   }
   return false;
 }
@@ -863,7 +888,9 @@ export function areLikelyDuplicatePair(a, b, {
   crossDaySimilarity = 0.55,
 } = {}) {
   if (!a || !b || a.id === b.id) return false;
-  if (a.type !== b.type) return false;
+  // Same outflow leaving checking: imported Citi payment vs logged debt payment
+  const outflow = new Set(['expense', 'debt_payment', 'transfer']);
+  if (a.type !== b.type && !(outflow.has(a.type) && outflow.has(b.type))) return false;
 
   const amtA = Math.round(Math.abs(Number(a.amount) || 0) * 100);
   const amtB = Math.round(Math.abs(Number(b.amount) || 0) * 100);
@@ -935,7 +962,10 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
     minSimilarity = 0.35,
   } = options;
 
-  const pending = (transactions || []).filter(isTransactionPending);
+  // Also merge bank-pending purchases that already hit checking (post date often +1 day)
+  const pending = (transactions || []).filter(t =>
+    isTransactionPending(t) || t.bankPending,
+  );
   if (!pending.length || !candidate) return null;
 
   const amt = Math.round(Math.abs(Number(candidate.amount) || 0) * 100);
