@@ -178,7 +178,6 @@ export function renderTransactions(container, arg) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Transaction Log'),
-    el('p', {}, 'Every dollar in and out — sort, edit, and categorize manually when needed')
   ));
   if (filterBanner) container.appendChild(filterBanner);
 
@@ -376,10 +375,7 @@ export function renderTransactions(container, arg) {
     ));
 
     // Mobile: card list
-    listEl.appendChild(el('div', { className: 'tx-mobile-list' },
-      ...visible.map(t => txCard(t, currentState, duplicateMeta)),
-      moreNote
-    ));
+    listEl.appendChild(buildMobileTxList(visible, currentState, duplicateMeta, sortKey, moreNote));
   }
 
   let searchTimer = null;
@@ -582,49 +578,71 @@ function txRow(t, state, duplicateMeta = new Map()) {
   );
 }
 
-function txCard(t, state, duplicateMeta = new Map()) {
+function categoryLineIsEmpty(line) {
+  if (line == null) return true;
+  if (typeof line === 'string') return !line.trim() || line.trim() === '—';
+  return false;
+}
+
+function buildMobileTxList(visible, state, duplicateMeta, sortKey, moreNote) {
+  const list = el('div', { className: 'tx-mobile-list' });
+  const groupByDate = sortKey === 'date';
+  let lastDate = null;
+  visible.forEach(t => {
+    if (groupByDate && t.date !== lastDate) {
+      lastDate = t.date;
+      list.appendChild(el('div', { className: 'tx-date-label' }, formatDate(t.date)));
+    }
+    list.appendChild(txCard(t, state, duplicateMeta, { hideDate: groupByDate }));
+  });
+  if (moreNote) list.appendChild(moreNote);
+  return list;
+}
+
+function txCard(t, state, duplicateMeta = new Map(), { hideDate = false } = {}) {
   const isIncome = t.type === 'income';
   const sourceTag = incomeSourceLabel(t, state);
   const dupCount = duplicateMeta.get(t.id);
   const isDuplicate = dupCount >= 2;
   const isPending = store.isPending(t) || !!t.bankPending;
+  const catLine = categoryLabel(t, state);
+  const more = txMoreMenu(t);
+  more.addEventListener('click', e => e.stopPropagation());
+
+  const metaBits = [];
+  if (sourceTag) metaBits.push(sourceTag);
+  if (!categoryLineIsEmpty(catLine)) metaBits.push(catLine);
+  if (t.bankPending || store.isPending(t)) metaBits.push(pendingBadge(t));
+  if (isDuplicate) {
+    metaBits.push(el('span', {
+      className: 'tx-duplicate-badge',
+      title: `${dupCount} transactions with this amount`,
+    }, `Dup ${dupCount}`));
+  }
 
   return el('article', {
     className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`,
+    onClick: () => openTransactionForm({ transaction: t }),
   },
-    el('div', { className: 'tx-card-top' },
-      el('span', { className: 'tx-card-date' }, formatDate(t.date)),
-      el('span', {
-        className: 'tx-card-amount',
-        style: `color:${isIncome ? 'var(--positive)' : 'var(--text)'}`,
-      }, `${isIncome ? '+' : '-'}${formatCurrency(t.amount)}`)
-    ),
-    el('div', { className: 'tx-card-body' },
-      el('div', { className: 'tx-card-desc' }, t.description || '—'),
-      t.memo
-        ? el('div', { className: 'tx-card-meta', style: 'font-style:italic' }, t.memo)
-        : null,
-      sourceTag ? el('div', { className: 'tx-card-meta' }, sourceTag) : null,
-      el('div', { className: 'tx-card-meta' }, categoryLabel(t, state)),
-      el('div', { className: 'tx-card-badges' },
-        el('span', { className: 'tx-type-badge' }, TYPE_LABELS[t.type] || t.type),
-        t.earmarkedEnvelope
-          ? el('span', { className: 'tx-type-badge', title: 'Gift earmarked to envelope' }, 'Gift')
+    el('div', { className: 'tx-card-main' },
+      el('div', { className: 'tx-card-body' },
+        hideDate ? null : el('div', { className: 'tx-card-date' }, formatDate(t.date)),
+        el('div', { className: 'tx-card-desc' }, t.description || '—'),
+        t.memo
+          ? el('div', { className: 'tx-card-meta', style: 'font-style:italic' }, t.memo)
           : null,
-        pendingBadge(t),
-        isDuplicate ? el('span', {
-          className: 'tx-duplicate-badge',
-          title: `${dupCount} transactions with this amount`,
-        }, `Duplicate (${dupCount})`) : null,
-      )
+        metaBits.length
+          ? el('div', { className: 'tx-card-meta tx-card-meta-row' }, ...metaBits)
+          : null,
+      ),
+      el('div', { className: 'tx-card-side' },
+        el('span', {
+          className: 'tx-card-amount',
+          style: `color:${isIncome ? 'var(--positive)' : 'var(--text)'}`,
+        }, `${isIncome ? '+' : '−'}${formatCurrency(t.amount)}`),
+        more,
+      ),
     ),
-    el('div', { className: 'tx-card-actions' },
-      el('button', {
-        className: 'btn btn-sm btn-secondary',
-        onClick: () => openTransactionForm({ transaction: t }),
-      }, 'Edit'),
-      txMoreMenu(t)
-    )
   );
 }
 

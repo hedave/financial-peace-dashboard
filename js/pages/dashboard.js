@@ -59,9 +59,9 @@ export function renderDashboard(container) {
 
   container.innerHTML = '';
 
-  container.appendChild(el('div', { className: 'page-header' },
-    el('h2', {}, 'Dashboard'),
-    el('p', {}, getMonthLabel(month) + ' — Give every dollar a job'),
+  container.appendChild(el('div', { className: 'page-header dash-page-header' },
+    el('h2', {}, 'Home'),
+    el('p', { className: 'page-kicker' }, getMonthLabel(month)),
     el('div', { className: 'dash-header-meta' },
       el('button', {
         type: 'button',
@@ -158,18 +158,18 @@ export function renderDashboard(container) {
 
   // Primary stats: cash truth first
   container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
-    statCard('Checking', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking'), false, 'Tap to update'),
+    statCard('Checking', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
     statCard(
-      'Month-end snowball',
+      'Snowball',
       formatCurrency(surplus),
       surplus > 0 ? 'positive' : '',
       () => allocateSurplus(),
       true,
       surplus > 0
-        ? 'If the rest of the month goes to plan · tap to send'
+        ? 'Month-end leftover · tap to send'
         : 'Forecast $0 after income, bills & plan',
     ),
-    statCard('Emergency Fund', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
+    statCard('Emergency', formatCurrency(state.balances.emergencyFund), 'positive', () => editBalance('emergency')),
     statCard(
       'To Allocate',
       formatCurrency(toAllocate),
@@ -179,27 +179,35 @@ export function renderDashboard(container) {
       Math.abs(toAllocate) < 0.01
         ? 'Every dollar has a job'
         : toAllocate < 0
-          ? 'Over-budgeted — lower some envelopes'
-          : 'Tap Budget to assign',
+          ? 'Over-budgeted'
+          : 'Assign in Budget',
     ),
   ));
 
-  container.appendChild(el('p', {
-    className: 'tx-form-hint section dash-forecast-line',
-    style: 'margin-top:0',
-  }, forecastLine + '.' + (bankToday > 0.005
-    ? ` Safe to send today: ${formatCurrency(bankToday)}.`
-    : ' Nothing free to send today after bills before next pay + cushion.')
-    + toAllocNote));
+  const forecastSummary = bankToday > 0.005
+    ? `Safe to send today ${formatCurrency(bankToday)}`
+    : 'Nothing free to send today';
+  const forecastAlloc = Math.abs(toAllocate) >= 0.01
+    ? ` · To Allocate ${formatCurrency(toAllocate)}`
+    : '';
+  container.appendChild(el('details', { className: 'dash-forecast-details section' },
+    el('summary', {}, forecastSummary + forecastAlloc),
+    el('p', { className: 'tx-form-hint dash-forecast-line' },
+      forecastLine + '.' + (bankToday > 0.005
+        ? ` Safe to send today: ${formatCurrency(bankToday)}.`
+        : ' Nothing free to send today after bills before next pay + cushion.')
+      + toAllocNote),
+  ));
 
   container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
 
   container.appendChild(el('div', { className: 'quick-actions section' },
-    quickAction('📝', 'Log Expense', () => window.appNavigate('transactions', 'expense')),
+    quickAction('📝', 'Log', () => window.appNavigate('transactions', 'expense')),
     quickAction('📥', 'Review', () => openReviewInbox()),
-    quickAction('💸', 'Snowball $', () => allocateSurplus()),
+    quickAction('💸', 'Snowball', () => allocateSurplus()),
     quickAction('✉️', 'Budget', () => window.appNavigate('budget')),
     quickAction('🧭', 'Advisor', () => window.appNavigate('advisor')),
+    quickAction('📋', 'Bills', () => window.appNavigate('bills')),
   ));
 
   container.appendChild(weekAtAGlance(upcoming, paychecks));
@@ -414,7 +422,7 @@ function weekAtAGlance(upcomingBills, paychecks) {
               className: 'week-glance-row',
               onClick: () => window.appNavigate('bills'),
             },
-              el('span', {}, formatDate(b.date)),
+              el('span', { className: 'week-glance-date' }, formatWeekDate(b.date)),
               el('span', { className: 'week-glance-label' }, b.label),
               el('strong', {}, formatCurrency(b.amount)),
             )),
@@ -430,7 +438,7 @@ function weekAtAGlance(upcomingBills, paychecks) {
               className: 'week-glance-row',
               onClick: () => window.appNavigate('income'),
             },
-              el('span', {}, formatDate(p.date)),
+              el('span', { className: 'week-glance-date' }, formatWeekDate(p.date)),
               el('span', { className: 'week-glance-label' }, p.label),
               el('strong', {}, formatCurrency(p.amount)),
             )),
@@ -451,11 +459,15 @@ function statCard(title, value, cls = '', onClick = null, highlight = false, sub
     el('div', { className: `card-value ${cls}` }, value)
   );
   if (subtitle) {
-    card.appendChild(el('div', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4' }, subtitle));
-  } else if (onClick) {
-    card.appendChild(el('div', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem' }, 'Tap to update'));
+    card.appendChild(el('div', { className: 'card-sub' }, subtitle));
   }
   return card;
+}
+
+function formatWeekDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /**
@@ -506,9 +518,9 @@ function cashRunwayCard(runway, target, onSnowball) {
   return el('div', { className: 'section card cash-runway-card' },
     el('div', { className: 'cash-runway-header' },
       el('div', {},
-        el('div', { className: 'card-title' }, 'Cash runway (if you snowball today)'),
-        el('p', { className: 'tx-form-hint', style: 'margin:0.25rem 0 0' },
-          'Uses cash free today, not the month-end forecast. Envelopes are labels, not separate piles.',
+        el('div', { className: 'card-title' }, 'Cash runway'),
+        el('p', { className: 'tx-form-hint cash-runway-blurb' },
+          'Cash free today — not the month-end forecast.',
         ),
       ),
       runway.surplus > 0

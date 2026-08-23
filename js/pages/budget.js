@@ -924,10 +924,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
       el('button', {
         type: 'button',
         className: 'btn btn-secondary',
-        onClick: () => {
-          modal.close();
-          window.appRefresh();
-        },
+        onClick: () => modal.close(),
       }, 'Close'),
       el('button', {
         type: 'button',

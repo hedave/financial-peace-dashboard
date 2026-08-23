@@ -45,7 +45,8 @@ function isPhoneUi() {
 
 function lockBodyScroll() {
   if (document.body.classList.contains('modal-open')) return;
-  const y = window.scrollY || 0;
+  window.appSnapshotScroll?.();
+  const y = window.scrollY || document.documentElement.scrollTop || 0;
   document.body.dataset.scrollY = String(y);
   document.body.classList.add('modal-open');
   document.documentElement.classList.add('modal-open');
@@ -54,12 +55,21 @@ function lockBodyScroll() {
 
 function unlockBodyScroll() {
   if (getOpenModalCount() > 0) return;
+  const y = Number(document.body.dataset.scrollY || 0);
   document.body.classList.remove('modal-open');
   document.documentElement.classList.remove('modal-open');
-  const y = Number(document.body.dataset.scrollY || 0);
   delete document.body.dataset.scrollY;
   document.body.style.top = '';
-  if (y) window.scrollTo(0, y);
+  if (!y) return;
+  const jump = () => {
+    try {
+      window.scrollTo({ top: y, left: 0, behavior: 'auto' });
+    } catch {
+      window.scrollTo(0, y);
+    }
+  };
+  jump();
+  requestAnimationFrame(jump);
 }
 
 function syncModalCountFromDom() {
@@ -83,11 +93,12 @@ function afterModalStackChange() {
   if (stackRefreshTimer) clearTimeout(stackRefreshTimer);
   stackRefreshTimer = setTimeout(() => {
     stackRefreshTimer = null;
-    if (getOpenModalCount() === 0) {
-      unlockBodyScroll();
-      window.appRefresh?.({ force: true });
-    }
-  }, 60);
+    if (getOpenModalCount() !== 0) return;
+    unlockBodyScroll();
+    requestAnimationFrame(() => {
+      if (getOpenModalCount() === 0) window.appRefresh?.({ force: true });
+    });
+  }, 50);
 }
 
 export function showModal({ title, body, footer, onClose, closeOnBackdrop = true }) {

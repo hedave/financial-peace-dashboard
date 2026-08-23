@@ -36,6 +36,9 @@ let mainEl = null;
 let unlocked = false;
 /** Last non-zero scroll per page (survives a frame where the browser clamps to 0). */
 const lastScrollByPage = Object.create(null);
+/** Held across modal lock → page rebuild (live capture is 0 while body is position:fixed). */
+let holdScroll = null;
+let restoreGuard = false;
 let scrollTrackingBound = false;
 let restoreTimers = [];
 
@@ -50,19 +53,36 @@ function captureScrollPos() {
 
 function applyScrollPos(pos) {
   if (!pos) return;
-  const y = pos.win || pos.doc || 0;
-  window.scrollTo(0, y);
-  if (document.documentElement) document.documentElement.scrollTop = y;
-  if (document.body) document.body.scrollTop = y;
-  if (document.scrollingElement) document.scrollingElement.scrollTop = pos.doc || y;
-  if (mainEl) mainEl.scrollTop = pos.main || 0;
+  const y = Math.max(0, Number(pos.win || pos.doc || 0));
+  const mainY = Math.max(0, Number(pos.main || 0));
+  try {
+    window.scrollTo({ top: y, left: 0, behavior: 'auto' });
+  } catch {
+    window.scrollTo(0, y);
+  }
+  const se = document.scrollingElement;
+  if (se) se.scrollTop = y;
+  if (mainEl) mainEl.scrollTop = mainY;
 }
 
 function trackScrollPos() {
+  if (restoreGuard) return;
+  if (document.body.classList.contains('modal-open')) return;
   const pos = captureScrollPos();
   // Ignore zeros after content collapse — keep last meaningful position
   if (pos.win > 0 || pos.doc > 0 || pos.main > 0) {
     lastScrollByPage[currentPage] = pos;
+  }
+}
+
+function snapshotScroll() {
+  if (document.body.classList.contains('modal-open') && holdScroll) return;
+  const pos = captureScrollPos();
+  if (pos.win > 0 || pos.doc > 0 || pos.main > 0) {
+    lastScrollByPage[currentPage] = pos;
+    holdScroll = pos;
+  } else if (lastScrollByPage[currentPage]) {
+    holdScroll = lastScrollByPage[currentPage];
   }
 }
 
@@ -85,15 +105,17 @@ function restoreScrollPos(pos) {
   const meaningful = (pos.win || 0) > 0 || (pos.doc || 0) > 0 || (pos.main || 0) > 0;
   if (!meaningful) return;
   clearRestoreTimers();
+  restoreGuard = true;
   const run = () => applyScrollPos(pos);
   run();
   requestAnimationFrame(() => {
     run();
     requestAnimationFrame(run);
   });
-  [16, 50, 100, 200, 400].forEach(ms => {
+  [16, 50, 100, 200, 400, 700, 1000].forEach(ms => {
     restoreTimers.push(setTimeout(run, ms));
   });
+  restoreTimers.push(setTimeout(() => { restoreGuard = false; }, 1100));
 }
 
 function scrollToTop() {
@@ -172,7 +194,7 @@ function renderPage(opts = {}) {
   // Prefer live capture; if browser already clamped to 0, use last known for this page
   let pos = captureScrollPos();
   if (samePage) {
-    const known = lastScrollByPage[currentPage];
+    const known = holdScroll || lastScrollByPage[currentPage];
     if ((pos.win === 0 && pos.doc === 0 && pos.main === 0) && known) {
       pos = known;
     } else if (pos.win > 0 || pos.doc > 0 || pos.main > 0) {
@@ -182,6 +204,10 @@ function renderPage(opts = {}) {
 
   renderPage._lastPage = currentPage;
 
+  const active = document.activeElement;
+  if (active && mainEl.contains(active) && typeof active.blur === 'function') {
+    active.blur();
+  }
   mainEl.innerHTML = '';
   const renderer = PAGES[currentPage];
   const finish = () => {
@@ -189,6 +215,7 @@ function renderPage(opts = {}) {
     updateNavBadges();
     refreshSyncChip();
     if (navigating || !samePage) {
+      holdScroll = null;
       scrollToTop();
       lastScrollByPage[currentPage] = { win: 0, doc: 0, main: 0 };
       return;
@@ -259,6 +286,7 @@ function showLockScreen() {
 
 window.appToast = showToast;
 window.appNavigate = navigate;
+window.appSnapshotScroll = snapshotScroll;
 /** Soft: badges/sync only. Full page re-render when no modal (or force: true). */
 window.appSoftRefresh = softRefreshChrome;
 window.appRefresh = (opts = {}) => {
@@ -314,7 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260812i';
+const APP_BUILD = '20260823c';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

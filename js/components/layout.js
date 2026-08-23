@@ -125,16 +125,23 @@ export function renderLayout(container, currentPage, onNavigate) {
   }, '+');
 
   const main = el('main', { className: 'main-content', id: 'page-content' });
+  const mainWrap = el('div', { className: 'main-wrap' });
+  if (notesOnly) {
+    mainWrap.appendChild(el('div', {
+      className: 'household-notes-banner',
+      role: 'status',
+      title: 'This login can add notes. Money edits stay on the main account.',
+    },
+      el('span', { className: 'household-notes-dot', 'aria-hidden': 'true' }),
+      el('span', { className: 'household-notes-label' }, 'Notes only'),
+    ));
+  }
+  mainWrap.appendChild(main);
 
   container.innerHTML = '';
   container.appendChild(sidebar);
   container.appendChild(overlay);
-  if (notesOnly) {
-    container.appendChild(el('div', { className: 'household-notes-banner' },
-      'Notes-only login · add stickies anytime. Money edits stay on the main account.',
-    ));
-  }
-  container.appendChild(main);
+  container.appendChild(mainWrap);
   container.appendChild(bottomNav);
   container.appendChild(fab);
 
@@ -250,7 +257,7 @@ export function updateActiveNav(page) {
   });
 
   const fab = document.getElementById('fab-expense');
-  if (fab) fab.hidden = !FAB_PAGES.has(page);
+  if (fab) fab.hidden = isNotesOnlyRole() || !FAB_PAGES.has(page);
 
   updateNavBadges();
   refreshSyncChip();
