@@ -19,3 +19,6 @@ create policy "Users insert own budget"
 create policy "Users update own budget"
   on budget_states for update
   using (auth.uid() = user_id);
+
+-- Optional: a second login that can only edit notes. Run supabase-household.sql
+-- after this file if you want a spouse notes-only account.

@@ -69,6 +69,8 @@ export function createSplitEditor(categories, {
         step: '0.01',
         min: 0,
         placeholder: '0.00',
+        inputMode: 'decimal',
+        enterKeyHint: 'done',
         value: row.amount,
       });
 
@@ -84,13 +86,35 @@ export function createSplitEditor(categories, {
             splitData.splice(index, 1);
             render();
           },
-        }, '×')
+        }, 'Remove')
         : null;
 
+      const restBtn = el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary',
+        title: 'Put the leftover amount on this line',
+        onClick: () => {
+          syncRow(index);
+          const total = getTotal();
+          const others = splitData.reduce((s, r, i) => (
+            i === index ? s : s + (Math.abs(Number(r.amount)) || 0)
+          ), 0);
+          const rest = Math.round((total - others) * 100) / 100;
+          amountIn.value = rest > 0 ? String(rest) : '0';
+          syncRow(index);
+        },
+      }, 'Rest');
+
       const rowEl = el('div', { className: 'split-row' },
+        el('div', { className: 'split-row-head' },
+          el('span', { className: 'split-row-label' }, `Split ${index + 1}`),
+        ),
         el('div', { className: 'split-row-category' }, picker.element),
-        el('div', { className: 'split-row-amount' }, amountIn),
-        removeBtn,
+        el('div', { className: 'split-row-amount' },
+          amountIn,
+          restBtn,
+          removeBtn,
+        ),
       );
 
       rows.push({ picker, amountIn });

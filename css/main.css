@@ -1827,12 +1827,16 @@ html[data-reduce-motion="true"] *::after {
 }
 
 /* Prevent background scroll / iOS rubber-band while a modal is open */
+html.modal-open,
+body.modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body.modal-open {
   position: fixed;
   left: 0;
   right: 0;
-  overflow: hidden;
-  overscroll-behavior: none;
   width: 100%;
 }
 
@@ -1935,6 +1939,55 @@ body.modal-open .modal-backdrop {
 .sticky-board-tab-danger {
   color: var(--destructive);
   border-color: color-mix(in srgb, var(--destructive) 35%, var(--border));
+}
+
+.household-notes-banner {
+  background: color-mix(in srgb, var(--accent, #c9a227) 18%, var(--bg-card));
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.55rem 1rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.notes-board-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.notes-search {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.sticky-note-swatches {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.sticky-note-swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  padding: 0;
+  cursor: pointer;
+}
+
+.sticky-note-swatch.is-on {
+  border-color: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+.sticky-note-saved {
+  font-size: 0.7rem;
+  color: rgba(0, 0, 0, 0.45);
+  min-width: 3.2rem;
+  text-align: right;
 }
 
 .sticky-board-hint {
@@ -2329,9 +2382,19 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .split-row {
   display: grid;
-  grid-template-columns: 1fr 7rem auto;
+  grid-template-columns: 1fr auto;
   gap: 0.5rem;
   align-items: start;
+}
+
+.split-row-head {
+  display: none;
+}
+
+.split-row-amount {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
 }
 
 .split-row-category,
@@ -2350,9 +2413,31 @@ html[data-reduce-motion="true"] .sticky-note {
 @media (max-width: 768px) {
   .split-row {
     grid-template-columns: 1fr;
+    gap: 0.45rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+  }
+  .split-row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .split-row-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-muted);
+  }
+  .split-row-amount {
+    width: 100%;
   }
   .split-row-amount input {
-    max-width: 10rem;
+    max-width: none;
+    flex: 1;
+  }
+  .split-remove {
+    min-height: 44px;
   }
 }
 
@@ -2717,6 +2802,47 @@ html[data-reduce-motion="true"] .sticky-note {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   min-height: 0;
+}
+
+.review-uncat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.25rem;
+}
+
+.review-assign-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+
+.review-item.is-selected {
+  outline: 2px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg));
+}
+
+.review-item-desc {
+  font-size: 0.85rem;
+  word-break: break-word;
+}
+
+.tx-form-more {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.75rem 0.75rem;
+}
+
+.tx-form-more summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0.55rem 0;
 }
 
 .review-item {
@@ -3736,8 +3862,49 @@ html[data-reduce-motion="true"] .sticky-note {
 
   /* 16px prevents iOS zoom-on-focus (then the sheet looks blown up) */
   input, select, textarea,
-  .envelope-picker-input {
+  .envelope-picker-input,
+  .sticky-note-title,
+  .sticky-note-body,
+  .notes-search {
     font-size: 16px;
+  }
+
+  .sticky-board {
+    grid-template-columns: 1fr;
+  }
+
+  .sticky-note {
+    transform: none;
+    min-height: 12rem;
+  }
+
+  .sticky-note-tool,
+  .sticky-note-swatch {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .sticky-note-swatch {
+    width: 1.4rem;
+    height: 1.4rem;
+    min-width: 1.4rem;
+    min-height: 1.4rem;
+  }
+
+  .notes-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .notes-header-actions .btn {
+    flex: 1 1 8rem;
+  }
+
+  .household-notes-banner {
+    position: sticky;
+    top: 0;
+    z-index: 40;
   }
 
   /* Bottom sheets pinned to the visible viewport (keyboard-safe) */
@@ -3867,6 +4034,24 @@ html[data-reduce-motion="true"] .sticky-note {
     padding-left: 0.35rem;
     padding-right: 0.35rem;
     font-size: 0.8rem;
+  }
+
+  .review-item-check {
+    padding: 0.35rem 0.15rem 0 0;
+  }
+
+  .review-item-check input {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .review-assign-dock {
+    padding-bottom: 0.25rem;
+  }
+
+  .envelope-picker-option {
+    min-height: 44px;
+    padding: 0.7rem 0.75rem;
   }
 
   .review-item {

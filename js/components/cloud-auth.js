@@ -1,4 +1,4 @@
-import { signIn, signUp } from '../cloud-sync.js';
+import { signIn, signUp, joinHousehold } from '../cloud-sync.js';
 import { store } from '../store.js';
 
 export function showCloudAuthScreen(onComplete) {
@@ -12,7 +12,7 @@ export function showCloudAuthScreen(onComplete) {
   card.innerHTML = `
     <h2>☁️ Cloud Sync</h2>
     <p style="color:var(--text-muted);font-size:0.9rem;line-height:1.5">
-      Sign in to load your budget on any device. Use the same login on your phone and your wife's device.
+      Main account: sign in as usual. Notes-only (spouse): create her own email login, then enter the household code from Settings.
     </p>
     <div class="form-group">
       <label>Email</label>
@@ -21,6 +21,10 @@ export function showCloudAuthScreen(onComplete) {
     <div class="form-group">
       <label>Password</label>
       <input type="password" id="cloud-pw" placeholder="Password" autocomplete="current-password" />
+    </div>
+    <div class="form-group">
+      <label>Household code (notes-only, optional)</label>
+      <input type="text" id="cloud-join" placeholder="ABC123" autocomplete="off" style="text-transform:uppercase;letter-spacing:0.08em" />
     </div>
     <p id="cloud-auth-error" style="color:var(--negative);font-size:0.8rem;display:none;margin-bottom:0.75rem"></p>
     <button class="btn btn-primary" style="width:100%;margin-bottom:0.5rem" id="cloud-signin">Sign In</button>
@@ -33,6 +37,7 @@ export function showCloudAuthScreen(onComplete) {
 
   const emailIn = card.querySelector('#cloud-email');
   const pwIn = card.querySelector('#cloud-pw');
+  const joinIn = card.querySelector('#cloud-join');
   const errEl = card.querySelector('#cloud-auth-error');
 
   function showError(msg) {
@@ -58,11 +63,19 @@ export function showCloudAuthScreen(onComplete) {
     }
     try {
       await signIn(emailIn.value.trim(), pwIn.value);
+      const joinCode = joinIn.value.trim();
+      if (joinCode) {
+        await joinHousehold(joinCode);
+        await store.forcePullFromCloud();
+        overlay.remove();
+        window.location.reload();
+        return;
+      }
       const pull = await store.pullFromCloud();
       if (!pull.hadRemote && store.hasMeaningfulLocalData()) {
         await store.pushToCloud({ force: true });
       } else if (!pull.hadRemote && !store.hasMeaningfulLocalData()) {
-        showError('No budget found in the cloud yet. On your main PC, open the app, sign in, and use Settings → Sync Now.');
+        showError('No budget found. Sync from the main login, or enter a household code above for notes-only.');
         return;
       } else if (pull.hadRemote && !pull.applied && store.hasMeaningfulLocalData()) {
         await store.pushToCloud();
@@ -97,7 +110,13 @@ export function showCloudAuthScreen(onComplete) {
     try {
       await signUp(emailIn.value.trim(), pwIn.value);
       await signIn(emailIn.value.trim(), pwIn.value);
-      await store.pushToCloud({ force: true });
+      const joinCode = joinIn.value.trim();
+      if (joinCode) {
+        await joinHousehold(joinCode);
+        await store.forcePullFromCloud();
+      } else {
+        await store.pushToCloud({ force: true });
+      }
       overlay.remove();
       window.location.reload();
     } catch (e) {

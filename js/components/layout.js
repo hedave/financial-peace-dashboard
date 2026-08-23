@@ -3,7 +3,7 @@ import { store } from '../store.js';
 import { applyTheme } from '../themes.js';
 import { showNotesPopup } from './notes-popup.js';
 import { showToast } from './modal.js';
-import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
+import { getSyncStatus, isCloudConfigured, isNotesOnlyRole } from '../cloud-sync.js';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Home', icon: '🏠' },
@@ -35,6 +35,8 @@ const FAB_PAGES = new Set(['dashboard', 'transactions', 'budget']);
 
 export function renderLayout(container, currentPage, onNavigate) {
   const state = store.getState();
+  const notesOnly = isNotesOnlyRole();
+  document.body.classList.toggle('household-notes', notesOnly);
 
   const sidebar = el('nav', { className: 'sidebar', id: 'sidebar' },
     el('div', { className: 'sidebar-header' },
@@ -70,12 +72,22 @@ export function renderLayout(container, currentPage, onNavigate) {
 
   const overlay = el('div', { className: 'overlay', id: 'overlay', onClick: closeMobile });
 
+  const bottomItems = notesOnly
+    ? [
+      { id: 'dashboard', label: 'Home', icon: '🏠' },
+      { id: 'notes', label: 'Notes', icon: '🗒️' },
+      { id: 'budget', label: 'Budget', icon: '✉️' },
+      { id: 'bills', label: 'Bills', icon: '📋' },
+      { id: 'more', label: 'More', icon: '☰' },
+    ]
+    : BOTTOM_NAV_ITEMS;
+
   const bottomNav = el('nav', {
     className: 'bottom-nav',
     id: 'bottom-nav',
     'aria-label': 'Primary',
   },
-    ...BOTTOM_NAV_ITEMS.map(item =>
+    ...bottomItems.map(item =>
       el('button', {
         type: 'button',
         className: `bottom-nav-item${isBottomNavActive(item.id, currentPage) ? ' active' : ''}`,
@@ -106,7 +118,7 @@ export function renderLayout(container, currentPage, onNavigate) {
     id: 'fab-expense',
     title: 'Log expense',
     'aria-label': 'Log expense',
-    hidden: !FAB_PAGES.has(currentPage),
+    hidden: notesOnly || !FAB_PAGES.has(currentPage),
     onClick: () => {
       window.appNavigate('transactions', 'expense');
     },
@@ -117,6 +129,11 @@ export function renderLayout(container, currentPage, onNavigate) {
   container.innerHTML = '';
   container.appendChild(sidebar);
   container.appendChild(overlay);
+  if (notesOnly) {
+    container.appendChild(el('div', { className: 'household-notes-banner' },
+      'Notes-only login · add stickies anytime. Money edits stay on the main account.',
+    ));
+  }
   container.appendChild(main);
   container.appendChild(bottomNav);
   container.appendChild(fab);
@@ -184,7 +201,10 @@ export function refreshSyncChip() {
 }
 
 function isBottomNavActive(navId, page) {
-  if (navId === 'more') return !BOTTOM_NAV_PAGE_IDS.has(page);
+  const ids = isNotesOnlyRole()
+    ? new Set(['dashboard', 'notes', 'budget', 'bills'])
+    : BOTTOM_NAV_PAGE_IDS;
+  if (navId === 'more') return !ids.has(page);
   return navId === page;
 }
 

@@ -300,9 +300,12 @@ export function createEnvelopePicker(opts = {}) {
   input.addEventListener('focus', () => {
     if (picking) return;
     filter = '';
-    requestAnimationFrame(() => {
-      try { input.select(); } catch { /* ignore */ }
-    });
+    const phone = window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
+    if (!phone) {
+      requestAnimationFrame(() => {
+        try { input.select(); } catch { /* ignore */ }
+      });
+    }
     buildVisible();
     highlight = Math.max(0, visible.findIndex(v => v.id === value));
     openList();

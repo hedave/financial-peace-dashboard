@@ -15,6 +15,7 @@ import { renderNotes } from './pages/notes.js';
 import { renderAdvisor, prepareAdvisorVisit } from './pages/advisor.js';
 import { isCloudConfigured } from './cloud-sync.js';
 import { showCloudAuthScreen } from './components/cloud-auth.js';
+import { showToast } from './components/modal.js';
 
 const PAGES = {
   dashboard: renderDashboard,
@@ -256,6 +257,7 @@ function showLockScreen() {
   });
 }
 
+window.appToast = showToast;
 window.appNavigate = navigate;
 /** Soft: badges/sync only. Full page re-render when no modal (or force: true). */
 window.appSoftRefresh = softRefreshChrome;
@@ -312,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260812g';
+const APP_BUILD = '20260812i';
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

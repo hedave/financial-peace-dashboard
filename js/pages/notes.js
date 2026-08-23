@@ -12,6 +12,7 @@ const STICKY_COLORS = [
 ];
 
 let activeBoardId = null;
+let notesSearch = '';
 
 /** For Quick Notes popup — last board viewed on the Notes page. */
 export function getActiveNotesBoardId() {
@@ -29,13 +30,13 @@ export function renderNotes(container) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header notes-page-header' },
     el('div', {},
-      el('h2', {}, 'Sticky notes'),
-      el('p', {}, 'Multiple pages · add, color, and toss stickies like a light Miro board'),
+      el('h2', {}, 'Notes'),
+      el('p', {}, 'Pages of stickies · tap to type · autosaves to the household'),
     ),
     el('div', { className: 'notes-header-actions' },
       el('button', {
         type: 'button',
-        className: 'btn btn-primary btn-sm',
+        className: 'btn btn-primary',
         onClick: () => {
           if (!board) return;
           store.addStickyNote(board.id, { title: '', text: '', color: 'yellow' });
@@ -45,19 +46,21 @@ export function renderNotes(container) {
       }, '+ Sticky'),
       el('button', {
         type: 'button',
-        className: 'btn btn-secondary btn-sm',
-        onClick: () => {
-          const title = window.prompt('Name for this notes page', 'Shopping');
-          if (title == null) return;
-          activeBoardId = store.addNoteBoard(title);
-          showToast('Page added');
-          window.appRefresh();
-        },
+        className: 'btn btn-secondary',
+        onClick: () => openPageNameModal({
+          title: 'New notes page',
+          value: '',
+          confirmLabel: 'Add page',
+          onSave: (name) => {
+            activeBoardId = store.addNoteBoard(name);
+            showToast('Page added');
+            window.appRefresh();
+          },
+        }),
       }, '+ Page'),
     ),
   ));
 
-  // Page tabs
   const tabs = el('div', { className: 'sticky-board-tabs section' });
   boards.forEach(b => {
     const tab = el('button', {
@@ -65,61 +68,88 @@ export function renderNotes(container) {
       className: `sticky-board-tab${b.id === board?.id ? ' active' : ''}`,
       onClick: () => {
         activeBoardId = b.id;
+        notesSearch = '';
         window.appRefresh();
       },
     }, b.title || 'Page');
-
-    // Double-click to rename
-    tab.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      const next = window.prompt('Rename page', b.title);
-      if (next == null) return;
-      store.renameNoteBoard(b.id, next);
-      window.appRefresh();
-    });
-
     tabs.appendChild(tab);
   });
+  container.appendChild(tabs);
 
-  if (board && boards.length > 1) {
-    tabs.appendChild(el('button', {
-      type: 'button',
-      className: 'sticky-board-tab sticky-board-tab-danger',
-      title: 'Delete this page',
-      onClick: () => {
-        confirmDialog(
-          'Delete this page?',
-          `Remove “${board.title}” and all its stickies?`,
-          () => {
-            store.deleteNoteBoard(board.id);
-            activeBoardId = null;
-            showToast('Page deleted');
+  let boardEl = null;
+  if (board) {
+    const tools = el('div', { className: 'notes-board-tools section' },
+      el('input', {
+        type: 'search',
+        className: 'notes-search',
+        placeholder: 'Search this page…',
+        value: notesSearch,
+        onInput: (e) => {
+          notesSearch = e.target.value;
+          paintBoard(boardEl, board);
+        },
+      }),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary',
+        onClick: () => openPageNameModal({
+          title: 'Rename page',
+          value: board.title || '',
+          confirmLabel: 'Save name',
+          onSave: (name) => {
+            store.renameNoteBoard(board.id, name);
             window.appRefresh();
           },
-        );
-      },
-    }, '🗑'));
+        }),
+      }, 'Rename'),
+      boards.length > 1
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-danger',
+          onClick: () => {
+            confirmDialog(
+              'Delete this page?',
+              `Remove “${board.title}” and all its stickies?`,
+              () => {
+                store.deleteNoteBoard(board.id);
+                activeBoardId = null;
+                showToast('Page deleted');
+                window.appRefresh();
+              },
+            );
+          },
+        }, 'Delete page')
+        : null,
+    );
+    container.appendChild(tools);
   }
-
-  container.appendChild(tabs);
-  container.appendChild(el('p', { className: 'sticky-board-hint' },
-    'Tip: double-click a page tab to rename · stickies autosave · colors via 🎨',
-  ));
 
   if (!board) {
     container.appendChild(el('div', { className: 'empty-state' },
       el('div', { className: 'empty-icon' }, '🗒️'),
-      el('h3', {}, 'No boards yet'),
-      el('p', {}, 'Add a page to start sticking notes.'),
+      el('h3', {}, 'No pages yet'),
+      el('p', {}, 'Add a page, then tap + Sticky.'),
     ));
     return;
   }
 
-  const boardEl = el('div', { className: 'sticky-board', id: 'sticky-board' });
+  boardEl = el('div', { className: 'sticky-board', id: 'sticky-board' });
+  paintBoard(boardEl, board);
+  container.appendChild(boardEl);
+}
 
+function paintBoard(boardEl, board) {
+  const q = String(notesSearch || '').trim().toLowerCase();
+  const stickies = (board.stickies || []).filter(n => {
+    if (!q) return true;
+    const hay = `${n.title || ''} ${n.text || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  boardEl.innerHTML = '';
   if (!board.stickies?.length) {
     boardEl.appendChild(el('div', { className: 'sticky-board-empty' },
-      el('p', {}, 'This page is empty.'),
+      el('p', {}, 'Nothing on this page yet.'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -127,15 +157,19 @@ export function renderNotes(container) {
           store.addStickyNote(board.id);
           window.appRefresh();
         },
-      }, '+ Add your first sticky'),
+      }, '+ Add a sticky'),
     ));
-  } else {
-    board.stickies.forEach(note => {
-      boardEl.appendChild(renderSticky(board.id, note));
-    });
+    return;
   }
-
-  container.appendChild(boardEl);
+  if (!stickies.length) {
+    boardEl.appendChild(el('div', { className: 'sticky-board-empty' },
+      el('p', {}, `No stickies match “${notesSearch.trim()}”.`),
+    ));
+    return;
+  }
+  stickies.forEach(note => {
+    boardEl.appendChild(renderSticky(board.id, note));
+  });
 }
 
 function renderSticky(boardId, note) {
@@ -158,14 +192,18 @@ function renderSticky(boardId, note) {
   });
   bodyIn.value = note.text || '';
 
+  const savedEl = el('span', { className: 'sticky-note-saved' }, '');
+
   const scheduleSave = () => {
     const key = note.id;
+    savedEl.textContent = 'Saving…';
     clearTimeout(stickyTimers.get(key));
     stickyTimers.set(key, setTimeout(() => {
       store.patchStickyNote(boardId, note.id, {
         title: titleIn.value,
         text: bodyIn.value,
       });
+      savedEl.textContent = 'Saved';
     }, 400));
   };
 
@@ -173,16 +211,6 @@ function renderSticky(boardId, note) {
   bodyIn.addEventListener('input', scheduleSave);
   titleIn.addEventListener('blur', scheduleSave);
   bodyIn.addEventListener('blur', scheduleSave);
-
-  const colorBtn = el('button', {
-    type: 'button',
-    className: 'sticky-note-tool',
-    title: 'Change color',
-    onClick: (e) => {
-      e.stopPropagation();
-      openColorPicker(boardId, note, card);
-    },
-  }, '🎨');
 
   const delBtn = el('button', {
     type: 'button',
@@ -198,9 +226,23 @@ function renderSticky(boardId, note) {
     },
   }, '×');
 
+  const swatches = el('div', { className: 'sticky-note-swatches' },
+    ...STICKY_COLORS.map(c => el('button', {
+      type: 'button',
+      className: `sticky-note-swatch sticky-${c.id}${note.color === c.id ? ' is-on' : ''}`,
+      title: c.label,
+      'aria-label': c.label,
+      onClick: (e) => {
+        e.stopPropagation();
+        store.patchStickyNote(boardId, note.id, { color: c.id });
+        window.appRefresh();
+      },
+    })),
+  );
+
   card.appendChild(el('div', { className: 'sticky-note-bar' },
-    el('span', { className: 'sticky-note-grip' }, '···'),
-    el('div', { className: 'sticky-note-tools' }, colorBtn, delBtn),
+    swatches,
+    el('div', { className: 'sticky-note-tools' }, savedEl, delBtn),
   ));
   card.appendChild(titleIn);
   card.appendChild(bodyIn);
@@ -208,29 +250,33 @@ function renderSticky(boardId, note) {
   return card;
 }
 
-function openColorPicker(boardId, note, cardEl) {
-  const body = el('div', { className: 'sticky-color-grid' },
-    ...STICKY_COLORS.map(c => el('button', {
-      type: 'button',
-      className: `sticky-color-swatch sticky-${c.id}${note.color === c.id ? ' active' : ''}`,
-      title: c.label,
-      onClick: () => {
-        store.patchStickyNote(boardId, note.id, { color: c.id });
-        modal.close();
-        window.appRefresh();
-      },
-    })),
-  );
-
+function openPageNameModal({ title, value, confirmLabel, onSave }) {
+  const input = el('input', {
+    type: 'text',
+    placeholder: 'Shopping, Kids, This week…',
+    value: value || '',
+  });
   const modal = showModal({
-    title: 'Sticky color',
-    body,
+    title,
+    body: el('div', { className: 'form-group' },
+      el('label', {}, 'Page name'),
+      input,
+    ),
     footer: [
+      el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Cancel'),
       el('button', {
         type: 'button',
-        className: 'btn btn-secondary',
-        onClick: () => modal.close(),
-      }, 'Cancel'),
+        className: 'btn btn-primary',
+        onClick: () => {
+          const name = input.value.trim();
+          if (!name) {
+            showToast('Enter a page name', 'info');
+            return;
+          }
+          modal.close();
+          onSave(name);
+        },
+      }, confirmLabel || 'Save'),
     ],
   });
 }

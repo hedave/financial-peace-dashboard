@@ -46,6 +46,8 @@ import {
   loadRemoteState,
   pushState,
   schedulePush,
+  isNotesOnlyRole,
+  refreshHousehold,
 } from './cloud-sync.js';
 import { findReconciliationCandidates } from './reconcile-match.js';
 
@@ -335,9 +337,15 @@ class Store {
       this.cloudReady = true;
       return { configured: true, signedIn: false };
     }
-    await this.pullFromCloud();
+    await refreshHousehold();
+    if (isNotesOnlyRole()) await this.forcePullFromCloud().catch(() => this.pullFromCloud());
+    else await this.pullFromCloud();
     this.cloudReady = true;
     return { configured: true, signedIn: true };
+  }
+
+  canWriteBudget() {
+    return !isNotesOnlyRole();
   }
 
   hasMeaningfulLocalData() {
@@ -364,6 +372,32 @@ class Store {
   async pullFromCloud() {
     const remote = await loadRemoteState();
     if (!remote?.state || typeof remote.state !== 'object') return { hadRemote: false, applied: false };
+
+    if (isNotesOnlyRole()) {
+      const keep = {
+        noteBoards: this.state.noteBoards,
+        notes: this.state.notes,
+        notesUpdatedAt: this.state.notesUpdatedAt,
+      };
+      const remoteNotesAt = remote.state.notesUpdatedAt;
+      const keepLocalNotes = keep.notesUpdatedAt
+        && (!remoteNotesAt || String(keep.notesUpdatedAt) > String(remoteNotesAt));
+      const remoteTime = new Date(remote.updated_at || 0).getTime();
+      this.state = normalizeState({
+        ...createDefaultState(),
+        ...remote.state,
+        _cloudUpdatedAt: remoteTime,
+      });
+      if (keepLocalNotes) {
+        this.state.noteBoards = keep.noteBoards;
+        this.state.notes = keep.notes;
+        this.state.notesUpdatedAt = keep.notesUpdatedAt;
+      }
+      this.processMonthRollover();
+      this.writeLocal();
+      this.notify();
+      return { hadRemote: true, applied: true };
+    }
 
     const remoteTime = new Date(remote.updated_at || 0).getTime();
     const localRaw = localStorage.getItem(STORAGE_KEY);
@@ -441,8 +475,14 @@ class Store {
     return this.state;
   }
 
-  update(fn) {
+  update(fn, opts = {}) {
     try {
+      if (isNotesOnlyRole() && !opts.notes) {
+        if (typeof window !== 'undefined' && typeof window.appToast === 'function') {
+          window.appToast('This login can only edit notes. Money changes stay on the main account.', 'info');
+        }
+        return;
+      }
       normalizeState(this.state);
       fn(this.state);
       normalizeState(this.state);
@@ -464,6 +504,9 @@ class Store {
     } catch (e) {
       console.error('Failed to write to localStorage', e);
       throw new Error('Could not save data. Your browser storage may be full or disabled.');
+    }
+    if (isCloudConfigured()) {
+      schedulePush(() => this.pushToCloud());
     }
   }
 
@@ -501,7 +544,7 @@ class Store {
     this.update(s => {
       if (!Array.isArray(s.noteBoards)) s.noteBoards = [];
       s.noteBoards.push(board);
-    });
+    }, { notes: true });
     return board.id;
   }
 
@@ -509,7 +552,7 @@ class Store {
     this.update(s => {
       const b = (s.noteBoards || []).find(x => x.id === boardId);
       if (b) b.title = String(title || 'Page').trim() || 'Page';
-    });
+    }, { notes: true });
   }
 
   deleteNoteBoard(boardId) {
@@ -518,7 +561,7 @@ class Store {
       if (!s.noteBoards.length) {
         s.noteBoards = [{ id: generateId(), title: 'General', stickies: [] }];
       }
-    });
+    }, { notes: true });
   }
 
   addStickyNote(boardId, { title = '', text = '', color = 'yellow' } = {}) {
@@ -534,7 +577,7 @@ class Store {
       if (!b) return;
       if (!Array.isArray(b.stickies)) b.stickies = [];
       b.stickies.unshift(note);
-    });
+    }, { notes: true });
     return note.id;
   }
 
@@ -556,7 +599,7 @@ class Store {
       const b = (s.noteBoards || []).find(x => x.id === boardId);
       if (!b || !Array.isArray(b.stickies)) return;
       b.stickies = b.stickies.filter(n => n.id !== noteId);
-    });
+    }, { notes: true });
   }
 
   syncLegacyNotesFromStickies() {

@@ -7,6 +7,7 @@ import { exportForGoogleSheets } from '../sheets-export.js';
 import { buildRuleLabel } from '../category-rules.js';
 import {
   isCloudConfigured, getUserEmail, getSyncStatus, signOut,
+  createHouseholdInvite, listHouseholdInvites, isNotesOnlyRole,
 } from '../cloud-sync.js';
 
 /**
@@ -231,8 +232,11 @@ export async function renderSettings(container) {
           }, 'Sign Out') : null,
         ),
         el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem' },
-          'Share one login with your spouse so both phones see the same household budget.',
+          isNotesOnlyRole()
+            ? 'You are on a notes-only login. Stickies sync to the household. Money edits stay on the main account.'
+            : 'Your login owns the budget. Create a notes-only code so your spouse can add stickies on her own account without changing transactions.',
         ),
+        await householdSharePanel(cloudEmail),
       )
       : el('p', { style: 'font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
         'Cloud sync is not configured on this deploy. See DEPLOY.md to connect Supabase.',
@@ -510,7 +514,7 @@ export async function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Household of ' + (state.settings.familySize || 7)
-      + ' · Build 20260812g'
+      + ' · Build 20260812i'
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));
@@ -542,6 +546,59 @@ function paletteSelector(currentId) {
   });
 
   return grid;
+}
+
+async function householdSharePanel(signedIn) {
+  if (!signedIn) return null;
+  if (isNotesOnlyRole()) {
+    return el('p', { className: 'tx-form-hint', style: 'margin-top:0.5rem' },
+      'Household role: notes only.',
+    );
+  }
+
+  const box = el('div', { className: 'household-share', style: 'margin-top:1rem' });
+  const codeEl = el('p', { className: 'household-code', style: 'font-size:1.4rem;font-weight:700;letter-spacing:0.12em;margin:0.5rem 0' }, '');
+  const hint = el('p', { className: 'tx-form-hint', style: 'margin:0' }, '');
+
+  async function paintInvite() {
+    const invites = await listHouseholdInvites();
+    const live = invites[0];
+    if (live) {
+      codeEl.textContent = live.code;
+      hint.textContent = `She signs up with her own email, then enters this code. Expires ${new Date(live.expires_at).toLocaleDateString()}.`;
+    } else {
+      codeEl.textContent = '';
+      hint.textContent = 'Create a code, then have her make her own login and join with it.';
+    }
+  }
+  await paintInvite();
+
+  box.appendChild(el('h3', { style: 'font-size:0.95rem;margin:0 0 0.35rem' }, 'Notes-only account (spouse)'));
+  box.appendChild(el('p', {
+    style: 'font-size:0.82rem;color:var(--text-muted);line-height:1.45;margin:0 0 0.5rem',
+  }, 'First run supabase-household.sql in the Supabase SQL editor. Then create a code. She will see the budget and can add notes, not transactions.'));
+  box.appendChild(codeEl);
+  box.appendChild(hint);
+  box.appendChild(el('button', {
+    type: 'button',
+    className: 'btn btn-sm btn-primary',
+    style: 'margin-top:0.65rem',
+    onClick: async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const inv = await createHouseholdInvite();
+        codeEl.textContent = inv.code;
+        hint.textContent = 'Give her this code. It lasts 7 days.';
+        showToast('Household code ready', 'success');
+      } catch (err) {
+        showToast(err.message || 'Could not create code', 'info', 7000);
+      } finally {
+        btn.disabled = false;
+      }
+    },
+  }, 'Create household code'));
+  return box;
 }
 
 function daysSince(iso) {

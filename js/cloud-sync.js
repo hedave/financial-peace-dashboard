@@ -4,6 +4,8 @@ let client = null;
 let pushTimer = null;
 let lastSyncedAt = null;
 let syncStatus = 'idle'; // idle | syncing | error | ok
+/** @type {{ role: 'owner' | 'notes', ownerId: string | null, userId: string | null }} */
+let household = { role: 'owner', ownerId: null, userId: null };
 
 export function isCloudConfigured() {
   return CLOUD_SYNC_ENABLED && SUPABASE_URL && SUPABASE_ANON_KEY
@@ -55,6 +57,121 @@ export async function signOut() {
   client = null;
   lastSyncedAt = null;
   syncStatus = 'idle';
+  household = { role: 'owner', ownerId: null, userId: null };
+}
+
+export function getHousehold() {
+  return household;
+}
+
+export function isNotesOnlyRole() {
+  return household.role === 'notes';
+}
+
+function inviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+export async function refreshHousehold() {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session) {
+    household = { role: 'owner', ownerId: null, userId: null };
+    return household;
+  }
+  const userId = session.user.id;
+  const { data, error } = await sb
+    .from('household_members')
+    .select('owner_id, role')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error && (error.code === '42P01' || /household_members/i.test(error.message || ''))) {
+    household = { role: 'owner', ownerId: userId, userId };
+    return household;
+  }
+  if (error) {
+    console.warn('Household lookup failed', error);
+    household = { role: 'owner', ownerId: userId, userId };
+    return household;
+  }
+  if (data?.owner_id) {
+    household = {
+      role: data.role === 'notes' ? 'notes' : 'owner',
+      ownerId: data.owner_id,
+      userId,
+    };
+  } else {
+    household = { role: 'owner', ownerId: userId, userId };
+  }
+  return household;
+}
+
+async function budgetOwnerId() {
+  if (!household.ownerId) await refreshHousehold();
+  const session = await getSession();
+  return household.ownerId || session?.user?.id || null;
+}
+
+export async function createHouseholdInvite() {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session) throw new Error('Sign in first');
+  const ownerId = session.user.id;
+  await sb.from('household_members').upsert({
+    user_id: ownerId,
+    owner_id: ownerId,
+    role: 'owner',
+  }, { onConflict: 'user_id' });
+  await sb.from('household_invites').delete().eq('owner_id', ownerId);
+  const code = inviteCode();
+  const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await sb.from('household_invites').insert({
+    code,
+    owner_id: ownerId,
+    role: 'notes',
+    expires_at: expires,
+  });
+  if (error) {
+    if (error.code === '42P01' || /household_invites/i.test(error.message || '')) {
+      throw new Error('Run supabase-household.sql in the Supabase SQL editor first.');
+    }
+    throw error;
+  }
+  await refreshHousehold();
+  return { code, expiresAt: expires };
+}
+
+export async function joinHousehold(code) {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session) throw new Error('Sign in first');
+  const trimmed = String(code || '').trim().toUpperCase();
+  if (trimmed.length < 4) throw new Error('Enter the 6-letter household code.');
+  const { data, error } = await sb.rpc('join_household', { invite_code: trimmed });
+  if (error) {
+    if (/join_household|does not exist|42P01/i.test(error.message || '')) {
+      throw new Error('Run supabase-household.sql in the Supabase SQL editor first.');
+    }
+    throw error;
+  }
+  await refreshHousehold();
+  return data;
+}
+
+export async function listHouseholdInvites() {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session) return [];
+  const { data, error } = await sb
+    .from('household_invites')
+    .select('code, expires_at, role')
+    .eq('owner_id', session.user.id)
+    .gt('expires_at', new Date().toISOString());
+  if (error) return [];
+  return data || [];
 }
 
 /** True if this looks like a fresh install with no real budget data */
@@ -70,15 +187,26 @@ export function isBlankBudgetState(state) {
   return !hasActivity;
 }
 
+function notesSlice(state) {
+  return {
+    notes: state?.notes || '',
+    notesUpdatedAt: state?.notesUpdatedAt || null,
+    noteBoards: Array.isArray(state?.noteBoards) ? state.noteBoards : [],
+  };
+}
+
 export async function loadRemoteState() {
   const sb = await getClient();
   const session = await getSession();
   if (!sb || !session) return null;
+  await refreshHousehold();
+  const ownerId = await budgetOwnerId();
+  if (!ownerId) return null;
 
   const { data, error } = await sb
     .from('budget_states')
     .select('state, updated_at')
-    .eq('user_id', session.user.id)
+    .eq('user_id', ownerId)
     .maybeSingle();
 
   if (error) throw error;
@@ -92,15 +220,39 @@ export async function pushState(state) {
   const sb = await getClient();
   const session = await getSession();
   if (!sb || !session) return false;
+  await refreshHousehold();
+  const ownerId = await budgetOwnerId();
+  if (!ownerId) return false;
 
   syncStatus = 'syncing';
-  const row = {
-    user_id: session.user.id,
-    state,
-    updated_at: new Date().toISOString(),
-  };
+  let payload = { ...state };
 
-  const { error } = await sb.from('budget_states').upsert(row, { onConflict: 'user_id' });
+  if (household.role === 'notes') {
+    const { data, error: readErr } = await sb
+      .from('budget_states')
+      .select('state, updated_at')
+      .eq('user_id', ownerId)
+      .maybeSingle();
+    if (readErr) {
+      syncStatus = 'error';
+      throw readErr;
+    }
+    const remote = data?.state && typeof data.state === 'object' ? data.state : {};
+    payload = { ...remote, ...notesSlice(state) };
+  }
+
+  const stamp = new Date().toISOString();
+  let error;
+  if (household.role === 'notes') {
+    const upd = await sb.from('budget_states')
+      .update({ state: payload, updated_at: stamp })
+      .eq('user_id', ownerId);
+    error = upd.error;
+  } else {
+    const row = { user_id: ownerId, state: payload, updated_at: stamp };
+    const up = await sb.from('budget_states').upsert(row, { onConflict: 'user_id' });
+    error = up.error;
+  }
   if (error) {
     syncStatus = 'error';
     throw error;

@@ -48,12 +48,14 @@ function lockBodyScroll() {
   const y = window.scrollY || 0;
   document.body.dataset.scrollY = String(y);
   document.body.classList.add('modal-open');
+  document.documentElement.classList.add('modal-open');
   document.body.style.top = `-${y}px`;
 }
 
 function unlockBodyScroll() {
   if (getOpenModalCount() > 0) return;
   document.body.classList.remove('modal-open');
+  document.documentElement.classList.remove('modal-open');
   const y = Number(document.body.dataset.scrollY || 0);
   delete document.body.dataset.scrollY;
   document.body.style.top = '';
@@ -103,15 +105,25 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
   backdrop.style.zIndex = String(z);
 
   let closed = false;
+  const scrollFieldInBody = (target) => {
+    if (!target || !bodyEl.contains(target)) return;
+    if (!target.matches('input, select, textarea, [role="combobox"]')) return;
+    const t = target.getBoundingClientRect();
+    const b = bodyEl.getBoundingClientRect();
+    const pad = 16;
+    if (t.bottom > b.bottom - pad) {
+      bodyEl.scrollTop += (t.bottom - b.bottom + pad);
+    } else if (t.top < b.top + pad) {
+      bodyEl.scrollTop -= (b.top - t.top + pad);
+    }
+    // iOS pans the document when the keyboard opens — pin it
+    if (document.body.classList.contains('modal-open')) {
+      window.scrollTo(0, 0);
+    }
+  };
   const onViewportChange = () => {
     const active = document.activeElement;
-    if (modal.contains(active) && active.matches?.('input, select, textarea')) {
-      try {
-        active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-      } catch {
-        active.scrollIntoView(true);
-      }
-    }
+    if (modal.contains(active)) scrollFieldInBody(active);
   };
   const close = () => {
     if (closed) return;
@@ -173,18 +185,9 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
   syncModalCountFromDom();
   lockBodyScroll();
 
-  const keepFieldVisible = (target) => {
-    if (!target || !bodyEl.contains(target)) return;
-    if (!target.matches('input, select, textarea')) return;
-    requestAnimationFrame(() => {
-      try {
-        target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
-      } catch {
-        target.scrollIntoView(true);
-      }
-    });
-  };
-  bodyEl.addEventListener('focusin', e => keepFieldVisible(e.target));
+  bodyEl.addEventListener('focusin', e => {
+    setTimeout(() => scrollFieldInBody(e.target), 280);
+  });
   window.visualViewport?.addEventListener('resize', onViewportChange);
 
   // Phone: don't pop the keyboard immediately — it shoves the sheet off-screen

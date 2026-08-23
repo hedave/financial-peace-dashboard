@@ -12,7 +12,8 @@
    - Turn **OFF** “Confirm email” (easier for personal/family use)
    - **Save**
    - You do **not** need to enable **Anonymous** sign-ins
-6. **Project Settings** → **API** (or **API Keys**) → copy:
+6. (Optional, spouse notes-only login) SQL Editor → paste `supabase-household.sql` → **Run**. Then in the app: Settings → Cloud → **Create household code**. She creates her own email login and enters that code.
+7. **Project Settings** → **API** (or **API Keys**) → copy:
    - **Project URL** (e.g. `https://abcdefgh.supabase.co`)
    - **Publishable key** (`sb_publishable_...`) — this replaced the old name "anon key"
    - If you only see legacy keys: **anon public** (`eyJ...`) works too

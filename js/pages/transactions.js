@@ -902,22 +902,14 @@ export function openTransactionForm({
   syncTypeFields();
   syncPostChecking();
 
+  amountIn.setAttribute('inputmode', 'decimal');
+  amountIn.setAttribute('enterkeyhint', 'done');
+
   const modal = showModal({
     title: isEdit ? 'Edit Transaction' : 'Add Transaction',
-    body: el('div', {},
+    body: el('div', { className: 'tx-form' },
       importNote,
       linkedDebtNote,
-      el('div', { className: 'input-row' },
-        typeField,
-        el('div', { className: 'form-group' },
-          el('label', {}, 'Date'),
-          dateIn,
-          el('p', {
-            className: 'tx-form-hint',
-            style: 'margin-top:0.35rem;margin-bottom:0;line-height:1.35',
-          }, 'Envelope month follows this date — use the purchase day for late bank posts.'),
-        ),
-      ),
       el('div', { className: 'input-row' },
         el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
         el('div', { className: 'form-group' }, el('label', {}, 'Description'), descIn),
@@ -925,11 +917,25 @@ export function openTransactionForm({
       splitOption,
       catGroup,
       splitSection,
-      memoGroup,
-      incomeSourceGroup,
-      postCheckingGroup,
       rememberGroup,
-      debtGroup,
+      el('details', { className: 'tx-form-more', open: isEdit ? true : undefined },
+        el('summary', {}, 'Date, type, memo & posting'),
+        el('div', { className: 'input-row' },
+          typeField,
+          el('div', { className: 'form-group' },
+            el('label', {}, 'Date'),
+            dateIn,
+            el('p', {
+              className: 'tx-form-hint',
+              style: 'margin-top:0.35rem;margin-bottom:0;line-height:1.35',
+            }, 'Envelope month follows this date — use the purchase day for late bank posts.'),
+          ),
+        ),
+        memoGroup,
+        incomeSourceGroup,
+        postCheckingGroup,
+        debtGroup,
+      ),
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Cancel'),

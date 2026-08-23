@@ -503,14 +503,14 @@ export function openUncategorizedReview() {
       cb.addEventListener('change', () => {
         if (cb.checked) selected.add(t.id);
         else selected.delete(t.id);
+        row.classList.toggle('is-selected', cb.checked);
         updateRemainingHint();
       });
-      list.appendChild(el('div', { className: 'review-item' },
+      const row = el('div', { className: 'review-item' },
         el('label', { className: 'review-item-check' }, cb),
         el('div', { className: 'review-item-main', style: 'flex:1;min-width:0' },
           el('strong', {}, formatDate(t.date)),
-          ' · ',
-          t.description || '—',
+          el('div', { className: 'review-item-desc' }, t.description || '—'),
         ),
         el('span', { className: 'review-item-amt' }, formatCurrency(t.amount)),
         el('div', { className: 'btn-group' },
@@ -522,6 +522,7 @@ export function openUncategorizedReview() {
                 m.openTransactionForm({
                   transaction: t,
                   rememberDefault: true,
+                  splitMode: store.isSplitTransaction(t),
                   onSaved: () => {
                     paint();
                     window.appSoftRefresh?.();
@@ -530,7 +531,7 @@ export function openUncategorizedReview() {
                 });
               });
             },
-          }, 'Edit'),
+          }, 'Edit / split'),
           el('button', {
             type: 'button',
             className: 'btn btn-sm btn-danger',
@@ -543,7 +544,13 @@ export function openUncategorizedReview() {
             }),
           }, 'Delete'),
         ),
-      ));
+      );
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button, input, a, .envelope-picker')) return;
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+      list.appendChild(row);
     });
     updateRemainingHint();
   }
@@ -552,14 +559,14 @@ export function openUncategorizedReview() {
 
   modal = showModal({
     title: 'Review uncategorized',
-    body: el('div', {},
+    body: el('div', { className: 'review-uncat' },
       el('p', { className: 'tx-form-hint' },
-        'Select transactions and assign an envelope, edit individually, or delete mistakes/duplicates. Type in the envelope box to jump (e.g. P → Pets).',
+        'Tap a row to select it. Assign at the bottom, or Edit / split one charge.',
       ),
       el('button', {
         type: 'button',
         className: 'btn btn-sm btn-secondary',
-        style: 'margin-bottom:0.75rem',
+        style: 'margin-bottom:0.65rem',
         onClick: () => {
           const n = store.applyRulesToUncategorized();
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
@@ -569,21 +576,23 @@ export function openUncategorizedReview() {
         },
       }, 'Apply saved rules'),
       list,
-      el('div', { className: 'form-group', style: 'margin-top:1rem' },
-        el('label', { for: 'bulk-cat' }, 'Assign selected to envelope'),
-        envelopePicker.element,
-        remainingHint,
-      ),
-      el('div', { className: 'form-option remember-rule', style: 'margin-top:0.75rem' },
-        el('div', { className: 'form-option-text' },
-          el('span', { className: 'form-option-label' }, 'Always use this envelope'),
-          el('span', { className: 'form-option-hint' },
-            'Save merchant rules so future CSV/PDF imports auto-categorize the same way',
-          ),
+      el('div', { className: 'review-assign-dock' },
+        el('div', { className: 'form-group', style: 'margin-bottom:0.5rem' },
+          el('label', { for: 'bulk-cat' }, 'Assign selected to envelope'),
+          envelopePicker.element,
+          remainingHint,
         ),
-        el('label', { className: 'toggle-switch' },
-          alwaysUse,
-          el('span', { className: 'toggle-slider' }),
+        el('div', { className: 'form-option remember-rule', style: 'margin:0.35rem 0 0.65rem' },
+          el('div', { className: 'form-option-text' },
+            el('span', { className: 'form-option-label' }, 'Always use this envelope'),
+            el('span', { className: 'form-option-hint' },
+              'Save a rule for this merchant on future imports',
+            ),
+          ),
+          el('label', { className: 'toggle-switch' },
+            alwaysUse,
+            el('span', { className: 'toggle-slider' }),
+          ),
         ),
       ),
     ),
@@ -650,14 +659,6 @@ export function openUncategorizedReview() {
           if (!store.getReviewInbox().uncategorized.length) modal.close();
         },
       }, 'Assign Selected'),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-accent',
-        onClick: () => {
-          modal.close();
-          window.appNavigate('transactions');
-        },
-      }, 'Open Transactions'),
     ],
   });
   modal.modal.classList.add('modal-wide', 'modal-scrollable');
