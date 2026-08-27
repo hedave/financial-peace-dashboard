@@ -71,6 +71,11 @@ export function renderBudget(container, arg) {
 
   const month = budgetViewMonth;
   const isCurrentMonth = month === liveMonth;
+  const overspendShare = store.getOverspendShare(month);
+  const showOverspendShare = isCurrentMonth
+    && !!store.getState().settings?.showOverspendShare
+    && overspendShare.overspendTotal > 0.005;
+  const coverIouSummary = store.getCoverIouSummary();
   const income = store.getTotalIncome(month);
   const bonusLogged = store.getBonusIncomeLogged(month);
   const bonusGross = store.getBonusIncomeGross(month);
@@ -205,6 +210,9 @@ export function renderBudget(container, arg) {
           bonusGross > 0.005
             ? `${formatCurrency(bonusGross)} bonus in · ${formatCurrency(bonusUsed)} sent to envelopes`
             : 'Refunds and extra deposits land here — Assign bonus on any envelope',
+          coverIouSummary.total > 0.005
+            ? ` · ${formatCurrency(coverIouSummary.total)} still owed back to envelopes that covered overspend`
+            : '',
         ),
       )
       : null,
@@ -224,6 +232,77 @@ export function renderBudget(container, arg) {
     }, `Carry-over from last month: ${formatCurrency(carryTotal)} across ${carryCount} envelope${carryCount === 1 ? '' : 's'}. That leftover is already in Remaining — To Allocate is only new income minus this month’s plan. Use Move to shift leftover this month; Allocate changes the ongoing plan.`));
   }
 
+  if (isCurrentMonth && overspendShare.overspendTotal > 0.005) {
+    const names = overspendShare.overspent
+      .slice(0, 3)
+      .map(o => o.name)
+      .join(', ');
+    const extra = overspendShare.overspent.length > 3
+      ? ` +${overspendShare.overspent.length - 3} more`
+      : '';
+    const shareOn = !!store.getState().settings?.showOverspendShare;
+    const sinkHit = overspendShare.sinkingTakeTotal > 0.005
+      ? ` Sinking funds would absorb ${formatCurrency(overspendShare.sinkingTakeTotal)} of that if leftover were shared.`
+      : '';
+    const billHit = overspendShare.protectedCount
+      ? ` Mapped bills/debts (${overspendShare.protectedNames.slice(0, 3).join(', ')}${overspendShare.protectedCount > 3 ? '…' : ''}) stay out of the share.`
+      : '';
+    container.appendChild(el('div', { className: 'banner banner-warning section overspend-share-banner' },
+      el('div', { className: 'banner-icon' }, '📉'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `${formatCurrency(overspendShare.overspendTotal)} overspent — same cash as leftover`),
+        el('p', {},
+          `${names}${extra} went past their envelope. That money already left checking, so leftover on flexible envelopes is on paper until you cover it.${sinkHit}${billHit}`,
+        ),
+      ),
+      el('div', { className: 'btn-group', style: 'margin-left:auto' },
+        el('button', {
+          type: 'button',
+          className: `btn btn-sm ${shareOn ? 'btn-primary' : 'btn-secondary'}`,
+          onClick: () => {
+            store.update(s => { s.settings.showOverspendShare = !shareOn; });
+            window.appRefresh();
+          },
+        }, shareOn ? 'Hide share' : 'Show share'),
+        store.canWriteBudget()
+          ? el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            onClick: () => openCoverOverspend(month),
+          }, 'Cover overspend')
+          : null,
+      ),
+    ));
+  }
+
+  if (isCurrentMonth && coverIouSummary.total > 0.005) {
+    const names = coverIouSummary.donors.slice(0, 3).map(d => d.name).join(', ');
+    const extra = coverIouSummary.donors.length > 3 ? ` +${coverIouSummary.donors.length - 3}` : '';
+    const sinkBit = coverIouSummary.sinkingTotal > 0.005
+      ? ` ${formatCurrency(coverIouSummary.sinkingTotal)} of that is sinking funds.`
+      : '';
+    container.appendChild(el('div', { className: 'banner banner-action section' },
+      el('div', { className: 'banner-icon' }, '↩️'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `${formatCurrency(coverIouSummary.total)} to restore from bonus`),
+        el('p', {},
+          `Cover overspend borrowed leftover from ${names}${extra}.${sinkBit} `
+          + (bonusAvailable > 0.005
+            ? `${formatCurrency(bonusAvailable)} bonus is free to put back.`
+            : 'When bonus or refunds land, repay those envelopes first.'),
+        ),
+      ),
+      store.canWriteBudget() && bonusAvailable > 0.005
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          style: 'margin-left:auto',
+          onClick: () => openRepayCoverFromBonus(month),
+        }, 'Repay from bonus')
+        : null,
+    ));
+  }
+
   const prevMonth = getPreviousMonth(liveMonth);
   const hasSnapshot = !!store.getState().monthBudgetSnapshots[prevMonth];
 
@@ -240,6 +319,20 @@ export function renderBudget(container, arg) {
     className: 'page-tools-item',
     onClick: () => { toolsMenu.removeAttribute('open'); openMoveBetweenEnvelopes(); },
   }, 'Move between envelopes'));
+  if (isCurrentMonth && store.getOverspendShare(month).overspendTotal > 0.005 && store.canWriteBudget()) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); openCoverOverspend(month); },
+    }, 'Cover overspend'));
+  }
+  if (isCurrentMonth && coverIouSummary.total > 0.005 && store.canWriteBudget()) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); openRepayCoverFromBonus(month); },
+    }, 'Repay cover from bonus'));
+  }
   const negCarryCount = store.countNegativeCarryOvers();
   if (negCarryCount > 0) {
     toolsList.appendChild(el('button', {
@@ -278,6 +371,13 @@ export function renderBudget(container, arg) {
         onClick: () => openMoveBetweenEnvelopes(),
         title: 'Shift leftover room this month only — does not change next month’s plan',
       }, 'Move between envelopes'),
+      overspendShare.overspendTotal > 0.005 && store.canWriteBudget()
+        ? el('button', {
+          className: 'btn btn-secondary budget-action-secondary',
+          onClick: () => openCoverOverspend(month),
+          title: 'Take a percentage of leftover envelopes to cover overspend this month',
+        }, 'Cover overspend')
+        : null,
       negCarryCount > 0
         ? el('button', {
           className: 'btn btn-secondary budget-action-secondary',
@@ -345,6 +445,20 @@ export function renderBudget(container, arg) {
         },
       }, opt.label));
     });
+    if (isCurrentMonth && overspendShare.overspendTotal > 0.005) {
+      const shareOn = !!store.getState().settings?.showOverspendShare;
+      filterBar.appendChild(el('button', {
+        type: 'button',
+        className: `chip${shareOn ? ' active' : ''}`,
+        title: 'Show how overspent envelopes take a share of leftover on every other envelope — including sinking funds',
+        onClick: () => {
+          store.update(s => {
+            s.settings.showOverspendShare = !shareOn;
+          });
+          window.appRefresh();
+        },
+      }, shareOn ? 'Overspend share on' : 'Overspend share'));
+    }
   }
   renderFilterChips();
   container.appendChild(filterBar);
@@ -359,14 +473,12 @@ export function renderBudget(container, arg) {
 
   function needsAttention(cat) {
     const health = store.getEnvelopeHealth(cat.id, month);
-    const remaining = store.getCategoryRemaining(cat.id, month);
     // Soft cap is plan-level; only surface for live month
     const overCap = isCurrentMonth && store.isOverSoftCap(cat.id);
-    return health === 'over' || health === 'depleted' || health === 'warning'
-      || remaining < 0 || overCap;
+    return health === 'over' || health === 'depleted' || health === 'warning' || overCap;
   }
 
-  const cardOptsBase = { month, isCurrentMonth };
+  const cardOptsBase = { month, isCurrentMonth, overspendShare, showOverspendShare };
 
   function renderGrid() {
     const favorites = favIds();
@@ -446,16 +558,36 @@ export function renderBudget(container, arg) {
 function linkedItems(cat) {
   const debts = store.getDebtsForCategory(cat.id);
   const bills = store.getBillsForCategory(cat.id);
-  if (!debts.length && !bills.length) return null;
+  const target = store.getSnowballTarget();
+  const retired = store.getRetiredDebtForEnvelope(cat.id);
+  const remaining = store.getCategoryRemaining(cat.id);
+  if (!debts.length && !bills.length && !retired) return null;
 
   const items = [
-    ...debts.map(d => `❄️ ${d.name} (${formatCurrency(d.minPayment)}/mo min)`),
+    ...debts.map(d => {
+      const isTarget = target && d.id === target.id;
+      return `❄️ ${d.name} (min ${formatCurrency(d.minPayment)}${isTarget ? ' · current snowball' : ''})`;
+    }),
     ...bills.map(b => `📋 ${b.name} (${formatCurrency(b.amount)})`),
   ];
 
+  const paidOffNote = retired && remaining > 0.005 && !debts.length
+    ? el('div', { className: 'envelope-linked-hint' },
+      `${retired.name} is paid off. Move leftover to the next snowball envelope so extra keeps rolling.`,
+    )
+    : null;
+
+  if (!items.length && !paidOffNote) return null;
+
   return el('div', { className: 'envelope-linked' },
-    el('span', { className: 'envelope-linked-label' }, 'Linked'),
-    items.join(' · ')
+    items.length
+      ? el('div', {},
+        el('span', { className: 'envelope-linked-label' }, 'Linked'),
+        ' ',
+        items.join(' · '),
+      )
+      : null,
+    paidOffNote,
   );
 }
 
@@ -498,6 +630,56 @@ function toggleFavorite(categoryId) {
   window.appRefresh();
 }
 
+function coverIouLine(cat) {
+  const owed = store.getCoverIouOutstandingForEnvelope(cat.id);
+  if (!(owed > 0.005)) return null;
+  return el('div', {
+    className: 'envelope-share-hit sinking',
+    title: 'This leftover was used to cover overspend. Bonus can put it back.',
+  }, `Owed back ${formatCurrency(owed)} from bonus`);
+}
+
+function overspendShareLine(cat, remaining, opts = {}) {
+  if (!opts.showOverspendShare || !opts.overspendShare) return null;
+  const hit = opts.overspendShare.byId?.[cat.id];
+  if (!hit) return null;
+  if (hit.role === 'snowball') {
+    return el('div', {
+      className: 'envelope-share-hit protected',
+      title: 'Extra paid to the mapped debt — not a hole to fill from other envelopes',
+    }, 'Extra snowball — not overspend');
+  }
+  if (hit.role === 'bill-extra') {
+    return el('div', {
+      className: 'envelope-share-hit protected',
+      title: 'Extra toward a mapped bill — leftover on this envelope is not shared',
+    }, 'Extra to bill — not overspend');
+  }
+  if (hit.role === 'over') {
+    return el('div', { className: 'envelope-share-hit over' },
+      `Needs ${formatCurrency(hit.over)} covered from leftover (same checking pile)`,
+    );
+  }
+  if (hit.role === 'protected') {
+    const label = hit.kind === 'debt'
+      ? 'Debt envelope — leftover not shared'
+      : 'Bill envelope — leftover not shared';
+    return el('div', {
+      className: 'envelope-share-hit protected',
+      title: 'Mapped on Bills or Debt with a set amount — leftover is not shared',
+    }, label);
+  }
+  if (hit.role === 'donor' && hit.take > 0.005) {
+    return el('div', {
+      className: `envelope-share-hit${hit.isSinking ? ' sinking' : ''}`,
+      title: 'Pro-rata share of household overspend — leftover is on paper until you cover it',
+    },
+      `Share of overspend −${formatCurrency(hit.take)} → ${formatCurrency(hit.after)} real`,
+    );
+  }
+  return null;
+}
+
 function envelopeCard(cat, focusId = null, opts = {}) {
   const month = opts.month || getCurrentMonth();
   const isCurrentMonth = opts.isCurrentMonth !== false && month === getCurrentMonth();
@@ -506,8 +688,8 @@ function envelopeCard(cat, focusId = null, opts = {}) {
   const budgeted = store.getCategoryBudgeted(cat.id, month);
   const carry = isCurrentMonth ? (Number(cat.carryOver) || 0) : 0;
   const moveDelta = store.getEnvelopeMoveDelta(cat.id, month);
-  const isOver = remaining < 0;
   const health = store.getEnvelopeHealth(cat.id, month);
+  const isOver = remaining < 0 && health === 'over';
   const healthLabel = store.getEnvelopeHealthLabel(health);
   const txCount = store.getCategoryTransactions(cat.id, { month, range: 'month' }).length;
   const overCap = isCurrentMonth && store.isOverSoftCap(cat.id);
@@ -585,6 +767,8 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         el('span', {}, 'Remaining'),
         el('span', { className: 'amount' }, formatCurrency(remaining))
       ),
+      overspendShareLine(cat, remaining, opts),
+      coverIouLine(cat),
       Math.abs(moveDelta) > 0.005
         ? el('div', {
           className: 'envelope-move-delta',
@@ -1217,6 +1401,172 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
           window.appRefresh();
         },
       }, 'Move'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
+function openCoverOverspend(month = getCurrentMonth()) {
+  if (!store.canWriteBudget()) {
+    showToast('Covering overspend stays on the main account', 'info');
+    return;
+  }
+  let includeSinking = false;
+  const preview = el('div', { className: 'overspend-cover-preview' });
+
+  function paint() {
+    const plan = store.planCoverOverspend(month, { includeSinkingFunds: includeSinking });
+    preview.innerHTML = '';
+    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.75rem' },
+      `Moves ${formatCurrency(plan.total)} this month only — next month’s budget plan is unchanged. `
+      + (includeSinking
+        ? 'Includes sinking funds.'
+        : 'Sinking funds (Christmas, vacation, etc.) are left alone.'),
+    ));
+    if (!plan.moves.length) {
+      preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+        plan.overspendTotal > 0.005
+          ? 'Not enough leftover in the selected envelopes to cover this. Turn on sinking funds, or Move leftover by hand.'
+          : 'Nothing is overspent this month.',
+      ));
+      return;
+    }
+    const fromTotals = new Map();
+    plan.moves.forEach(m => {
+      const cur = fromTotals.get(m.fromId) || { name: m.fromName, amount: 0, isSinking: m.isSinking };
+      cur.amount += m.amount;
+      fromTotals.set(m.fromId, cur);
+    });
+    const list = el('div', { className: 'envelope-move-list' });
+    [...fromTotals.values()]
+      .sort((a, b) => b.amount - a.amount)
+      .forEach(row => {
+        list.appendChild(el('div', { className: 'envelope-move-row' },
+          el('div', { className: 'envelope-move-row-main' },
+            el('strong', {}, `−${formatCurrency(row.amount)}`),
+            el('span', {}, ` ${row.name}${row.isSinking ? ' · sinking' : ''}`),
+          ),
+        ));
+      });
+    preview.appendChild(list);
+    if (plan.shortfall > 0.005) {
+      preview.appendChild(el('p', {
+        className: 'tx-form-hint',
+        style: 'margin:0.75rem 0 0;color:var(--negative)',
+      }, `${formatCurrency(plan.shortfall)} still uncovered — leftover isn’t enough.`));
+    }
+  }
+
+  const sinkToggle = el('label', { className: 'form-option', style: 'margin-top:0.5rem' },
+    el('input', {
+      type: 'checkbox',
+      checked: includeSinking ? true : undefined,
+      onChange: (e) => {
+        includeSinking = !!e.target.checked;
+        paint();
+      },
+    }),
+    el('span', {}, 'Include sinking funds in the share'),
+  );
+
+  paint();
+
+  const share = store.getOverspendShare(month);
+  const modal = showModal({
+    title: 'Cover overspend',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        `${formatCurrency(share.overspendTotal)} overspent this month. Take a percentage of leftover on flexible envelopes (bigger leftover pays more) and move it onto the overspent ones. Envelopes mapped to a bill amount or an active debt are never skimmed. Checking does not change. We’ll remember who chipped in and offer to restore them from bonus later.`,
+      ),
+      sinkToggle,
+      preview,
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Cancel'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          const plan = store.applyCoverOverspend(month, { includeSinkingFunds: includeSinking });
+          if (!plan || !plan.moves.length) {
+            showToast('Nothing to move', 'info');
+            return;
+          }
+          showToast(
+            `Covered ${formatCurrency(plan.total)} from leftover`
+            + (plan.shortfall > 0.005 ? ` · ${formatCurrency(plan.shortfall)} still open` : '')
+            + ' · will offer to restore from bonus later',
+            'success',
+          );
+          modal.close();
+          window.appRefresh();
+        },
+      }, 'Apply this month'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
+function openRepayCoverFromBonus(month = getCurrentMonth()) {
+  if (!store.canWriteBudget()) {
+    showToast('Repaying cover stays on the main account', 'info');
+    return;
+  }
+  const plan = store.planRepayCoverFromBonus(month);
+  if (!plan.total) {
+    showToast(
+      plan.bonus < 0.005
+        ? 'No free bonus yet — wait for a refund or extra deposit'
+        : 'Nothing left to repay',
+      'info',
+    );
+    return;
+  }
+  const list = el('div', { className: 'envelope-move-list' });
+  plan.pays.forEach(p => {
+    list.appendChild(el('div', { className: 'envelope-move-row' },
+      el('div', { className: 'envelope-move-row-main' },
+        el('strong', {}, `+${formatCurrency(p.amount)}`),
+        el('span', {}, ` ${p.name}${p.isSinking ? ' · sinking' : ''}`),
+      ),
+    ));
+  });
+  const modal = showModal({
+    title: 'Repay cover from bonus',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        `Put ${formatCurrency(plan.total)} of free bonus back onto envelopes that covered overspend. `
+        + `Sinking funds first. Does not undo the original cover — those overspent envelopes stay covered. `
+        + (plan.leftoverIou > 0.005
+          ? `${formatCurrency(plan.leftoverIou)} still owed after this.`
+          : 'This clears the IOU.'),
+      ),
+      list,
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Cancel'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          const result = store.repayCoverFromBonus(month);
+          if (!result || !result.total) {
+            showToast('Nothing to repay', 'info');
+            return;
+          }
+          showToast(`Restored ${formatCurrency(result.total)} from bonus`, 'success');
+          modal.close();
+          window.appRefresh();
+        },
+      }, `Repay ${formatCurrency(plan.total)}`),
     ],
   });
   modal.modal.classList.add('modal-scrollable');

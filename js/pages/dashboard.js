@@ -134,6 +134,25 @@ export function renderDashboard(container) {
       onClick: () => window.appNavigate('budget'),
     }, `📝 ${notedEnvelopes.length} notes`));
   }
+  const overspendShare = store.getOverspendShare(month);
+  if (overspendShare.overspendTotal > 0.005) {
+    actionChips.push(el('button', {
+      type: 'button',
+      className: 'chip chip-warn',
+      onClick: () => {
+        store.update(s => { s.settings.showOverspendShare = true; });
+        window.appNavigate('budget');
+      },
+    }, `📉 ${formatCurrency(overspendShare.overspendTotal)} overspend sharing leftover`));
+  }
+  const coverIous = store.getCoverIouSummary();
+  if (coverIous.total > 0.005) {
+    actionChips.push(el('button', {
+      type: 'button',
+      className: 'chip',
+      onClick: () => window.appNavigate('budget'),
+    }, `↩️ ${formatCurrency(coverIous.total)} to restore from bonus`));
+  }
   billWarnings.forEach(w => {
     actionChips.push(el('button', {
       type: 'button',

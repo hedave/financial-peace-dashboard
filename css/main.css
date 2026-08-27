@@ -1887,6 +1887,31 @@ html[data-reduce-motion="true"] *::after {
 .envelope-remaining.over .amount { color: var(--negative); }
 .envelope-remaining.ok .amount { color: var(--positive); }
 
+.envelope-share-hit {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.envelope-share-hit.over {
+  color: var(--negative);
+}
+
+.envelope-share-hit.sinking {
+  color: var(--accent);
+}
+
+.envelope-share-hit.protected {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.overspend-cover-preview {
+  margin-top: 0.75rem;
+}
+
 .sinking-tag {
   font-size: 0.65rem;
   font-weight: 600;
@@ -3042,10 +3067,21 @@ html[data-reduce-motion="true"] .sticky-note {
 .health-warning { background: rgba(245, 158, 11, 0.2); color: #b45309; }
 .health-depleted { background: rgba(245, 158, 11, 0.35); color: #92400e; }
 .health-over { background: rgba(220, 38, 38, 0.15); color: var(--negative); }
+.health-snowball { background: color-mix(in srgb, var(--primary) 16%, var(--bg)); color: var(--primary); }
+.health-bill-extra { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); color: var(--accent); }
 
 .envelope-warning { border-color: rgba(245, 158, 11, 0.4); }
 .envelope-depleted { border-color: rgba(245, 158, 11, 0.55); }
 .envelope-over { border-color: rgba(220, 38, 38, 0.35); }
+.envelope-snowball { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.envelope-bill-extra { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+
+.envelope-linked-hint {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
 .envelope-over-cap { border-color: rgba(220, 38, 38, 0.4); }
 
 .envelope-goal {

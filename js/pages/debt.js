@@ -79,6 +79,20 @@ export function renderDebt(container) {
         onClick: () => makePayment(target)
       }, 'Make Payment')
     ));
+    if (!target.categoryId) {
+      container.appendChild(el('div', { className: 'banner banner-action section' },
+        el('div', { className: 'banner-icon' }, '✉️'),
+        el('div', { className: 'banner-text' },
+          el('h3', {}, `Map ${target.name} to a Budget envelope`),
+          el('p', {}, 'Extra snowball on that envelope is not treated as overspend. When this one is paid off, map the next debt the same way and Move leftover there.'),
+        ),
+        el('button', {
+          className: 'btn btn-secondary',
+          style: 'margin-left:auto;white-space:nowrap',
+          onClick: () => openDebtForm(target),
+        }, 'Edit debt'),
+      ));
+    }
   } else if (paused.length && !snowball.length) {
     container.appendChild(el('div', { className: 'banner banner-action section' },
       el('div', { className: 'banner-icon' }, '⏸️'),
@@ -582,8 +596,8 @@ function openDebtForm(debt = null) {
         el('div', { className: 'form-group' }, el('label', {}, 'Due note'), dueIn),
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Budget Envelope'), catSelect),
-      el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:-0.25rem 0 0.75rem' },
-        'Link this debt to an envelope so minimum payments count toward your monthly budget.'
+      el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:-0.25rem 0 0.75rem;line-height:1.45' },
+        'Link this debt to an envelope so the min counts in Budget. Extra snowball on that envelope is not treated as overspend. When this one is paid off, map the next debt the same way and Move leftover there.',
       ),
       el('div', { className: 'form-option', style: 'margin-bottom:0.75rem' },
         el('div', { className: 'form-option-text' },

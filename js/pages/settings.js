@@ -84,6 +84,12 @@ export async function renderSettings(container) {
         ? 'On: warns when To Allocate ≠ $0 and before overspending an envelope'
         : 'Dave Ramsey soft warnings off');
     }),
+    toggleRow('Show overspend share on Budget', !!state.settings.showOverspendShare, val => {
+      store.update(s => { s.settings.showOverspendShare = val; });
+      showToast(val
+        ? 'Budget cards show how overspend haircuts leftover (including sinking funds)'
+        : 'Overspend share hidden');
+    }),
     el('p', {
       className: 'tx-form-hint',
       style: 'margin-top:0.5rem;margin-bottom:0',
@@ -514,7 +520,7 @@ export async function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Household of ' + (state.settings.familySize || 7)
-      + ' · Build 20260823c'
+      + ' · Build 20260823h'
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));

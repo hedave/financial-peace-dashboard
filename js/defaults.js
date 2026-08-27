@@ -87,6 +87,8 @@ export function createDefaultState() {
   return {
     version: 1,
     setupComplete: false,
+    /** Leftover taken to cover overspend — repay from bonus when it lands. */
+    overspendCoverIous: [],
     settings: {
       darkMode: false,
       palette: 'forest',
@@ -107,6 +109,8 @@ export function createDefaultState() {
       dismissMonthChecklist: null,
       /** Favorite envelope ids for Budget pin row */
       favoriteCategoryIds: [],
+      /** Budget: show pro-rata haircut of leftover from overspent envelopes */
+      showOverspendShare: false,
       /** Advisor named envelopes — category ids (null = auto-match by name). */
       advisorAliases: {
         dining: null,

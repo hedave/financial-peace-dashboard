@@ -63,6 +63,44 @@ function isRecurringBill(bill) {
   return !!(bill && bill.recurring !== false);
 }
 
+function r2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** Split `total` across items by weight (remaining). Caps each at its weight. */
+function allocateProRataByWeight(items, total) {
+  const target = r2(total);
+  const rows = (items || []).map(i => ({
+    ...i,
+    w: Math.max(0, Number(i.weight) || 0),
+    amount: 0,
+  }));
+  const sumW = rows.reduce((s, i) => s + i.w, 0);
+  if (!(target > 0) || !(sumW > 0)) return rows;
+
+  rows.forEach(row => {
+    const exact = target * (row.w / sumW);
+    row.amount = Math.floor(exact * 100) / 100;
+    row.frac = exact - row.amount;
+  });
+  let cents = Math.round((target - rows.reduce((s, i) => s + i.amount, 0)) * 100);
+  const byFrac = [...rows].sort((a, b) => b.frac - a.frac);
+  for (const row of byFrac) {
+    if (cents <= 0) break;
+    if (r2(row.w - row.amount) < 0.01) continue;
+    row.amount = r2(row.amount + 0.01);
+    cents -= 1;
+  }
+  let guard = 0;
+  while (cents > 0 && guard++ < 400) {
+    const row = rows.find(i => r2(i.w - i.amount) >= 0.01);
+    if (!row) break;
+    row.amount = r2(row.amount + 0.01);
+    cents -= 1;
+  }
+  return rows;
+}
+
 /**
  * After a payment: record last paid; recurring bills roll to next cycle as unpaid.
  * Mutates bill in place.
@@ -232,6 +270,14 @@ function normalizeState(state) {
   if (!state.monthBonusAllocations || typeof state.monthBonusAllocations !== 'object') {
     state.monthBonusAllocations = {};
   }
+  if (!Array.isArray(state.overspendCoverIous)) state.overspendCoverIous = [];
+  state.overspendCoverIous = state.overspendCoverIous
+    .filter(i => i && i.fromId && i.toId)
+    .map(i => ({
+      ...i,
+      amount: Math.round((Number(i.amount) || 0) * 100) / 100,
+      repaid: Math.round((Number(i.repaid) || 0) * 100) / 100,
+    }));
   if (!Array.isArray(state.monthCloseLog)) state.monthCloseLog = [];
   if (!state.reconciliation || typeof state.reconciliation !== 'object') {
     state.reconciliation = { bankBalance: null, asOfDate: null };
@@ -250,6 +296,9 @@ function normalizeState(state) {
   }
   if (state.settings.familySize == null || !Number.isFinite(Number(state.settings.familySize))) {
     state.settings.familySize = 7;
+  }
+  if (typeof state.settings.showOverspendShare !== 'boolean') {
+    state.settings.showOverspendShare = false;
   }
   if (!Array.isArray(state.settings.favoriteCategoryIds)) {
     state.settings.favoriteCategoryIds = [];
@@ -829,6 +878,7 @@ class Store {
     return (this.state.categories || [])
       .filter(c => c && !c.parentId && c.id !== toId)
       .filter(c => includeSinkingFunds || !c.isSinkingFund)
+      .filter(c => !this.envelopeHasFixedObligation(c.id))
       .map(c => ({
         id: c.id,
         name: c.name,
@@ -1081,6 +1131,43 @@ class Store {
       .filter(b => b.status !== 'paid' && b.categoryId === categoryId);
   }
 
+  /**
+   * Relationship to Bills / Debt (not a Citi special case).
+   * debt — payment home for an active debt (extra = snowball)
+   * bill — mapped to an unpaid bill with a set amount
+   * sinking — sinking fund
+   * spend — flexible envelope
+   */
+  getEnvelopeKind(categoryId) {
+    if (!categoryId) return 'spend';
+    if (this.getDebtsForCategory(categoryId).length) return 'debt';
+    const billed = this.getBillsForCategory(categoryId)
+      .some(b => Math.abs(Number(b.amount) || 0) > 0.005);
+    if (billed) return 'bill';
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (cat?.isSinkingFund) return 'sinking';
+    return 'spend';
+  }
+
+  /** Paid-off debt that used to live on this envelope (leftover can roll to the next target). */
+  getRetiredDebtForEnvelope(categoryId) {
+    if (!categoryId || this.getDebtsForCategory(categoryId).length) return null;
+    const archived = [
+      ...(this.state.archivedDebts || []),
+      ...(this.state.debts || []).filter(d => d.archived),
+    ];
+    return archived.find(d => d && d.categoryId === categoryId) || null;
+  }
+
+  /**
+   * Envelope is spoken for by a Bills-page bill (set amount) or an active
+   * debt min. Leftover here is not free to share toward overspend.
+   */
+  envelopeHasFixedObligation(categoryId) {
+    const kind = this.getEnvelopeKind(categoryId);
+    return kind === 'debt' || kind === 'bill';
+  }
+
   isDebtMinInBudget(debt) {
     const min = Number(debt.minPayment) || 0;
     if (!min || !debt.categoryId) return false;
@@ -1193,9 +1280,23 @@ class Store {
     this.update(s => {
       const list = s.monthEnvelopeMoves?.[month];
       if (!Array.isArray(list)) return;
-      const next = list.filter(m => m.id !== moveId);
-      if (next.length === list.length) return;
-      s.monthEnvelopeMoves[month] = next;
+      const move = list.find(m => m.id === moveId);
+      if (!move) return;
+      s.monthEnvelopeMoves[month] = list.filter(m => m.id !== moveId);
+      if (move.coverBatchId && Array.isArray(s.overspendCoverIous)) {
+        const iou = s.overspendCoverIous.find(i =>
+          i.batchId === move.coverBatchId
+          && i.fromId === move.fromId
+          && i.toId === move.toId
+        );
+        if (iou) {
+          iou.amount = r2((Number(iou.amount) || 0) - (Number(move.amount) || 0));
+          if (iou.amount < (Number(iou.repaid) || 0)) iou.repaid = Math.max(0, iou.amount);
+          if (iou.amount < 0.005) {
+            s.overspendCoverIous = s.overspendCoverIous.filter(i => i !== iou);
+          }
+        }
+      }
       ok = true;
     });
     return ok;
@@ -1280,6 +1381,354 @@ class Store {
 
   getToAllocate() {
     return this.getUnallocatedFunds();
+  }
+
+  /**
+   * Overspend is the same checking cash other envelopes still list as leftover.
+   * Haircut is pro-rata by remaining (a % of every leftover envelope, including sinking).
+   */
+  getOverspendShare(month = getCurrentMonth()) {
+    const cats = (this.state.categories || []).filter(c => c && !c.parentId);
+    const rows = cats.map(c => ({
+      id: c.id,
+      name: c.name,
+      icon: c.icon || '',
+      kind: this.getEnvelopeKind(c.id),
+      isSinking: !!c.isSinkingFund,
+      remaining: this.getCategoryRemaining(c.id, month),
+    }));
+    const overspent = rows
+      .filter(r => r.remaining < -0.005 && r.kind !== 'debt' && r.kind !== 'bill')
+      .map(r => ({ ...r, over: r2(-r.remaining) }))
+      .sort((a, b) => b.over - a.over || a.name.localeCompare(b.name));
+    const donors = rows.filter(r => r.remaining > 0.005 && r.kind !== 'debt' && r.kind !== 'bill');
+    const protectedLeftover = rows.filter(r => r.remaining > 0.005 && (r.kind === 'debt' || r.kind === 'bill'));
+    const overspendTotal = r2(overspent.reduce((s, r) => s + r.over, 0));
+    const donorPool = r2(donors.reduce((s, r) => s + r.remaining, 0));
+    const coverable = r2(Math.min(overspendTotal, donorPool));
+    const takes = allocateProRataByWeight(
+      donors.map(d => ({ id: d.id, weight: d.remaining })),
+      coverable,
+    );
+    const takeById = new Map(takes.map(t => [t.id, t.amount]));
+    const byId = {};
+    rows.forEach(r => {
+      if (r.remaining < -0.005 && r.kind === 'debt') {
+        byId[r.id] = {
+          role: 'snowball',
+          remaining: r.remaining,
+          over: 0,
+          take: 0,
+          after: r.remaining,
+          kind: r.kind,
+          isSinking: r.isSinking,
+        };
+        return;
+      }
+      if (r.remaining < -0.005 && r.kind === 'bill') {
+        byId[r.id] = {
+          role: 'bill-extra',
+          remaining: r.remaining,
+          over: 0,
+          take: 0,
+          after: r.remaining,
+          kind: r.kind,
+          isSinking: r.isSinking,
+        };
+        return;
+      }
+      if (r.remaining < -0.005) {
+        byId[r.id] = {
+          role: 'over',
+          remaining: r.remaining,
+          over: r2(-r.remaining),
+          take: 0,
+          after: r.remaining,
+          kind: r.kind,
+          isSinking: r.isSinking,
+        };
+        return;
+      }
+      if (r.kind === 'debt' || r.kind === 'bill') {
+        byId[r.id] = {
+          role: 'protected',
+          remaining: r.remaining,
+          over: 0,
+          take: 0,
+          after: r.remaining,
+          kind: r.kind,
+          isSinking: r.isSinking,
+        };
+        return;
+      }
+      const take = r2(takeById.get(r.id) || 0);
+      byId[r.id] = {
+        role: take > 0.005 ? 'donor' : 'flat',
+        remaining: r.remaining,
+        over: 0,
+        take,
+        after: r2(r.remaining - take),
+        kind: r.kind,
+        isSinking: r.isSinking,
+        pct: donorPool > 0.005 ? coverable / donorPool : 0,
+      };
+    });
+    const sinkingTakeTotal = r2(
+      donors.filter(d => d.isSinking).reduce((s, d) => s + (takeById.get(d.id) || 0), 0),
+    );
+    return {
+      overspendTotal,
+      donorPool,
+      coverable,
+      uncovered: r2(Math.max(0, overspendTotal - coverable)),
+      haircutPct: donorPool > 0.005 ? coverable / donorPool : 0,
+      overspent,
+      sinkingTakeTotal,
+      protectedCount: protectedLeftover.length,
+      protectedNames: protectedLeftover.map(r => r.name),
+      byId,
+    };
+  }
+
+  /**
+   * Month-only moves: skim leftover (pro-rata %) to zero overspent envelopes.
+   * Sinking funds excluded unless includeSinkingFunds.
+   */
+  planCoverOverspend(month = getCurrentMonth(), { includeSinkingFunds = false } = {}) {
+    const share = this.getOverspendShare(month);
+    const overs = share.overspent.map(o => ({
+      id: o.id,
+      name: o.name,
+      need: o.over,
+    }));
+    const donors = (this.state.categories || [])
+      .filter(c => c && !c.parentId)
+      .filter(c => includeSinkingFunds || !c.isSinkingFund)
+      .filter(c => !this.envelopeHasFixedObligation(c.id))
+      .map(c => ({
+        id: c.id,
+        name: c.name,
+        isSinking: !!c.isSinkingFund,
+        remaining: this.getCategoryRemaining(c.id, month),
+      }))
+      .filter(d => d.remaining > 0.005 && !overs.some(o => o.id === d.id));
+
+    const pool = r2(donors.reduce((s, d) => s + d.remaining, 0));
+    const need = share.overspendTotal;
+    const coverable = r2(Math.min(need, pool));
+    const takes = allocateProRataByWeight(
+      donors.map(d => ({ id: d.id, weight: d.remaining })),
+      coverable,
+    );
+    const takeById = new Map(takes.map(t => [t.id, t.amount]));
+    donors.forEach(d => { d.take = r2(takeById.get(d.id) || 0); });
+
+    const moves = [];
+    donors.forEach(d => {
+      let give = d.take;
+      overs.forEach(o => {
+        if (give < 0.005 || o.need < 0.005) return;
+        const amt = r2(Math.min(give, o.need));
+        if (!(amt > 0.005)) return;
+        moves.push({
+          fromId: d.id,
+          fromName: d.name,
+          toId: o.id,
+          toName: o.name,
+          amount: amt,
+          isSinking: d.isSinking,
+        });
+        give = r2(give - amt);
+        o.need = r2(o.need - amt);
+      });
+    });
+    const total = r2(moves.reduce((s, m) => s + m.amount, 0));
+    return {
+      moves,
+      total,
+      shortfall: r2(Math.max(0, need - total)),
+      includeSinkingFunds: !!includeSinkingFunds,
+      overspendTotal: need,
+      donorPool: pool,
+    };
+  }
+
+  applyCoverOverspend(month = getCurrentMonth(), {
+    includeSinkingFunds = false,
+  } = {}) {
+    if (!this.canWriteBudget()) return null;
+    const plan = this.planCoverOverspend(month, { includeSinkingFunds });
+    if (!plan.moves.length) return plan;
+    const note = includeSinkingFunds
+      ? 'Cover overspend (shared % of leftover, including sinking funds)'
+      : 'Cover overspend (shared % of leftover; sinking funds protected)';
+    const batchId = generateId();
+    this.update(s => {
+      if (!s.monthEnvelopeMoves || typeof s.monthEnvelopeMoves !== 'object') {
+        s.monthEnvelopeMoves = {};
+      }
+      if (!Array.isArray(s.monthEnvelopeMoves[month])) {
+        s.monthEnvelopeMoves[month] = [];
+      }
+      if (!Array.isArray(s.overspendCoverIous)) s.overspendCoverIous = [];
+      const at = new Date().toISOString();
+      plan.moves.forEach(m => {
+        s.monthEnvelopeMoves[month].push({
+          id: generateId(),
+          fromId: m.fromId,
+          toId: m.toId,
+          amount: m.amount,
+          note,
+          at,
+          coverBatchId: batchId,
+        });
+        s.overspendCoverIous.push({
+          id: generateId(),
+          batchId,
+          fromId: m.fromId,
+          fromName: m.fromName,
+          toId: m.toId,
+          toName: m.toName,
+          amount: m.amount,
+          repaid: 0,
+          isSinking: !!m.isSinking,
+          month,
+          at,
+          note,
+        });
+      });
+    });
+    plan.batchId = batchId;
+    return plan;
+  }
+
+  getCoverIous() {
+    return (this.state.overspendCoverIous || [])
+      .filter(i => i && i.fromId)
+      .map(i => {
+        const amount = r2(i.amount);
+        const repaid = r2(i.repaid);
+        return {
+          ...i,
+          amount,
+          repaid,
+          outstanding: r2(Math.max(0, amount - repaid)),
+        };
+      })
+      .filter(i => i.amount > 0.005);
+  }
+
+  getCoverIouSummary() {
+    const ious = this.getCoverIous().filter(i => i.outstanding > 0.005);
+    const byFrom = new Map();
+    ious.forEach(i => {
+      const cat = this.state.categories.find(c => c.id === i.fromId);
+      const row = byFrom.get(i.fromId) || {
+        fromId: i.fromId,
+        name: cat?.name || i.fromName || 'Envelope',
+        isSinking: !!(cat?.isSinkingFund || i.isSinking),
+        outstanding: 0,
+      };
+      row.outstanding = r2(row.outstanding + i.outstanding);
+      byFrom.set(i.fromId, row);
+    });
+    const donors = [...byFrom.values()].sort((a, b) => {
+      if (a.isSinking !== b.isSinking) return a.isSinking ? -1 : 1;
+      return b.outstanding - a.outstanding || a.name.localeCompare(b.name);
+    });
+    return {
+      total: r2(donors.reduce((s, d) => s + d.outstanding, 0)),
+      sinkingTotal: r2(donors.filter(d => d.isSinking).reduce((s, d) => s + d.outstanding, 0)),
+      donors,
+      ious,
+    };
+  }
+
+  getCoverIouOutstandingForEnvelope(categoryId) {
+    if (!categoryId) return 0;
+    return r2(
+      this.getCoverIous()
+        .filter(i => i.fromId === categoryId)
+        .reduce((s, i) => s + i.outstanding, 0),
+    );
+  }
+
+  /**
+   * Restore leftover that covered overspend, from the free bonus pot.
+   * Does not reverse the original cover — overspent envelopes stay covered.
+   * Sinking-fund IOUs are repaid first.
+   */
+  planRepayCoverFromBonus(month = getCurrentMonth()) {
+    const bonus = this.getBonusAvailable(month);
+    const summary = this.getCoverIouSummary();
+    const ious = summary.ious.slice().sort((a, b) => {
+      if (!!a.isSinking !== !!b.isSinking) return a.isSinking ? -1 : 1;
+      return String(a.at || '').localeCompare(String(b.at || ''));
+    });
+    let left = r2(Math.min(bonus, summary.total));
+    const iouPays = [];
+    ious.forEach(i => {
+      if (left < 0.005) return;
+      const take = r2(Math.min(i.outstanding, left));
+      if (!(take > 0.005)) return;
+      iouPays.push({ iouId: i.id, fromId: i.fromId, amount: take, isSinking: !!i.isSinking });
+      left = r2(left - take);
+    });
+    const byFrom = new Map();
+    iouPays.forEach(p => {
+      const cat = this.state.categories.find(c => c.id === p.fromId);
+      const row = byFrom.get(p.fromId) || {
+        fromId: p.fromId,
+        name: cat?.name || 'Envelope',
+        isSinking: p.isSinking,
+        amount: 0,
+      };
+      row.amount = r2(row.amount + p.amount);
+      byFrom.set(p.fromId, row);
+    });
+    const pays = [...byFrom.values()];
+    const total = r2(pays.reduce((s, p) => s + p.amount, 0));
+    return {
+      pays,
+      iouPays,
+      total,
+      bonus,
+      outstanding: summary.total,
+      leftoverBonus: r2(Math.max(0, bonus - total)),
+      leftoverIou: r2(Math.max(0, summary.total - total)),
+    };
+  }
+
+  repayCoverFromBonus(month = getCurrentMonth()) {
+    if (!this.canWriteBudget()) return null;
+    const plan = this.planRepayCoverFromBonus(month);
+    if (!plan.pays.length) return plan;
+    const note = 'Repay cover overspend from bonus';
+    this.update(s => {
+      if (!s.monthBonusAllocations || typeof s.monthBonusAllocations !== 'object') {
+        s.monthBonusAllocations = {};
+      }
+      if (!Array.isArray(s.monthBonusAllocations[month])) {
+        s.monthBonusAllocations[month] = [];
+      }
+      if (!Array.isArray(s.overspendCoverIous)) s.overspendCoverIous = [];
+      const at = new Date().toISOString();
+      plan.pays.forEach(p => {
+        s.monthBonusAllocations[month].push({
+          id: generateId(),
+          categoryId: p.fromId,
+          amount: p.amount,
+          note,
+          at,
+        });
+      });
+      plan.iouPays.forEach(p => {
+        const iou = s.overspendCoverIous.find(i => i.id === p.iouId);
+        if (!iou) return;
+        iou.repaid = r2((Number(iou.repaid) || 0) + p.amount);
+      });
+    });
+    return plan;
   }
 
   /** Envelope remaining still “spoken for” this month (not free for snowball). */
@@ -1739,13 +2188,23 @@ class Store {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 'none';
     const pool = this.getCategoryPool(categoryId, month);
+    const kind = this.getEnvelopeKind(categoryId);
     if (pool <= 0) {
       const remaining = this.getCategoryRemaining(categoryId, month);
-      return remaining < -0.005 ? 'over' : 'none';
+      if (remaining < -0.005) {
+        if (kind === 'debt') return 'snowball';
+        if (kind === 'bill') return 'bill-extra';
+        return 'over';
+      }
+      return 'none';
     }
     const spent = this.getCategorySpent(categoryId, month);
     const remaining = this.getCategoryRemaining(categoryId, month);
-    if (remaining < 0) return 'over';
+    if (remaining < 0) {
+      if (kind === 'debt') return 'snowball';
+      if (kind === 'bill') return 'bill-extra';
+      return 'over';
+    }
     const pct = spent / pool;
     if (pct >= 1) return 'depleted';
     if (pct >= 0.8) return 'warning';
@@ -1759,6 +2218,8 @@ class Store {
       warning: '80%+ used',
       depleted: 'At limit',
       over: 'Over budget',
+      snowball: 'Extra snowball',
+      'bill-extra': 'Extra to bill',
     }[health] || '';
   }
 
