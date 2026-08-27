@@ -240,4 +240,77 @@ if (store.state.transactions.filter(t => Math.abs(Number(t.amount) - 2378.45) < 
 }
 console.log('50-row USAA file: FigPig checking equals USAA available; posted twins merge');
 
+// Legacy holdChecking pending income: re-import of the same pending ACH
+// must backfill checking once (Home awaiting-bank → cleared + bankPending).
+resetBooks(1506.22);
+store.state.transactions.push({
+  id: 'legacy-vacp',
+  date: '2026-08-27',
+  amount: 2378.45,
+  type: 'income',
+  description: 'VACP TREAS XXVA BENEF',
+  clearingStatus: 'pending',
+});
+const vacpLegacyPending = parseBankCsvText(usaaCsv([
+  { date: '08/27/2026', description: 'VACP TREAS XXVA BENEF', amount: 2378.45, status: 'Pending' },
+]));
+stats = store.importTransactions(vacpLegacyPending, { includePending: true });
+if (cents(store.state.balances.checking) !== 388467) {
+  fail('legacy pending VACP re-import should credit +2378.45 → 3884.67', {
+    checking: store.state.balances.checking, stats,
+  });
+}
+const legacyVacp = store.state.transactions.find(t => t.id === 'legacy-vacp');
+if (!legacyVacp || store.state.transactions.filter(t => Math.abs(Number(t.amount) - 2378.45) < 0.001).length !== 1) {
+  fail('legacy VACP must stay one row', store.state.transactions);
+}
+if (legacyVacp.clearingStatus === 'pending') fail('Home must not still show awaiting bank', legacyVacp);
+if (legacyVacp.clearingStatus !== 'cleared' || !legacyVacp.bankPending) {
+  fail('legacy VACP should be cleared + bankPending until posted', legacyVacp);
+}
+
+stats = store.importTransactions(vacpLegacyPending, { includePending: true });
+if (!(stats.duplicates >= 1) || stats.count !== 0) {
+  fail('second pending re-import should be duplicates, checking unchanged', stats);
+}
+if (cents(store.state.balances.checking) !== 388467) {
+  fail('second pending re-import must not move checking', store.state.balances.checking);
+}
+
+stats = store.importTransactions(parseBankCsvText(usaaCsv([
+  { date: '08/27/2026', description: 'VACP TREAS XXVA BENEF', amount: 2378.45, status: 'Posted' },
+])), { includePending: true });
+if (stats.matchedPending < 1) fail('posted VACP twin should merge legacy row', stats);
+if (cents(store.state.balances.checking) !== 388467) {
+  fail('posted twin must not double-credit', store.state.balances.checking);
+}
+if (legacyVacp.bankPending) fail('posted twin should clear bankPending', legacyVacp);
+if (store.state.transactions.filter(t => Math.abs(Number(t.amount) - 2378.45) < 0.001).length !== 1) {
+  fail('posted twin must not add a second VACP row');
+}
+console.log('legacy pending VACP: checking +2378.45 once; Home not awaiting bank');
+
+// Pending purchase already on-book must not get a second checking hit
+resetBooks(0);
+store.state.transactions.push({
+  id: 'usps-onbook',
+  date: '2026-08-27',
+  amount: 12.90,
+  type: 'expense',
+  description: 'USPS PO 36248007 157 082626',
+  clearingStatus: 'cleared',
+  bankPending: true,
+});
+store.state.balances.checking = -12.90;
+stats = store.importTransactions(parseBankCsvText(usaaCsv([
+  { date: '08/27/2026', description: 'USPS PO 36248007 157 082626', amount: -12.90, status: 'Pending' },
+])), { includePending: true });
+if (cents(store.state.balances.checking) !== -1290) {
+  fail('on-book pending purchase must not hit checking again', store.state.balances.checking);
+}
+if (store.state.transactions.filter(t => Math.abs(Number(t.amount) - 12.9) < 0.001).length !== 1) {
+  fail('on-book USPS must stay one row');
+}
+console.log('on-book pending purchase: no second checking hit');
+
 console.log('all import-reconcile checks passed');

@@ -3682,9 +3682,7 @@ class Store {
             }
           }
 
-          // Manual pending (off-book) posts → apply checking once.
-          // Bank-pending rows already moved checking on first import.
-          if (isTransactionPending(existing) && incomingPosted) {
+          const creditOffBookPending = () => {
             existing.clearingStatus = 'cleared';
             this.applyCheckingDelta(
               s,
@@ -3707,14 +3705,30 @@ class Store {
             }
             stats.matchedPending++;
             stats.count++;
+          };
+
+          // Manual pending (off-book) posts → apply checking once.
+          // Bank-pending rows already moved checking on first import.
+          if (isTransactionPending(existing) && incomingPosted) {
+            creditOffBookPending();
             return;
           }
 
-          // Bank-pending purchase already hit checking, or posted alias merge.
-          if (existingBankHold || changed) {
-            if (isTransactionPending(existing) && incomingPosted) {
-              existing.clearingStatus = 'cleared';
-            }
+          // Legacy holdChecking pending income: USAA available already includes
+          // the ACH while Status is still Pending. Credit once, keep bankPending
+          // until the posted twin arrives. Purchases already on-book skip this.
+          if (
+            isTransactionPending(existing)
+            && existing.type === 'income'
+            && tx.type === 'income'
+          ) {
+            existing.bankPending = true;
+            creditOffBookPending();
+            return;
+          }
+
+          // Posted alias merge / clearer description. No-op re-import → duplicates.
+          if (changed) {
             stats.matchedPending++;
             return;
           }
