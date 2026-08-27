@@ -8,7 +8,8 @@ import { renderIncome } from './pages/income.js';
 import { renderBudget } from './pages/budget.js';
 import { renderBills } from './pages/bills.js';
 import { renderDebt } from './pages/debt.js';
-import { renderTransactions } from './pages/transactions.js';
+import { renderTransactions, importBankText, importBankFile, openImportDialog } from './pages/transactions.js';
+import { selfCheckImportReconcile } from './csv-import.js';
 import { renderReports } from './pages/reports.js';
 import { renderSettings } from './pages/settings.js';
 import { renderNotes } from './pages/notes.js';
@@ -145,14 +146,52 @@ function softRefreshChrome() {
   refreshSyncChip();
 }
 
+function getRouteIntent() {
+  const hash = String(window.location.hash || '');
+  const search = String(window.location.search || '');
+  const qFromHash = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+  const params = new URLSearchParams(qFromHash || search.replace(/^\?/, ''));
+  const pageMatch = hash.match(/^#\/?([a-z]+)/i);
+  return {
+    page: pageMatch && PAGES[pageMatch[1]] ? pageMatch[1] : null,
+    openImport: params.get('import') === '1',
+  };
+}
+
+function applyHashRoute() {
+  const intent = getRouteIntent();
+  if (intent.page) {
+    navigate(intent.page, intent.openImport ? { import: true } : null);
+    return;
+  }
+  if (intent.openImport) navigate('transactions', { import: true });
+}
+
+function installFigPigApi() {
+  window.FigPig = {
+    importBankText,
+    importBankFile,
+    openImportDialog,
+    selfCheckImport: selfCheckImportReconcile,
+    lastImportStats: window.FigPig?.lastImportStats || null,
+    APP_BUILD,
+  };
+}
+
 function bootstrap() {
   const shell = document.getElementById('app');
+  const intent = getRouteIntent();
+  if (intent.page) currentPage = intent.page;
+  else if (intent.openImport) currentPage = 'transactions';
+  if (intent.openImport) pageArg = { import: true };
+
   mainEl = renderLayout(shell, currentPage, navigate);
   bindScrollTracking();
   if (mainEl) {
     mainEl.addEventListener('scroll', trackScrollPos, { passive: true });
   }
   renderPage({ reason: 'bootstrap' });
+  window.addEventListener('hashchange', applyHashRoute);
   store.subscribe(() => {
     // Notes auto-save silently; re-rendering would reset the textarea while typing
     if (!mainEl || currentPage === 'notes') {
@@ -342,7 +381,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260823h';
+const APP_BUILD = '20260826a';
+
+installFigPigApi();
 
 if ('serviceWorker' in navigator) {
   // When a new SW takes control, reload once so HTML/CSS/JS match

@@ -16,6 +16,7 @@ import {
   findBestPendingMatch,
   isTransactionPending,
   descriptionSimilarity,
+  pickClearerDescription,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
 import { findBillForTransaction, findAutoPayBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
@@ -3617,8 +3618,41 @@ class Store {
         const holdChecking = bankPending && tx.type === 'income';
 
         const settleExisting = (existing) => {
-          if (tx.date) existing.date = tx.date;
-          if (tx.description) existing.description = tx.description;
+          const existingBankHold = !!existing.bankPending || isTransactionPending(existing);
+          const incomingPosted = !bankPending;
+          let changed = false;
+
+          if (incomingPosted) {
+            if (tx.date && tx.date !== existing.date) {
+              existing.date = tx.date;
+              changed = true;
+            }
+            if (tx.description) {
+              const next = existingBankHold
+                ? tx.description
+                : pickClearerDescription(existing.description, tx.description);
+              if (next && next !== existing.description) {
+                existing.description = next;
+                changed = true;
+              }
+            }
+          } else if (tx.description) {
+            const next = pickClearerDescription(existing.description, tx.description);
+            if (next && next !== existing.description) {
+              existing.description = next;
+              changed = true;
+            }
+          }
+
+          const typeRank = { debt_payment: 3, transfer: 2, expense: 1 };
+          if (
+            existing.type !== 'income' && tx.type !== 'income'
+            && (typeRank[tx.type] || 0) > (typeRank[existing.type] || 0)
+          ) {
+            existing.type = tx.type;
+            changed = true;
+          }
+
           if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
             existing.importCategory = tx.bankCategory;
             const resolved = resolveCategoryId(
@@ -3627,37 +3661,66 @@ class Store {
               s.categories,
               tx.type,
             );
-            if (resolved) existing.categoryId = resolved;
-          }
-          if (bankPending) existing.bankPending = true;
-          else delete existing.bankPending;
-          // Already in the log (cleared purchase, or still-pending refund). Don't add a twin.
-          if (holdChecking || !isTransactionPending(existing)) {
-            stats.duplicates++;
-            return;
-          }
-          existing.clearingStatus = 'cleared';
-          this.applyCheckingDelta(
-            s,
-            this.getCheckingDelta(existing.type, existing.amount, 'cleared'),
-          );
-          if (existing.type === 'income') {
-            this.applyImportedIncome(s, existing);
-            stats.incomeLinked++;
-            stats.income++;
-            stats.incomeAmount += Math.abs(Number(existing.amount) || 0);
-            stats.incomeIdsForReturnMatch.push(existing.id);
-          } else if (existing.type === 'expense' || existing.type === 'debt_payment' || existing.type === 'transfer') {
-            stats.expense++;
-            stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
-            if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
-            if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
-              if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
-              else this.applyImportedDebtPayment(existing, s, stats);
+            if (resolved) {
+              existing.categoryId = resolved;
+              changed = true;
             }
           }
-          stats.matchedPending++;
-          stats.count++;
+
+          if (bankPending) {
+            if (!existing.bankPending) {
+              existing.bankPending = true;
+              changed = true;
+            }
+          } else if (existing.bankPending) {
+            delete existing.bankPending;
+            changed = true;
+          }
+
+          if (!existing.categoryId && !this.isSplitTransaction(existing)) {
+            if (this.applyRulesToTransaction(existing, s)) {
+              stats.ruleApplied++;
+              changed = true;
+            }
+          }
+
+          // Manual pending income (off-book) posts → apply checking once.
+          if (isTransactionPending(existing) && !holdChecking) {
+            existing.clearingStatus = 'cleared';
+            this.applyCheckingDelta(
+              s,
+              this.getCheckingDelta(existing.type, existing.amount, 'cleared'),
+            );
+            if (existing.type === 'income') {
+              this.applyImportedIncome(s, existing);
+              stats.incomeLinked++;
+              stats.income++;
+              stats.incomeAmount += Math.abs(Number(existing.amount) || 0);
+              stats.incomeIdsForReturnMatch.push(existing.id);
+            } else if (existing.type === 'expense' || existing.type === 'debt_payment' || existing.type === 'transfer') {
+              stats.expense++;
+              stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
+              if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
+              if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
+                if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
+                else this.applyImportedDebtPayment(existing, s, stats);
+              }
+            }
+            stats.matchedPending++;
+            stats.count++;
+            return;
+          }
+
+          // Bank-pending purchase already hit checking, or posted alias merge.
+          if (existingBankHold || changed) {
+            if (isTransactionPending(existing) && incomingPosted) {
+              existing.clearingStatus = 'cleared';
+            }
+            stats.matchedPending++;
+            return;
+          }
+
+          stats.duplicates++;
         };
 
         // Match a pending manual log → clear in place when the bank row posts

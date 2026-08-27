@@ -1,7 +1,16 @@
 /** Merchant / description rules for auto-categorizing transactions */
 
+import { normalizeMerchantDescription } from './csv-import.js';
+
 export function normalizePattern(pattern) {
   return String(pattern || '').toLowerCase().trim();
+}
+
+/** Rule key: hyphen/store-number pending names match saved walmart / usps rules. */
+export function normalizeRuleText(text) {
+  const merchant = normalizeMerchantDescription(text);
+  if (merchant) return merchant;
+  return normalizePattern(text);
 }
 
 /**
@@ -10,7 +19,8 @@ export function normalizePattern(pattern) {
  * (Old rules that saved only "ingles" still work but lose to longer matches.)
  */
 export function guessMerchantPattern(description) {
-  let text = String(description || '').trim();
+  const normalized = normalizeMerchantDescription(description);
+  let text = normalized || String(description || '').trim();
   if (!text) return '';
   // Drop common bank noise prefixes
   text = text
@@ -33,9 +43,12 @@ export function guessMerchantPattern(description) {
 }
 
 export function descriptionMatchesPattern(description, pattern) {
-  const p = normalizePattern(pattern);
+  const p = normalizeRuleText(pattern);
   if (!p) return false;
-  return String(description || '').toLowerCase().includes(p);
+  const desc = normalizeRuleText(description);
+  if (desc.includes(p)) return true;
+  // Fallback for odd patterns that merchant-normalize strips empty
+  return String(description || '').toLowerCase().includes(normalizePattern(pattern));
 }
 
 /**
@@ -48,8 +61,8 @@ export function findMatchingRule(description, rules = []) {
   );
   if (!matches.length) return null;
   matches.sort((a, b) => {
-    const la = normalizePattern(a.pattern).length;
-    const lb = normalizePattern(b.pattern).length;
+    const la = normalizeRuleText(a.pattern).length;
+    const lb = normalizeRuleText(b.pattern).length;
     if (lb !== la) return lb - la;
     return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
   });

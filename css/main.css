@@ -1786,6 +1786,34 @@ html[data-reduce-motion="true"] *::after {
 }
 .import-tips-list li { margin-bottom: 0.25rem; }
 
+.import-drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 5%, var(--bg-card));
+  color: var(--text);
+  text-align: center;
+  cursor: copy;
+}
+
+.import-drop-zone strong { font-size: 0.92rem; }
+
+.import-drop-zone-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.import-drop-zone.is-over {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
+}
+
 .import-preview-list {
   display: flex;
   flex-direction: column;

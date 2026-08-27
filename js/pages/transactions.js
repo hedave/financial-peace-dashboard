@@ -179,7 +179,17 @@ export function renderTransactions(container, arg) {
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Transaction Log'),
   ));
+  container.appendChild(makeImportDropZone((file) => {
+    importBankFile(file, { includePending: true, showSummary: true }).catch((err) => {
+      console.error(err);
+      showToast(err?.message || 'Import failed', 'info');
+    });
+  }));
   if (filterBanner) container.appendChild(filterBanner);
+
+  if (arg && typeof arg === 'object' && arg.import) {
+    setTimeout(() => openImportDialog(), 0);
+  }
 
   const inbox = store.getReviewInbox();
   const duplicateCount = store.getDuplicateTransactionIds().size;
@@ -1174,14 +1184,88 @@ const BANK_IMPORT_TIPS = {
   },
 };
 
+function stashImportStats(stats) {
+  if (typeof window === 'undefined') return;
+  window.FigPig = window.FigPig || {};
+  window.FigPig.lastImportStats = stats;
+}
+
 function finishImport(stats, modal) {
-  modal.close();
+  stashImportStats(stats);
+  modal?.close?.();
   if (stats.count > 0 || stats.matchedPending > 0) {
-    window.appRefresh();
+    window.appRefresh?.();
     openImportSummary(stats);
   } else {
     showToast(formatImportToast(stats), 'info', 6000);
   }
+}
+
+/** Same path as the Import modal — paste/CSV text. */
+export async function importBankText(text, { includePending = true, showSummary = true } = {}) {
+  const rows = parseBankCsvText(text);
+  const stats = !rows.length
+    ? { count: 0, skipped: 0, duplicates: 0, parsed: 0, matchedPending: 0, ruleApplied: 0 }
+    : store.importTransactions(rows, { includePending });
+  if (!rows.length) stats.skipped = 0;
+  stashImportStats(stats);
+  if (showSummary) finishImport(stats, null);
+  else if (stats.count > 0 || stats.matchedPending > 0) window.appRefresh?.();
+  return stats;
+}
+
+/** Same path as the Import modal — CSV or PDF File. */
+export async function importBankFile(file, { includePending = true, showSummary = true } = {}) {
+  if (!file) {
+    const stats = { count: 0, skipped: 0, duplicates: 0, parsed: 0, matchedPending: 0 };
+    stashImportStats(stats);
+    return stats;
+  }
+  const name = String(file.name || '').toLowerCase();
+  let rows = [];
+  if (name.endsWith('.pdf')) {
+    const parsed = await parseBankPdfFile(file);
+    rows = rowsToImportObjects(parsed, { includePending });
+  } else {
+    const text = await file.text();
+    rows = parseBankCsvText(text);
+  }
+  if (!rows.length) {
+    const stats = { count: 0, skipped: 0, duplicates: 0, parsed: 0, matchedPending: 0 };
+    stashImportStats(stats);
+    if (showSummary) showToast('No transactions found in that file — try paste from USAA mobile', 'info');
+    return stats;
+  }
+  const stats = store.importTransactions(rows, { includePending });
+  stashImportStats(stats);
+  if (showSummary) finishImport(stats, null);
+  else if (stats.count > 0 || stats.matchedPending > 0) window.appRefresh?.();
+  return stats;
+}
+
+function makeImportDropZone(onFile) {
+  const zone = el('div', {
+    className: 'import-drop-zone',
+    title: 'Drop a USAA CSV or PDF — parsed only on this device',
+  },
+    el('strong', {}, 'Drop bank CSV / PDF here'),
+    el('span', { className: 'import-drop-zone-hint' },
+      'Same as Import bank data. Nothing is uploaded.',
+    ),
+  );
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    zone.classList.add('is-over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('is-over');
+    const file = e.dataTransfer?.files?.[0];
+    if (file) onFile(file);
+  });
+  return zone;
 }
 
 /** Post-import summary sheet with deep links into Review. */
@@ -1190,7 +1274,7 @@ function openImportSummary(stats) {
   const stillPending = store.getPendingTransactions().length;
   const lines = [
     stats.count ? `${stats.count} new transaction${stats.count === 1 ? '' : 's'}` : null,
-    stats.matchedPending ? `${stats.matchedPending} pending matched (checking updated)` : null,
+    stats.matchedPending ? `${stats.matchedPending} merged with existing` : null,
     stats.expense ? `${stats.expense} expenses` : null,
     stats.income ? `${stats.income} income` : null,
     stats.categorized ? `${stats.categorized} auto-categorized` : null,
@@ -1316,7 +1400,7 @@ function paintImportPreview(previewEl, rows, { sourceLabel = 'Preview' } = {}) {
   }, 'Parsed only on this device — nothing is uploaded to a bank or our servers.'));
 }
 
-function openImportDialog() {
+export function openImportDialog() {
   const fileIn = el('input', {
     type: 'file',
     accept: '.csv,.CSV,text/csv,.pdf,.PDF,application/pdf',
@@ -1441,6 +1525,14 @@ function openImportDialog() {
         el('label', {}, 'Or choose a file (CSV / PDF)'),
         fileIn,
       ),
+      makeImportDropZone((file) => {
+        modal.close();
+        importBankFile(file, { includePending: includePendingIn.checked, showSummary: true })
+          .catch((err) => {
+            console.error(err);
+            showToast(err?.message || 'Import failed', 'info');
+          });
+      }),
       el('label', {
         style: 'display:flex;align-items:center;gap:0.5rem;color:var(--text);margin:0.5rem 0',
       },

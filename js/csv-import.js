@@ -752,6 +752,57 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
 
 export const DUPLICATE_DATE_WINDOW_DAYS = 7;
 
+const OUTFLOW_TYPES = new Set(['expense', 'debt_payment', 'transfer']);
+
+/** Bank-generic labels after lowercase / hyphen collapse (not merchant-stripped). */
+const TRANSFER_PAYMENT_LABELS = [
+  'icpayment',
+  'dda debit',
+  'dda',
+  'ach',
+  'zelle',
+  'transfer',
+  'credit card payment',
+  'citi credit card payment',
+  'citi credit',
+  'online payment',
+  'web payment',
+  'card payment',
+];
+
+export function isOutflowType(type) {
+  return OUTFLOW_TYPES.has(type);
+}
+
+export function looksLikeBankTransferLabel(description) {
+  const raw = String(description || '').toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!raw) return false;
+  const compact = raw.replace(/\s+/g, '');
+  if (compact === 'icpayment' || compact === 'ddadebit' || compact === 'dda') return true;
+  const phrases = TRANSFER_PAYMENT_LABELS.filter(l => l.includes(' '));
+  if (phrases.some(p => raw.includes(p))) return true;
+  const tokens = new Set(raw.split(' '));
+  if (tokens.has('icpayment') || tokens.has('zelle') || tokens.has('ach') || tokens.has('transfer')) return true;
+  return false;
+}
+
+/** Prefer posted merchant names over pending WAL-MART #4428 082626 noise. */
+export function pickClearerDescription(existing, incoming, { preferIncoming = false } = {}) {
+  const a = String(existing || '').trim();
+  const b = String(incoming || '').trim();
+  if (preferIncoming && b) return b;
+  if (!a) return b;
+  if (!b) return a;
+  const ugly = (s) => /\b\d{6}\b/.test(s) || /#\s*\d{3,}/.test(s);
+  if (ugly(a) && !ugly(b)) return b;
+  if (ugly(b) && !ugly(a)) return a;
+  const na = normalizeMerchantDescription(a);
+  const nb = normalizeMerchantDescription(b);
+  if (nb.length > na.length + 2) return b;
+  if (na.length > nb.length + 2) return a;
+  return a;
+}
+
 const DESC_NOISE = /\b(pos|debit|credit|purchase|withdrawal|chk|card|pending|visa|mastercard|amex|usaa|ach|web|id|ref|transaction|payment|auth)\b/gi;
 const STORE_NUMBER = /#?\s*\d{3,}\b/g;
 
@@ -897,8 +948,19 @@ export function areLikelyDuplicatePair(a, b, {
   if (!amtA || amtA !== amtB) return false;
 
   const dayDiff = daysBetween(a.date, b.date);
-  // Same calendar day + same amount: likely re-import or double-post
-  if (dayDiff === 0) return true;
+  // Same calendar day + same amount is NOT always a duplicate:
+  // Chick-fil-A vs Lindt $20 must stay two purchases. Flag only when
+  // merchants look related, both are generic bank-transfer labels, or one is a debt payment.
+  if (dayDiff === 0) {
+    if (areDescriptionsSimilar(a.description, b.description, crossDaySimilarity)) return true;
+    if (shareStrongMerchantToken(a.description, b.description)) return true;
+    if (looksLikeBankTransferLabel(a.description) && looksLikeBankTransferLabel(b.description)) return true;
+    if ((a.type === 'debt_payment' || b.type === 'debt_payment')
+      && (looksLikeBankTransferLabel(a.description) || looksLikeBankTransferLabel(b.description))) {
+      return true;
+    }
+    return false;
+  }
   if (dayDiff > dateWindowDays) return false;
 
   // Cross-day same amount: need similar merchant.
@@ -930,21 +992,24 @@ export function isImportDuplicateTransaction(existing, tx) {
   const amt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
   if (!amt) return false;
   const day = String(tx.date || '').slice(0, 10);
-  const type = tx.type;
 
   return (existing || []).some(t => {
-    if (t.type !== type) return false;
     if (Math.round(Math.abs(Number(t.amount) || 0) * 100) !== amt) return false;
     if (String(t.date || '').slice(0, 10) !== day) return false;
-    // Same day + same amount: treat as re-import of the same bank row
-    // unless descriptions clearly differ (two different purchases same day)
+    const sameType = t.type === tx.type;
+    const bothOutflow = isOutflowType(t.type) && isOutflowType(tx.type);
+    if (!sameType && !bothOutflow) return false;
+    if (t.type === 'income' || tx.type === 'income') return sameType;
+
     const na = normalizeMerchantDescription(t.description);
     const nb = normalizeMerchantDescription(tx.description);
     if (!na || !nb) return true;
     if (na === nb) return true;
-    // Distinct merchants same day same $ — allow both
-    if (descriptionSimilarity(t.description, tx.description) < 0.35) return false;
-    return true;
+    if (t.type === 'debt_payment' || tx.type === 'debt_payment') return true;
+    if (looksLikeBankTransferLabel(t.description) && looksLikeBankTransferLabel(tx.description)) return true;
+    if (descriptionSimilarity(t.description, tx.description) >= 0.35) return true;
+    // Distinct merchants same day same $ — keep both (Chick-fil-A vs Lindt)
+    return false;
   });
 }
 
@@ -975,7 +1040,9 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
   let bestScore = -1;
 
   pending.forEach(tx => {
-    if (tx.type !== candidate.type) return;
+    const sameType = tx.type === candidate.type;
+    const bothOutflow = isOutflowType(tx.type) && isOutflowType(candidate.type);
+    if (!sameType && !bothOutflow) return;
     const txAmt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
     if (txAmt !== amt) return;
 
@@ -1015,7 +1082,8 @@ export function clusterDuplicateTransactions(transactions, options = {}) {
   const buckets = new Map();
 
   txs.forEach(tx => {
-    const key = `${tx.type}|${Math.round(Math.abs(Number(tx.amount)) * 100)}`;
+    const amt = Math.round(Math.abs(Number(tx.amount)) * 100);
+    const key = isOutflowType(tx.type) ? `out|${amt}` : `${tx.type}|${amt}`;
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(tx);
   });
@@ -1063,4 +1131,41 @@ export function detectBankFormat(rows) {
   if (keys.some(k => k.includes('debit')) && keys.some(k => k.includes('credit'))) return 'debits-credits';
   if (keys.includes('amount')) return 'signed-amount';
   return 'generic';
+}
+
+/**
+ * Console / node check for import merge rules. Does not touch the live budget.
+ * window.FigPig.selfCheckImport() or: node scripts/test-import-reconcile.mjs
+ */
+export function selfCheckImportReconcile() {
+  const failures = [];
+  const check = (name, got, want) => {
+    if (got !== want) failures.push(`${name}: got ${got}, want ${want}`);
+  };
+
+  check('wal-mart normalizes', normalizeMerchantDescription('WAL-MART #4428 082626'), 'walmart');
+  check('usps pending normalizes', normalizeMerchantDescription('USPS PO 36248007 157 082626').includes('usps'), true);
+  check('ICPayment is transfer label', looksLikeBankTransferLabel('ICPayment'), true);
+  check('DDA DEBIT is transfer label', looksLikeBankTransferLabel('DDA DEBIT'), true);
+  check('Citi card payment is transfer label', looksLikeBankTransferLabel('Citi Credit Card Payment'), true);
+  check('Chick-fil-A is not transfer label', looksLikeBankTransferLabel('Chick-fil-A'), false);
+
+  const dda = { date: '2026-08-25', amount: 287.39, type: 'expense', description: 'DDA DEBIT' };
+  const icp = { date: '2026-08-25', amount: 287.39, type: 'expense', description: 'ICPayment' };
+  check('ICPayment merges DDA DEBIT', isImportDuplicateTransaction([dda], icp), true);
+  check('ICPayment/DDA is Review pair', areLikelyDuplicatePair(dda, { ...icp, id: 'b' }), true);
+
+  const debt = { date: '2026-08-17', amount: 2061.13, type: 'debt_payment', description: 'Snowball payment to Citi' };
+  const citi = { date: '2026-08-17', amount: 2061.13, type: 'expense', description: 'Citi Credit Card Payment' };
+  check('Citi expense merges debt_payment', isImportDuplicateTransaction([debt], citi), true);
+
+  const chick = { date: '2026-08-24', amount: 20, type: 'expense', description: 'Chick-fil-A', id: 'c' };
+  const lindt = { date: '2026-08-24', amount: 20, type: 'expense', description: 'Lindt', id: 'l' };
+  check('Chick vs Lindt import keeps both', isImportDuplicateTransaction([chick], lindt), false);
+  check('Chick vs Lindt not a Review pair', areLikelyDuplicatePair(chick, lindt), false);
+
+  const clearer = pickClearerDescription('WAL-MART #4428 082626', 'Walmart', { preferIncoming: true });
+  check('prefer posted Walmart name', clearer, 'Walmart');
+
+  return { ok: failures.length === 0, failures };
 }
