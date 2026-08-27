@@ -828,6 +828,10 @@ export function normalizeMerchantDescription(description) {
   s = s.replace(/\bmktpl\b|\bmktplace\b|\bmarketplace\b/g, 'marketplace');
   s = s.replace(/\bwal-?mart\b/g, 'walmart');
   s = s.replace(/\bmc donald/g, 'mcdonald');
+  // USPS pending "USPS PO 36248…" vs posted "US Postal Service"
+  s = s.replace(/\bunited\s+states\s+postal\s+(service|svc)\b/g, 'usps');
+  s = s.replace(/\bu\.?\s*s\.?\s+postal\s+(service|svc)\b/g, 'usps');
+  s = s.replace(/\busps\s+po\b/g, 'usps');
   s = s.replace(STORE_NUMBER, ' ');
   // Order / auth codes (AMAZON MKTPL*XP57B2H33)
   s = s.replace(/\*[a-z0-9]+\b/g, ' ');
@@ -841,7 +845,7 @@ export function normalizeMerchantDescription(description) {
 /** Brands too short for the 5-letter rule but still a real merchant. */
 const SHORT_BRANDS = new Set([
   'citi', 'cvs', 'aldi', 'nike', 'amex', 'usaa', 'ikea', 'att', 'pnc',
-  'bbt', 'discover', 'kfc', 'hbo', 'lowes',
+  'bbt', 'discover', 'kfc', 'hbo', 'lowes', 'usps',
 ]);
 
 function isWeakMerchantToken(t, weak) {
@@ -1050,15 +1054,15 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
     if (dayDiff > dateWindowDays) return;
 
     const sim = descriptionSimilarity(tx.description, candidate.description);
+    const sameMerchant = shareStrongMerchantToken(tx.description, candidate.description)
+      || normalizeMerchantDescription(tx.description) === normalizeMerchantDescription(candidate.description);
     // Same day: allow weaker description (amount is strong signal)
-    // Cross-day: require minSimilarity
-    if (dayDiff > 0 && sim < minSimilarity) return;
-    if (dayDiff === 0 && sim < 0.15 && normalizeMerchantDescription(tx.description)
-      && normalizeMerchantDescription(candidate.description)) {
-      // Both have descriptions but totally different — skip unless one is empty
+    // Cross-day: require minSimilarity unless it's the same merchant (USPS PO → US Postal Service)
+    if (dayDiff > 0 && sim < minSimilarity && !sameMerchant) return;
+    if (dayDiff === 0 && sim < 0.15 && !sameMerchant) {
       const na = normalizeMerchantDescription(tx.description);
       const nb = normalizeMerchantDescription(candidate.description);
-      if (na && nb && sim < 0.15) return;
+      if (na && nb) return;
     }
 
     // Score: similarity primary, recency secondary
@@ -1144,7 +1148,49 @@ export function selfCheckImportReconcile() {
   };
 
   check('wal-mart normalizes', normalizeMerchantDescription('WAL-MART #4428 082626'), 'walmart');
-  check('usps pending normalizes', normalizeMerchantDescription('USPS PO 36248007 157 082626').includes('usps'), true);
+  check(
+    'usps po pending = usps',
+    normalizeMerchantDescription('USPS PO 36248007 157 082626'),
+    'usps',
+  );
+  check(
+    'us postal service = usps',
+    normalizeMerchantDescription('US Postal Service'),
+    'usps',
+  );
+  check(
+    'usps pending vs posted similar',
+    descriptionSimilarity('USPS PO 36248007 157 082626', 'US Postal Service') >= 0.65,
+    true,
+  );
+  const uspsPending = {
+    date: '2026-08-27', amount: 12.90, type: 'expense',
+    description: 'USPS PO 36248007 157 082626', id: 'up', bankPending: true,
+  };
+  const uspsPosted = {
+    date: '2026-08-27', amount: 12.90, type: 'expense',
+    description: 'US Postal Service', id: 'us',
+  };
+  check('usps pending import-dup of posted', isImportDuplicateTransaction([uspsPending], uspsPosted), true);
+  check(
+    'usps findBestPendingMatch',
+    !!findBestPendingMatch([uspsPending], uspsPosted),
+    true,
+  );
+  const vacpPending = {
+    date: '2026-08-27', amount: 2378.45, type: 'income',
+    description: 'VACP TREAS XXVA BENEF', id: 'vp', bankPending: true,
+  };
+  const vacpPosted = {
+    date: '2026-08-27', amount: 2378.45, type: 'income',
+    description: 'VACP TREAS XXVA BENEF', id: 'vf',
+  };
+  check('vacp pending import-dup of posted', isImportDuplicateTransaction([vacpPending], vacpPosted), true);
+  check(
+    'vacp findBestPendingMatch',
+    !!findBestPendingMatch([vacpPending], vacpPosted),
+    true,
+  );
   check('ICPayment is transfer label', looksLikeBankTransferLabel('ICPayment'), true);
   check('DDA DEBIT is transfer label', looksLikeBankTransferLabel('DDA DEBIT'), true);
   check('Citi card payment is transfer label', looksLikeBankTransferLabel('Citi Credit Card Payment'), true);

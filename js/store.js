@@ -3614,8 +3614,6 @@ class Store {
           description: tx.description,
         };
         const bankPending = !!tx.pending;
-        // Purchases already left checking. Pending refunds/bonus often have not.
-        const holdChecking = bankPending && tx.type === 'income';
 
         const settleExisting = (existing) => {
           const existingBankHold = !!existing.bankPending || isTransactionPending(existing);
@@ -3684,8 +3682,9 @@ class Store {
             }
           }
 
-          // Manual pending income (off-book) posts → apply checking once.
-          if (isTransactionPending(existing) && !holdChecking) {
+          // Manual pending (off-book) posts → apply checking once.
+          // Bank-pending rows already moved checking on first import.
+          if (isTransactionPending(existing) && incomingPosted) {
             existing.clearingStatus = 'cleared';
             this.applyCheckingDelta(
               s,
@@ -3752,7 +3751,7 @@ class Store {
           categoryId,
           description: tx.description,
           importCategory: tx.bankCategory || null,
-          clearingStatus: holdChecking ? 'pending' : 'cleared',
+          clearingStatus: 'cleared',
           ...(bankPending ? { bankPending: true } : {}),
         };
 
@@ -3763,7 +3762,8 @@ class Store {
           }
         }
 
-        if (tx.type === 'income' && !holdChecking && this.applyImportedIncome(s, newTx)) {
+        // Pending inbound ACH is already in USAA available — credit checking now.
+        if (tx.type === 'income' && this.applyImportedIncome(s, newTx)) {
           stats.incomeLinked++;
         }
 
@@ -3779,7 +3779,7 @@ class Store {
             else this.applyImportedDebtPayment(newTx, s, stats);
           }
         } else {
-          if (!holdChecking) s.balances.checking += tx.amount;
+          s.balances.checking += tx.amount;
           stats.income++;
           stats.incomeAmount += Math.abs(Number(tx.amount) || 0);
           stats.incomeIdsForReturnMatch.push(newTx.id);
