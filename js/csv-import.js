@@ -774,6 +774,14 @@ export function isOutflowType(type) {
   return OUTFLOW_TYPES.has(type);
 }
 
+/** Work-trip ACH (GSA / Federal Travel Payments). Surplus after the card payoff goes to Dad. */
+export function looksLikeFederalTravelPayment(description) {
+  const raw = String(description || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/\bfederal\s+travel\b/.test(raw)) return true;
+  const n = normalizeMerchantDescription(description);
+  return /\bfederal\s+travel\b/.test(n);
+}
+
 export function looksLikeBankTransferLabel(description) {
   const raw = String(description || '').toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!raw) return false;
@@ -1148,6 +1156,9 @@ export function selfCheckImportReconcile() {
   };
 
   check('wal-mart normalizes', normalizeMerchantDescription('WAL-MART #4428 082626'), 'walmart');
+  check('federal travel payments match', looksLikeFederalTravelPayment('Federal Travel Payments'), true);
+  check('federal travel ACH match', looksLikeFederalTravelPayment('FEDERAL TRAVEL PAYMENTS TREAS 310'), true);
+  check('usps is not federal travel', looksLikeFederalTravelPayment('US Postal Service'), false);
   check(
     'usps po pending = usps',
     normalizeMerchantDescription('USPS PO 36248007 157 082626'),

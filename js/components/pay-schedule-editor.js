@@ -6,6 +6,11 @@ import {
   getChecksForYear,
 } from '../pay-schedule.js';
 import { isBonusIncomeSource } from '../income-sources.js';
+import { getGsaEftDates, getGsaEftYears, gsaEftDateSet } from '../gsa-eft-dates.js';
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 export function openPayScheduleEditor(source) {
   if (isBonusIncomeSource(source)) {
@@ -17,7 +22,11 @@ export function openPayScheduleEditor(source) {
   let year = String(new Date().getFullYear());
 
   function currentYears() {
-    return store.getPayCalendarYears(store.getState().incomeSources.find(s => s.id === source.id) || source);
+    const years = new Set(
+      store.getPayCalendarYears(store.getState().incomeSources.find(s => s.id === source.id) || source),
+    );
+    getGsaEftYears().forEach(y => years.add(String(y)));
+    return [...years].sort();
   }
 
   const modeDates = el('input', { type: 'radio', name: 'pay-mode', value: 'dates' });
@@ -51,30 +60,88 @@ export function openPayScheduleEditor(source) {
   const recurringPanel = el('div', { className: 'pay-editor-recurring' });
 
   const yearTabs = el('div', { className: 'pay-year-tabs' });
+  const calWrap = el('div', { className: 'pay-cal-year' });
   const datesList = el('div', { className: 'pay-dates-list' });
   const newDateIn = el('input', { type: 'date', value: todayISO() });
   const newAmtIn = el('input', { type: 'number', step: '0.01', min: 0, placeholder: 'Optional' });
+
+  function liveSource() {
+    return store.getState().incomeSources.find(s => s.id === source.id) || source;
+  }
+
+  function refreshAfterDateChange() {
+    source.paySchedule = liveSource().paySchedule;
+    renderYearTabs();
+    renderCalendar();
+    renderDatesList();
+  }
+
+  function selectYear(y) {
+    year = String(y);
+    renderYearTabs();
+    renderCalendar();
+    renderDatesList();
+    fillGsaBtn.textContent = `Add all GSA EFT (purple) ${year}`;
+  }
 
   function renderYearTabs() {
     yearTabs.innerHTML = '';
     currentYears().forEach(y => {
       yearTabs.appendChild(el('button', {
         type: 'button',
-        className: `pay-year-tab${y === year ? ' active' : ''}`,
-        onClick: () => { year = y; renderDatesList(); },
+        className: `pay-year-tab${String(y) === String(year) ? ' active' : ''}`,
+        onClick: () => selectYear(y),
       }, y));
     });
   }
 
+  function monthGrid(y, month, selected, gsa) {
+    const pad = String(month).padStart(2, '0');
+    const iso = (d) => `${y}-${pad}-${String(d).padStart(2, '0')}`;
+    const first = new Date(y, month - 1, 1).getDay();
+    const nDays = new Date(y, month, 0).getDate();
+    const grid = el('div', { className: 'pay-cal-grid' });
+    DOW.forEach(d => grid.appendChild(el('span', { className: 'pay-cal-dow' }, d)));
+    for (let i = 0; i < first; i++) grid.appendChild(el('span', { className: 'pay-cal-pad' }));
+    for (let d = 1; d <= nDays; d++) {
+      const date = iso(d);
+      const on = selected.has(date);
+      const eft = gsa.has(date);
+      grid.appendChild(el('button', {
+        type: 'button',
+        className: `pay-cal-day${on ? ' selected' : ''}${eft ? ' gsa' : ''}`,
+        title: eft ? `${date} · GSA EFT (purple)` : date,
+        onClick: () => {
+          const amt = perCheckIn.value ? Number(perCheckIn.value) : null;
+          store.togglePayCheck(source.id, date, amt);
+          refreshAfterDateChange();
+        },
+      }, String(d)));
+    }
+    return el('div', { className: 'pay-cal-month' },
+      el('div', { className: 'pay-cal-month-name' }, MONTH_NAMES[month - 1]),
+      grid,
+    );
+  }
+
+  function renderCalendar() {
+    calWrap.innerHTML = '';
+    const y = Number(year);
+    const selected = new Set(getChecksForYear(liveSource(), year).map(c => c.date));
+    const gsa = gsaEftDateSet(year);
+    for (let m = 1; m <= 12; m++) {
+      calWrap.appendChild(monthGrid(y, m, selected, gsa));
+    }
+  }
+
   function renderDatesList() {
-    const src = store.getState().incomeSources.find(s => s.id === source.id) || source;
-    const checks = getChecksForYear(src, year);
+    const checks = getChecksForYear(liveSource(), year);
     datesList.innerHTML = '';
     if (!checks.length) {
       datesList.appendChild(el('p', { className: 'pay-dates-empty' },
-        Number(year) === new Date().getFullYear() + 1
-          ? 'Federal FY pay dates publish each October — add 2027 checks then.'
-          : `No pay dates for ${year} yet.`
+        getGsaEftDates(year).length
+          ? `No dates for ${year} yet — tap purple EFT days, or add all GSA EFT dates.`
+          : `No pay dates for ${year} yet. Tap a day to add it.`,
       ));
       return;
     }
@@ -87,8 +154,7 @@ export function openPayScheduleEditor(source) {
           className: 'btn btn-sm btn-danger',
           onClick: () => {
             store.removePayCheck(source.id, check.date);
-            source.paySchedule = store.getState().incomeSources.find(s => s.id === source.id).paySchedule;
-            renderDatesList();
+            refreshAfterDateChange();
             showToast('Date removed');
           },
         }, '×'),
@@ -108,14 +174,47 @@ export function openPayScheduleEditor(source) {
   freqSelect.addEventListener('change', syncPanels);
   syncPanels();
   renderYearTabs();
+  renderCalendar();
   renderDatesList();
 
   datesPanel.appendChild(el('p', { className: 'tx-form-hint' },
-    'Enter the exact deposit dates from your pay stub or federal schedule. Amount is optional if it matches your usual check.'
+    'Tap a day to add or remove it. Purple outline = GSA EFT (when the deposit hits checking). Pink official paycheck dates are not used — USAA follows EFT.'
   ));
+  const fillGsaBtn = el('button', {
+    type: 'button',
+    className: 'btn btn-sm btn-primary',
+    onClick: () => {
+      const dates = getGsaEftDates(year);
+      if (!dates.length) {
+        showToast(`No GSA EFT list for ${year} yet`, 'info');
+        return;
+      }
+      const n = store.addPayChecks(
+        source.id,
+        dates,
+        perCheckIn.value ? Number(perCheckIn.value) : null,
+      );
+      refreshAfterDateChange();
+      showToast(n
+        ? `Added ${n} GSA EFT date${n === 1 ? '' : 's'} for ${year}`
+        : `All GSA EFT dates for ${year} were already on the calendar`);
+    },
+  }, `Add all GSA EFT (purple) ${year}`);
+
   datesPanel.appendChild(yearTabs);
+  datesPanel.appendChild(el('div', { className: 'pay-cal-actions' },
+    fillGsaBtn,
+    el('span', { className: 'pay-cal-legend' },
+      el('span', { className: 'pay-cal-swatch gsa' }), ' GSA EFT',
+      el('span', { className: 'pay-cal-swatch selected', style: 'margin-left:0.75rem' }), ' On your calendar',
+    ),
+  ));
+  datesPanel.appendChild(calWrap);
   datesPanel.appendChild(datesList);
   datesPanel.appendChild(el('div', { className: 'pay-add-date' },
+    el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
+      'Odd date (not on the GSA calendar):',
+    ),
     el('div', { className: 'input-row' },
       el('div', { className: 'form-group' }, el('label', {}, 'Pay date'), newDateIn),
       el('div', { className: 'form-group' }, el('label', {}, 'Amount (optional)'), newAmtIn),
@@ -127,8 +226,8 @@ export function openPayScheduleEditor(source) {
         if (!newDateIn.value) return;
         store.addPayCheck(source.id, newDateIn.value, newAmtIn.value || null);
         year = newDateIn.value.slice(0, 4);
-        renderYearTabs();
-        renderDatesList();
+        fillGsaBtn.textContent = `Add all GSA EFT (purple) ${year}`;
+        refreshAfterDateChange();
         newAmtIn.value = '';
         showToast('Pay date added');
       },
@@ -205,4 +304,5 @@ export function openPayScheduleEditor(source) {
     ],
   });
   modal.modal.classList.add('modal-wide');
+  modal.modal.classList.add('modal-scrollable');
 }

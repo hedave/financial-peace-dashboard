@@ -1,6 +1,6 @@
 import {
   el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth,
-  emptyState, getRecentMonths, addMonths,
+  emptyState, getRecentMonths, addMonths, todayISO,
 } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
@@ -275,6 +275,33 @@ export function renderBudget(container, arg) {
     ));
   }
 
+  const holdReserve = isCurrentMonth ? store.getUpcomingHoldReserve({ mode: 'today' }) : 0;
+  const activeHolds = isCurrentMonth ? store.getActiveUpcomingHolds() : [];
+  if (isCurrentMonth && holdReserve > 0.005) {
+    const names = activeHolds.slice(0, 2).map(h => {
+      const cat = state.categories.find(c => c.id === h.categoryId);
+      return h.description || cat?.name || formatDate(h.date);
+    }).join(', ');
+    const extra = activeHolds.length > 2 ? ` +${activeHolds.length - 2}` : '';
+    container.appendChild(el('div', { className: 'banner banner-action section' },
+      el('div', { className: 'banner-icon' }, '📌'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `${formatCurrency(holdReserve)} held out of snowball`),
+        el('p', {},
+          `${names}${extra}. Checking is unchanged. To Allocate is unchanged. Safe-to-send and the month-end forecast drop until you spend it or dismiss the hold.`,
+        ),
+      ),
+      store.canWriteBudget()
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          style: 'margin-left:auto',
+          onClick: () => openUpcomingHolds(),
+        }, 'Edit holds')
+        : null,
+    ));
+  }
+
   if (isCurrentMonth && coverIouSummary.total > 0.005) {
     const names = coverIouSummary.donors.slice(0, 3).map(d => d.name).join(', ');
     const extra = coverIouSummary.donors.length > 3 ? ` +${coverIouSummary.donors.length - 3}` : '';
@@ -319,6 +346,13 @@ export function renderBudget(container, arg) {
     className: 'page-tools-item',
     onClick: () => { toolsMenu.removeAttribute('open'); openMoveBetweenEnvelopes(); },
   }, 'Move between envelopes'));
+  if (store.canWriteBudget()) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); openUpcomingHolds(); },
+    }, 'Upcoming hold'));
+  }
   if (isCurrentMonth && store.getOverspendShare(month).overspendTotal > 0.005 && store.canWriteBudget()) {
     toolsList.appendChild(el('button', {
       type: 'button',
@@ -365,6 +399,13 @@ export function renderBudget(container, arg) {
   if (isCurrentMonth) {
     container.appendChild(el('div', { className: 'btn-group section budget-actions' },
       el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
+      store.canWriteBudget()
+        ? el('button', {
+          className: 'btn btn-secondary',
+          onClick: () => openUpcomingHolds(),
+          title: 'Hold a known future spend out of snowball — does not change To Allocate',
+        }, 'Upcoming hold')
+        : null,
       el('button', { className: 'btn btn-accent budget-action-secondary', onClick: () => addCategory(true) }, '+ Add Sinking Fund'),
       el('button', {
         className: 'btn btn-secondary budget-action-secondary',
@@ -1401,6 +1442,125 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
           window.appRefresh();
         },
       }, 'Move'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
+export function openUpcomingHolds() {
+  if (!store.canWriteBudget()) {
+    showToast('Upcoming holds stay on the main account', 'info');
+    return;
+  }
+  const nextFirst = `${addMonths(getCurrentMonth(), 1)}-01`;
+  const medical = (store.getState().categories || []).find(c =>
+    /medical/i.test(String(c.name || '')) && !c.parentId,
+  );
+  const descIn = el('input', {
+    type: 'text',
+    placeholder: 'Roman medical',
+    value: '',
+  });
+  const dateIn = el('input', { type: 'date', value: nextFirst });
+  const amountIn = el('input', { type: 'number', step: '0.01', min: '0', value: '1500' });
+  const picker = createEnvelopePicker({
+    value: medical?.id || '',
+    placeholder: 'Envelope (optional)',
+    emptyLabel: '— Cash hold, no envelope —',
+    showRemaining: true,
+    allowEmpty: true,
+  });
+
+  const list = el('div', { className: 'envelope-move-list', style: 'margin-bottom:1rem' });
+  function paintList() {
+    list.innerHTML = '';
+    const holds = store.getUpcomingHolds();
+    if (!holds.length) {
+      list.appendChild(el('p', { className: 'tx-form-hint' }, 'None yet.'));
+      return;
+    }
+    holds.forEach(h => {
+      const cat = store.getState().categories.find(c => c.id === h.categoryId);
+      const spent = store.getUpcomingHoldSpent(h);
+      const left = Math.max(0, Math.round((h.amount - spent) * 100) / 100);
+      const done = store.isUpcomingHoldSatisfied(h);
+      const actions = el('div', { className: 'btn-group', style: 'flex-shrink:0' });
+      if (!done) {
+        actions.appendChild(el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          onClick: () => {
+            store.dismissUpcomingHold(h.id);
+            paintList();
+            window.appRefresh();
+          },
+        }, 'Dismiss'));
+      }
+      actions.appendChild(el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary',
+        onClick: () => {
+          store.deleteUpcomingHold(h.id);
+          paintList();
+          window.appRefresh();
+        },
+      }, 'Delete'));
+      list.appendChild(el('div', { className: 'envelope-move-row' },
+        el('div', { className: 'envelope-move-row-main' },
+          el('strong', {}, formatCurrency(h.amount)),
+          el('span', {},
+            ` ${h.description || cat?.name || 'Hold'} · ${formatDate(h.date)}`
+            + (cat ? ` · ${cat.name}` : '')
+            + (done ? ' · done' : spent > 0.005 ? ` · ${formatCurrency(left)} still held` : ''),
+          ),
+        ),
+        actions,
+      ));
+    });
+  }
+  paintList();
+
+  const modal = showModal({
+    title: 'Upcoming hold',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        'Known future spend (next month’s medical, travel, etc.). Held out of snowball and safe-to-send. Does not change To Allocate or checking. Drops when you spend it on that envelope or dismiss it.',
+      ),
+      el('div', { className: 'section-title' }, 'Active'),
+      list,
+      el('div', { className: 'section-title' }, 'Add one'),
+      el('div', { className: 'form-group' }, el('label', {}, 'What'), descIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'When'), dateIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
+      el('div', { className: 'form-group' }, el('label', {}, 'Envelope'), picker.element),
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          const amt = Math.round((Number(amountIn.value) || 0) * 100) / 100;
+          picker.commitTyped?.();
+          const row = store.addUpcomingHold({
+            date: dateIn.value,
+            amount: amt,
+            categoryId: picker.value || null,
+            description: descIn.value,
+          });
+          if (!row) {
+            showToast('Need a date and amount greater than zero', 'info');
+            return;
+          }
+          showToast(`Holding ${formatCurrency(row.amount)} out of snowball`, 'success');
+          modal.close();
+          window.appRefresh();
+        },
+      }, 'Hold from snowball'),
     ],
   });
   modal.modal.classList.add('modal-scrollable');

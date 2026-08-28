@@ -18,6 +18,12 @@ export const DEFAULT_CATEGORIES = [
   { name: 'Utilities', icon: '💡' },
   { name: 'Insurance', icon: '🛡️' },
   { name: 'Education', icon: '📚' },
+  {
+    name: 'Work travel',
+    icon: '🧳',
+    passThrough: true,
+    note: 'Federal Travel Payments land here. After you pay the work card from this envelope, leftover moves to Dad.',
+  },
 ];
 
 export const SINKING_FUND_DEFAULTS = [
@@ -64,9 +70,10 @@ export function createDefaultState() {
     /** Soft cap (regular) or savings goal (sinking). 0 = none. */
     goalAmount: 0,
     /** Free-text note (e.g. gift money, kid-specific context). */
-    note: '',
+    note: typeof c.note === 'string' ? c.note : '',
     /** Show Gift $ on this envelope (off by default — for kids, not bills). */
     allowGifts: false,
+    passThrough: c.passThrough === true,
   }));
 
   SINKING_FUND_DEFAULTS.forEach(c => {
@@ -89,6 +96,8 @@ export function createDefaultState() {
     setupComplete: false,
     /** Leftover taken to cover overspend — repay from bonus when it lands. */
     overspendCoverIous: [],
+    /** Known future spends held out of snowball / safe-to-send (not To Allocate). */
+    upcomingHolds: [],
     settings: {
       darkMode: false,
       palette: 'forest',

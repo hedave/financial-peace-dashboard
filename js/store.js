@@ -17,6 +17,7 @@ import {
   isTransactionPending,
   descriptionSimilarity,
   pickClearerDescription,
+  looksLikeFederalTravelPayment,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
 import { findBillForTransaction, findAutoPayBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
@@ -66,6 +67,17 @@ function isRecurringBill(bill) {
 
 function r2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+const WORK_TRAVEL_ENVELOPE_NAME = 'work travel';
+const DAD_ENVELOPE_NAME = 'dad';
+
+function findEnvelopeByName(state, name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key) return null;
+  return (state.categories || []).find(c =>
+    c && !c.parentId && String(c.name || '').trim().toLowerCase() === key,
+  ) || null;
 }
 
 /** Split `total` across items by weight (remaining). Caps each at its weight. */
@@ -169,12 +181,14 @@ function ensureDefaultCategories(state) {
     goalAmount: 0,
     note: '',
     allowGifts: false,
+    passThrough: false,
     ...c,
     id: c.id || generateId(),
     name: c.name.trim(),
     goalAmount: Number(c.goalAmount) > 0 ? Number(c.goalAmount) : 0,
     note: typeof c.note === 'string' ? c.note : (c.note ? String(c.note) : ''),
     allowGifts: c.allowGifts === true,
+    passThrough: c.passThrough === true || String(c.name || '').trim().toLowerCase() === 'work travel',
   }));
 
   const sinkingNames = new Set(SINKING_FUND_DEFAULTS.map(c => c.name.toLowerCase()));
@@ -194,10 +208,17 @@ function ensureDefaultCategories(state) {
       monthlyBudget: 0,
       carryOver: 0,
       goalAmount: 0,
-      note: '',
+      note: typeof def.note === 'string' ? def.note : '',
       allowGifts: false,
+      passThrough: def.passThrough === true || def.name.toLowerCase() === 'work travel',
     });
     existing.add(def.name.toLowerCase());
+  });
+
+  state.categories.forEach(c => {
+    if (String(c.name || '').trim().toLowerCase() === WORK_TRAVEL_ENVELOPE_NAME) {
+      c.passThrough = true;
+    }
   });
 
   // Keep Mortgage at the top — it's a primary bill for most families
@@ -272,6 +293,18 @@ function normalizeState(state) {
     state.monthBonusAllocations = {};
   }
   if (!Array.isArray(state.overspendCoverIous)) state.overspendCoverIous = [];
+  if (!Array.isArray(state.upcomingHolds)) state.upcomingHolds = [];
+  state.upcomingHolds = state.upcomingHolds
+    .filter(h => h && (Number(h.amount) || 0) > 0)
+    .map(h => ({
+      id: h.id || generateId(),
+      date: String(h.date || '').slice(0, 10),
+      amount: Math.round((Math.abs(Number(h.amount) || 0)) * 100) / 100,
+      categoryId: h.categoryId || null,
+      description: typeof h.description === 'string' ? h.description.trim() : '',
+      done: h.done === true,
+      createdAt: h.createdAt || new Date().toISOString(),
+    }));
   state.overspendCoverIous = state.overspendCoverIous
     .filter(i => i && i.fromId && i.toId)
     .map(i => ({
@@ -1396,13 +1429,16 @@ class Store {
       icon: c.icon || '',
       kind: this.getEnvelopeKind(c.id),
       isSinking: !!c.isSinkingFund,
+      passThrough: !!c.passThrough || String(c.name || '').trim().toLowerCase() === WORK_TRAVEL_ENVELOPE_NAME,
       remaining: this.getCategoryRemaining(c.id, month),
     }));
     const overspent = rows
-      .filter(r => r.remaining < -0.005 && r.kind !== 'debt' && r.kind !== 'bill')
+      .filter(r => r.remaining < -0.005 && r.kind !== 'debt' && r.kind !== 'bill' && !r.passThrough)
       .map(r => ({ ...r, over: r2(-r.remaining) }))
       .sort((a, b) => b.over - a.over || a.name.localeCompare(b.name));
-    const donors = rows.filter(r => r.remaining > 0.005 && r.kind !== 'debt' && r.kind !== 'bill');
+    const donors = rows.filter(r =>
+      r.remaining > 0.005 && r.kind !== 'debt' && r.kind !== 'bill' && !r.passThrough,
+    );
     const protectedLeftover = rows.filter(r => r.remaining > 0.005 && (r.kind === 'debt' || r.kind === 'bill'));
     const overspendTotal = r2(overspent.reduce((s, r) => s + r.over, 0));
     const donorPool = r2(donors.reduce((s, r) => s + r.remaining, 0));
@@ -1506,6 +1542,7 @@ class Store {
       .filter(c => c && !c.parentId)
       .filter(c => includeSinkingFunds || !c.isSinkingFund)
       .filter(c => !this.envelopeHasFixedObligation(c.id))
+      .filter(c => !c.passThrough && String(c.name || '').trim().toLowerCase() !== WORK_TRAVEL_ENVELOPE_NAME)
       .map(c => ({
         id: c.id,
         name: c.name,
@@ -1652,6 +1689,117 @@ class Store {
         .filter(i => i.fromId === categoryId)
         .reduce((s, i) => s + i.outstanding, 0),
     );
+  }
+
+  getUpcomingHolds() {
+    return (this.state.upcomingHolds || [])
+      .filter(h => h && r2(h.amount) > 0.005)
+      .slice()
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+        || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }
+
+  /** Spending on the hold's envelope from when it was created through the hold month. */
+  getUpcomingHoldSpent(hold) {
+    if (!hold?.categoryId) return 0;
+    const start = String(hold.createdAt || hold.date || '').slice(0, 10);
+    const holdMonth = String(hold.date || '').slice(0, 7);
+    return r2(
+      this.getCategoryTransactions(hold.categoryId, { range: 'all' })
+        .filter(t => t.type === 'expense' || t.type === 'debt_payment')
+        .reduce((s, t) => {
+          const d = String(t.date || '').slice(0, 10);
+          if (start && d && d < start) return s;
+          if (holdMonth && d.slice(0, 7) > holdMonth) return s;
+          return s + (Math.abs(Number(t.envelopeAmount) || 0));
+        }, 0),
+    );
+  }
+
+  isUpcomingHoldSatisfied(hold) {
+    if (!hold || hold.done) return true;
+    const need = r2(hold.amount);
+    if (!(need > 0.005)) return true;
+    return this.getUpcomingHoldSpent(hold) + 0.005 >= need;
+  }
+
+  getActiveUpcomingHolds() {
+    return this.getUpcomingHolds().filter(h => !this.isUpcomingHoldSatisfied(h));
+  }
+
+  /**
+   * Cash still spoken for by known upcoming spends.
+   * today: full leftover need (pay-bridge ignores envelopes).
+   * forecast: leftover need not already in envelope remaining (avoid double-count).
+   */
+  getUpcomingHoldReserve({ mode = 'today', month = getCurrentMonth() } = {}) {
+    const holds = this.getActiveUpcomingHolds();
+    const remainingByCat = new Map();
+    if (mode === 'forecast') {
+      (this.state.categories || []).forEach(c => {
+        if (!c?.id || c.parentId) return;
+        remainingByCat.set(c.id, Math.max(0, this.getCategoryRemaining(c.id, month)));
+      });
+    }
+    let total = 0;
+    holds.forEach(h => {
+      const need = r2(Math.max(0, r2(h.amount) - this.getUpcomingHoldSpent(h)));
+      if (!(need > 0.005)) return;
+      if (mode === 'today' || !h.categoryId) {
+        total = r2(total + need);
+        return;
+      }
+      const rem = remainingByCat.get(h.categoryId) || 0;
+      const covered = r2(Math.min(need, rem));
+      remainingByCat.set(h.categoryId, r2(rem - covered));
+      total = r2(total + need - covered);
+    });
+    return total;
+  }
+
+  addUpcomingHold({ date, amount, categoryId = null, description = '' } = {}) {
+    if (!this.canWriteBudget()) return null;
+    const amt = r2(Math.abs(Number(amount) || 0));
+    const iso = String(date || '').slice(0, 10);
+    if (!(amt > 0.005) || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+    let row = null;
+    this.update(s => {
+      if (!Array.isArray(s.upcomingHolds)) s.upcomingHolds = [];
+      row = {
+        id: generateId(),
+        date: iso,
+        amount: amt,
+        categoryId: categoryId || null,
+        description: String(description || '').trim(),
+        done: false,
+        createdAt: new Date().toISOString(),
+      };
+      s.upcomingHolds.push(row);
+    });
+    return row;
+  }
+
+  dismissUpcomingHold(id) {
+    if (!this.canWriteBudget() || !id) return false;
+    let ok = false;
+    this.update(s => {
+      const h = (s.upcomingHolds || []).find(x => x.id === id);
+      if (!h) return;
+      h.done = true;
+      ok = true;
+    });
+    return ok;
+  }
+
+  deleteUpcomingHold(id) {
+    if (!this.canWriteBudget() || !id) return false;
+    let ok = false;
+    this.update(s => {
+      const n = (s.upcomingHolds || []).length;
+      s.upcomingHolds = (s.upcomingHolds || []).filter(h => h.id !== id);
+      ok = (s.upcomingHolds || []).length !== n;
+    });
+    return ok;
   }
 
   /**
@@ -1823,11 +1971,12 @@ class Store {
 
     const debtMinsLeft = r2(this.getRemainingMinDebtPaymentsOutsideBudget(month));
     const envelopeLeft = this.getStillAssignedEnvelopeCash(month);
+    const upcomingHold = this.getUpcomingHoldReserve({ mode: 'forecast', month });
 
     const grossIn = r2(checking + incomeLeft);
     const livingAndObligations = r2(billsLeft + debtMinsLeft + envelopeLeft);
-    // After income + after funding the plan + bills/mins, leave cushion
-    const projected = r2(grossIn - livingAndObligations - buffer);
+    // After income + after funding the plan + bills/mins, leave cushion + known upcoming
+    const projected = r2(grossIn - livingAndObligations - buffer - upcomingHold);
     const safe = Math.max(0, projected);
 
     return {
@@ -1837,6 +1986,7 @@ class Store {
       billsLeft,
       debtMinsLeft,
       envelopeLeft,
+      upcomingHold,
       buffer,
       undatedBillCount,
       grossIn,
@@ -1947,8 +2097,9 @@ class Store {
       bills.reduce((s, b) => s + (Number(b.amount) || 0), 0) * 100,
     ) / 100;
 
-    // After snowball + bills, leave cushion in checking
-    const reserved = Math.round((billsTotal + buffer) * 100) / 100;
+    // After snowball + bills, leave cushion in checking + known upcoming holds
+    const upcomingHold = this.getUpcomingHoldReserve({ mode: 'today' });
+    const reserved = Math.round((billsTotal + buffer + upcomingHold) * 100) / 100;
     const freeCash = Math.max(0, Math.round((checking - reserved) * 100) / 100);
 
     const undatedBillCount = bills.filter(b => b.undated).length;
@@ -1965,6 +2116,7 @@ class Store {
       bills,
       reserved,
       freeCash,
+      upcomingHold,
       hasNextPay: !!nextPayDate,
     };
   }
@@ -2491,9 +2643,77 @@ class Store {
     return transactionMatchesIncomeSource(tx, source);
   }
 
+  /**
+   * Federal Travel Payments: park on Work travel (not To Allocate / bonus).
+   * Does not recategorize a row that already has an envelope.
+   */
+  earmarkFederalTravelIncome(s, tx) {
+    if (!tx || tx.type !== 'income') return false;
+    if (this.isSplitTransaction(tx)) return false;
+    if (tx.categoryId || tx.earmarkedEnvelope) return false;
+    if (!looksLikeFederalTravelPayment(tx.description)) return false;
+    const travel = findEnvelopeByName(s, WORK_TRAVEL_ENVELOPE_NAME);
+    if (!travel) return false;
+    const amt = Math.abs(Number(tx.amount) || 0);
+    if (!(amt > 0)) return false;
+    tx.categoryId = travel.id;
+    tx.earmarkedEnvelope = true;
+    if (tx.incomeSourceId) {
+      const src = (s.incomeSources || []).find(i => i.id === tx.incomeSourceId);
+      if (src && isBonusIncomeSource(src)) delete tx.incomeSourceId;
+    }
+    travel.carryOver = r2((Number(travel.carryOver) || 0) + amt);
+    travel.passThrough = true;
+    return true;
+  }
+
+  outflowHitsEnvelope(tx, categoryId) {
+    if (!tx || !categoryId) return 0;
+    if (!['expense', 'debt_payment', 'transfer'].includes(tx.type)) return 0;
+    if (this.isSplitTransaction(tx)) {
+      return r2((tx.splits || [])
+        .filter(sp => sp.categoryId === categoryId)
+        .reduce((sum, sp) => sum + (Math.abs(Number(sp.amount) || 0)), 0));
+    }
+    return tx.categoryId === categoryId ? r2(Math.abs(Number(tx.amount) || 0)) : 0;
+  }
+
+  /**
+   * After a Work travel card payment, leftover (mileage / unused per diem) → Dad.
+   * Only when leftover is smaller than this payment so a partial payoff still holds.
+   */
+  settleWorkTravelLeftoverToDad(s, outflowTx) {
+    const travel = findEnvelopeByName(s, WORK_TRAVEL_ENVELOPE_NAME);
+    const dad = findEnvelopeByName(s, DAD_ENVELOPE_NAME);
+    if (!travel || !dad) return null;
+    const payment = this.outflowHitsEnvelope(outflowTx, travel.id);
+    if (!(payment > 0.005)) return null;
+    const month = String(outflowTx.date || '').slice(0, 7) || getCurrentMonth();
+    let remaining = this.getCategoryRemaining(travel.id, month);
+    if (outflowTx.type === 'transfer') remaining = r2(remaining - payment);
+    if (!(remaining > 0.005) || remaining + 0.005 >= payment) return null;
+    if (!s.monthEnvelopeMoves || typeof s.monthEnvelopeMoves !== 'object') {
+      s.monthEnvelopeMoves = {};
+    }
+    if (!Array.isArray(s.monthEnvelopeMoves[month])) {
+      s.monthEnvelopeMoves[month] = [];
+    }
+    const move = {
+      id: generateId(),
+      fromId: travel.id,
+      toId: dad.id,
+      amount: remaining,
+      note: 'Work travel leftover → Dad',
+      at: new Date().toISOString(),
+    };
+    s.monthEnvelopeMoves[month].push(move);
+    return move;
+  }
+
   applyImportedIncome(s, tx) {
     // Refunds / gifts already assigned to an envelope are not paychecks
     if (tx?.earmarkedEnvelope || tx?.refundOfTxId) return false;
+    if (looksLikeFederalTravelPayment(tx?.description)) return false;
     const source = resolveIncomeSource(tx.description, s.incomeSources, {
       date: tx.date,
       amount: tx.amount,
@@ -2535,6 +2755,53 @@ class Store {
       src.paySchedule = sched;
       this.syncSourceAmountFromSchedule(src);
     });
+  }
+
+  /** Add many exact dates in one write (GSA EFT fill). Skips dates already on the calendar. */
+  addPayChecks(sourceId, dates, amount = null) {
+    const isos = [...new Set((dates || []).map(d => String(d).slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
+    if (!isos.length) return 0;
+    let added = 0;
+    this.update(s => {
+      const src = s.incomeSources.find(i => i.id === sourceId);
+      if (!src) return;
+      const sched = normalizePaySchedule(src.paySchedule);
+      sched.mode = 'dates';
+      const have = new Set(sched.checks.map(c => c.date));
+      isos.forEach(iso => {
+        if (have.has(iso)) return;
+        sched.checks.push({ date: iso, amount: amount != null ? Number(amount) : null });
+        have.add(iso);
+        added++;
+      });
+      sched.checks.sort((a, b) => a.date.localeCompare(b.date));
+      src.paySchedule = sched;
+      this.syncSourceAmountFromSchedule(src);
+    });
+    return added;
+  }
+
+  togglePayCheck(sourceId, date, amount = null) {
+    const iso = String(date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+    let added = false;
+    this.update(s => {
+      const src = s.incomeSources.find(i => i.id === sourceId);
+      if (!src) return;
+      const sched = normalizePaySchedule(src.paySchedule);
+      sched.mode = 'dates';
+      const exists = sched.checks.some(c => c.date === iso);
+      if (exists) {
+        sched.checks = sched.checks.filter(c => c.date !== iso);
+      } else {
+        sched.checks.push({ date: iso, amount: amount != null ? Number(amount) : null });
+        added = true;
+      }
+      sched.checks.sort((a, b) => a.date.localeCompare(b.date));
+      src.paySchedule = sched;
+      this.syncSourceAmountFromSchedule(src);
+    });
+    return added;
   }
 
   removePayCheck(sourceId, date) {
@@ -3017,17 +3284,19 @@ class Store {
         ...(earmarkToEnvelope && type === 'income' && categoryId ? { earmarkedEnvelope: true } : {}),
       };
       if (type === 'income') {
+        this.earmarkFederalTravelIncome(s, newTx);
         if (status === 'cleared') this.applyImportedIncome(s, newTx);
         if (!newTx.incomeSourceId) {
           const src = resolveIncomeSource(newTx.description, s.incomeSources, {
             date: newTx.date,
             amount: newTx.amount,
           });
-          if (src) newTx.incomeSourceId = src.id;
+          if (src && !newTx.earmarkedEnvelope) newTx.incomeSourceId = src.id;
         }
       }
       s.transactions.unshift(newTx);
       this.applyCheckingDelta(s, this.getCheckingDelta(type, num, status));
+      this.settleWorkTravelLeftoverToDad(s, newTx);
       if (type === 'debt_payment' && debtId) {
         this.adjustDebtForPayment(s, debtId, num);
       }
@@ -3150,6 +3419,8 @@ class Store {
       if (tx.earmarkedEnvelope && tx.type === 'income' && tx.categoryId) {
         this.reverseEarmarkCarry(s, tx, +1);
       }
+
+      this.settleWorkTravelLeftoverToDad(s, tx);
 
       // Income linkage when first cleared
       if (newType === 'income' && newStatus === 'cleared' && oldStatus === 'pending') {
@@ -3682,6 +3953,20 @@ class Store {
             }
           }
 
+          if (
+            existing.type === 'income' && tx.type === 'income'
+            && !existing.categoryId
+            && !this.isSplitTransaction(existing)
+          ) {
+            if (tx.description && looksLikeFederalTravelPayment(tx.description)) {
+              if (existing.description !== tx.description) {
+                existing.description = tx.description;
+                changed = true;
+              }
+            }
+            if (this.earmarkFederalTravelIncome(s, existing)) changed = true;
+          }
+
           const creditOffBookPending = () => {
             existing.clearingStatus = 'cleared';
             this.applyCheckingDelta(
@@ -3777,11 +4062,15 @@ class Store {
         }
 
         // Pending inbound ACH is already in USAA available — credit checking now.
+        if (tx.type === 'income') {
+          this.earmarkFederalTravelIncome(s, newTx);
+        }
         if (tx.type === 'income' && this.applyImportedIncome(s, newTx)) {
           stats.incomeLinked++;
         }
 
         s.transactions.push(newTx);
+        this.settleWorkTravelLeftoverToDad(s, newTx);
 
         if (tx.type === 'expense') {
           s.balances.checking -= tx.amount;

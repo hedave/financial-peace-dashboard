@@ -1652,9 +1652,19 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 .top-envelope-head {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 0.75rem;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
+}
+
+.top-envelope-head > span {
+  min-width: 0;
+}
+
+.top-envelope-head strong {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .top-envelope-meta {
@@ -2002,7 +2012,7 @@ body.modal-open .modal-backdrop {
 }
 
 .modal.modal-wide {
-  max-width: 720px;
+  max-width: 920px;
 }
 
 /* Review / long modals: keep header/footer visible; scroll the body */
@@ -3413,6 +3423,106 @@ html[data-reduce-motion="true"] .sticky-note {
   border-color: var(--primary);
 }
 
+.pay-cal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pay-cal-legend {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.pay-cal-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 4px;
+  border: 2px solid var(--border);
+  vertical-align: middle;
+}
+.pay-cal-swatch.gsa { background: #efe8f8; border-color: #8b6bb0; }
+.pay-cal-swatch.selected { background: var(--primary); border-color: var(--primary); }
+
+.pay-cal-year {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.pay-cal-month {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.4rem 0.55rem;
+}
+
+.pay-cal-month-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+  text-align: center;
+}
+
+.pay-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.pay-cal-dow {
+  text-align: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 0.1rem 0;
+}
+
+.pay-cal-pad { min-height: 1.6rem; }
+
+.pay-cal-day {
+  min-height: 1.85rem;
+  border: 2px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.pay-cal-day.gsa {
+  border-color: #8b6bb0;
+  background: #efe8f8;
+  color: #2d1b3d;
+}
+.pay-cal-day.selected {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.pay-cal-day.gsa.selected { box-shadow: inset 0 0 0 2px #c4b3dd; color: #fff; }
+.pay-cal-day:active { transform: scale(0.94); }
+
+[data-theme="dark"] .pay-cal-day.gsa:not(.selected) {
+  background: #3a2d52;
+  border-color: #b49ad4;
+  color: #f3eefc;
+}
+[data-theme="dark"] .pay-cal-swatch.gsa {
+  background: #3a2d52;
+  border-color: #b49ad4;
+}
+
 .pay-dates-list {
   display: flex;
   flex-direction: column;
@@ -3596,7 +3706,10 @@ html[data-reduce-motion="true"] .sticky-note {
     padding: 0.85rem 1rem 1.25rem;
     width: 100%;
     max-width: 100%;
-    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(8.75rem + env(safe-area-inset-bottom, 0px));
+  }
+  html {
+    scroll-padding-bottom: calc(8.75rem + env(safe-area-inset-bottom, 0px));
   }
   .page-header {
     margin-bottom: 0.75rem;
@@ -3816,6 +3929,17 @@ html[data-reduce-motion="true"] .sticky-note {
     width: 100%;
   }
 
+  .pay-cal-year {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pay-cal-day {
+    min-height: 2.15rem;
+    font-size: 0.78rem;
+  }
+  @media (max-width: 430px) {
+    .pay-cal-year { grid-template-columns: 1fr; }
+  }
+
   .page-tools-menu > summary.btn {
     width: 100%;
     justify-content: center;
@@ -3905,7 +4029,7 @@ html[data-reduce-motion="true"] .sticky-note {
     border-color: var(--primary);
   }
 
-  /* Bottom navigation — floating pill */
+  /* Bottom navigation — floating pill (opaque so progress bars don't show through) */
   .bottom-nav {
     display: flex;
     position: fixed;
@@ -3913,7 +4037,7 @@ html[data-reduce-motion="true"] .sticky-note {
     right: 0.5rem;
     bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
     z-index: 95;
-    background: color-mix(in srgb, var(--primary-dark) 94%, #000);
+    background: var(--primary-dark);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 1.2rem;
@@ -3923,8 +4047,13 @@ html[data-reduce-motion="true"] .sticky-note {
     gap: 0.12rem;
     overflow: hidden;
     box-shadow: 0 10px 36px rgba(0, 0, 0, 0.28);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+  }
+
+  /* Keep right-edge $ off the FAB (Home Clothing $826 was sitting under +) */
+  body:has(.fab-expense:not([hidden])) .top-envelope-row,
+  body:has(.fab-expense:not([hidden])) .dash-bill-row,
+  body:has(.fab-expense:not([hidden])) .tx-card {
+    padding-right: 2.85rem;
   }
 
   .bottom-nav-item {

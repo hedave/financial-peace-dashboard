@@ -5,7 +5,7 @@ import { BABY_STEPS } from '../defaults.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { renderReviewBanner, openPendingReview, openReviewInbox } from '../components/review-inbox.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
-import { openEnvelopeActivity } from './budget.js';
+import { openEnvelopeActivity, openUpcomingHolds } from './budget.js';
 import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
 import { refreshSyncChip } from '../components/layout.js';
 
@@ -36,6 +36,7 @@ export function renderDashboard(container) {
     (fc.billsLeft || 0) > 0.005 ? `− bills due ${formatCurrency(fc.billsLeft)}` : '− bills $0',
     (fc.debtMinsLeft || 0) > 0.005 ? `− debt mins ${formatCurrency(fc.debtMinsLeft)}` : null,
     (fc.envelopeLeft || 0) > 0.005 ? `− envelope plan ${formatCurrency(fc.envelopeLeft)}` : null,
+    (fc.upcomingHold || 0) > 0.005 ? `− upcoming hold ${formatCurrency(fc.upcomingHold)}` : null,
     (fc.buffer || 0) > 0.005 ? `− cushion ${formatCurrency(fc.buffer)}` : null,
   ].filter(Boolean).join(' ');
   const todayLine = bankToday > 0.005
@@ -217,6 +218,41 @@ export function renderDashboard(container) {
         : ' Nothing free to send today after bills before next pay + cushion.')
       + toAllocNote),
   ));
+
+  const holdToday = store.getUpcomingHoldReserve({ mode: 'today' });
+  const activeHolds = store.getActiveUpcomingHolds();
+  if (store.canWriteBudget()) {
+    if (holdToday > 0.005) {
+      const holdLabel = activeHolds.slice(0, 2).map(h => {
+        const cat = state.categories.find(c => c.id === h.categoryId);
+        return h.description || cat?.name || formatDate(h.date);
+      }).join(', ');
+      container.appendChild(el('div', { className: 'banner banner-action section' },
+        el('div', { className: 'banner-icon' }, '📌'),
+        el('div', { className: 'banner-text' },
+          el('h3', {}, `${formatCurrency(holdToday)} held for upcoming`),
+          el('p', {},
+            `${holdLabel}${activeHolds.length > 2 ? ` +${activeHolds.length - 2}` : ''}. Out of snowball and safe-to-send — not To Allocate.`,
+          ),
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          style: 'margin-left:auto',
+          onClick: () => openUpcomingHolds(),
+        }, 'Edit holds'),
+      ));
+    } else {
+      container.appendChild(el('p', { className: 'tx-form-hint section', style: 'margin-top:0' },
+        el('button', {
+          type: 'button',
+          className: 'linkish',
+          onClick: () => openUpcomingHolds(),
+        }, 'Upcoming hold'),
+        ' — park a known future spend (e.g. $1,500 medical) out of snowball. Does not change To Allocate.',
+      ));
+    }
+  }
 
   container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
 
@@ -930,6 +966,7 @@ export function allocateSurplus() {
         + ` · Income left: ${formatCurrency(forecast.incomeLeft || 0)}`
         + ` · Bills still due: ${formatCurrency(forecast.billsLeft || 0)}`
         + ` · Envelope plan left: ${formatCurrency(forecast.envelopeLeft || 0)}`
+        + ((forecast.upcomingHold || 0) > 0.005 ? ` · Upcoming hold: ${formatCurrency(forecast.upcomingHold)}` : '')
         + ` · Cushion: ${formatCurrency(forecast.buffer || 0)}`,
       ),
       el('div', { className: 'form-group' }, el('label', {}, 'Amount to send now'), input),

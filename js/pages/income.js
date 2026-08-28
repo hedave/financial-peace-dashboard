@@ -82,7 +82,7 @@ export function renderIncome(container) {
   container.appendChild(el('div', { className: 'section' },
     el('div', { className: 'section-title' }, `Pay Calendar — ${getMonthLabel(month)}`),
     el('p', { className: 'section-hint' },
-      'Add pay dates via Edit dates. CSV imports fill in check amounts when descriptions match. Add next-year federal dates each October.'
+      'Edit dates opens a calendar. Purple days are GSA EFT (when checking gets paid). Tap days or add all GSA EFT for the year. CSV imports fill check amounts when descriptions match.'
     ),
     el('div', { className: 'pay-calendar-grid' },
       ...paychecks.map(p => payCalendarCard(p, state)),
