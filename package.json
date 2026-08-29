@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/generate-config.js",
-    "start": "py -3 -m http.server 8080 --bind 127.0.0.1",
+    "start": "node scripts/start.mjs",
     "test:import": "node scripts/test-import-reconcile.mjs"
   }
 }
