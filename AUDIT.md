@@ -29,6 +29,10 @@ Scoped inspection only. No app rewrite. Kalshi: not present in this repo.
 
 9. **PWA / deploy assume generated config on Netlify** — `netlify.toml` build is `node scripts/generate-config.js`. Local/agent must do the same; do not commit the output.
 
+## Verification (this VM, 2026-08-29)
+
+Install (`.cursor/environment.json`) and `npm run test:import` both exited 0. Full command output is in the PR description. `js/config.js` was generated (cloud sync off) and remains gitignored.
+
 ## Out of scope (not done)
 
 USAA login, scraping, moving money, large refactors, new features, merge, Kalshi, rewriting snowball/budget math.
