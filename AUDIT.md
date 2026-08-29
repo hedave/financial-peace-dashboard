@@ -13,7 +13,7 @@ Scoped inspection only. No app rewrite. Kalshi: not present in this repo.
 
 1. **Missing generated config blocks the app** — `js/cloud-sync.js` (import of `./config.js`); writer is `scripts/generate-config.js`; template is `js/config.example.js`; ignore rule in `.gitignore`. Fresh clone / agent VM has no `js/config.js` until `npm run build` / the environment `install` runs.
 
-2. **`npm start` is Windows-only** — `package.json` script `start` calls `py -3`. Linux agents need `python3 -m http.server 8080 --bind 127.0.0.1`. `start.bat` already prefers a Node static server, then `py`.
+2. **`npm start` is cross-platform** — `package.json` `start` runs `scripts/start.mjs` (`python3`, then Node, then Windows `py -3`). `start.bat` still prefers a Node static server, then `py`.
 
 3. **Snowball / budget math is a large unsplit surface** — `js/store.js` (~4100 lines) owns `getToAllocate`, `getCategoryRemaining`, `getSurplusForSnowball`, `getMonthEndSnowballForecast`, `getBankSurplusForSnowball`, import checking updates. UI callers: `js/pages/budget.js`, `js/pages/debt.js`, `js/pages/dashboard.js`, `js/advisor/context.js`, `js/advisor/engine.js`. `scripts/test-import-reconcile.mjs` covers import/reconcile and a few store cases (holds, travel leftover, GSA EFT), not a full math suite. **Do not change this math unless that existing test fails.**
 

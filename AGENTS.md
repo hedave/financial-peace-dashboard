@@ -30,13 +30,11 @@ That runs `node scripts/test-import-reconcile.mjs` (import/reconcile + a few sto
 
 ## Run
 
-`package.json` `"start"` is Windows-only (`py -3`). On this Linux VM / Cloud Agent:
-
 ```bash
-python3 -m http.server 8080 --bind 127.0.0.1
+npm start
 ```
 
-Then open `http://127.0.0.1:8080`. Windows local: `start.bat` (Node server first, then `py`).
+Serves `http://127.0.0.1:8080` via `python3`, then a Node static server, then Windows `py -3`. Windows local: `start.bat` (Node first, then `py`) still works.
 
 `npm run build` is an alias for `node scripts/generate-config.js` (Netlify uses the same).
 
