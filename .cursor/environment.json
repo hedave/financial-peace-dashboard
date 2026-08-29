@@ -1,0 +1,4 @@
+{
+  "name": "FigPig Financial",
+  "install": "node --version\nnode scripts/generate-config.js\ntest -f js/config.js"
+}
