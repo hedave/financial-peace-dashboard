@@ -67,9 +67,23 @@ function signedAmount(row) {
   return null;
 }
 
+function firstHint(...vals) {
+  for (const v of vals) {
+    if (v == null || v === '') continue;
+    if (typeof v === 'object') {
+      const inner = firstHint(v.id, v.name, v.envelope, v.category);
+      if (inner) return inner;
+      continue;
+    }
+    const s = redactSensitive(String(v).trim());
+    if (s) return s;
+  }
+  return null;
+}
+
 /**
  * @param {unknown} raw
- * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null }[]}
+ * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null, requestedEnvelope: string|null }[]}
  */
 export function normalizeIngestTransactions(raw) {
   const list = Array.isArray(raw) ? raw : [];
@@ -86,6 +100,21 @@ export function normalizeIngestTransactions(raw) {
       row.description || row.Description || row.merchant || row.merchant_name || row.name || 'USAA transaction',
     );
     const bankCategory = redactSensitive(row.bankCategory || row.category || row.Category || '') || null;
+    const requestedEnvelope = firstHint(
+      row.envelope,
+      row.Envelope,
+      row.envelopeId,
+      row.envelope_id,
+      row.envelopeID,
+      row.envelopeName,
+      row.envelope_name,
+      row.categoryId,
+      row.category_id,
+      row.CategoryId,
+      row.category,
+      row.Category,
+      row.bankCategory,
+    );
     out.push({
       date,
       amount: Math.abs(signed),
@@ -93,6 +122,7 @@ export function normalizeIngestTransactions(raw) {
       description: description || 'USAA transaction',
       pending,
       bankCategory,
+      requestedEnvelope,
     });
   }
   return out;
@@ -105,5 +135,6 @@ export function inboxRowsToImportObjects(txs) {
     Amount: t.type === 'income' ? Math.abs(Number(t.amount) || 0) : -Math.abs(Number(t.amount) || 0),
     Status: t.pending ? 'Pending' : 'Posted',
     Category: t.bankCategory || '',
+    Envelope: t.requestedEnvelope || '',
   }));
 }

@@ -34,14 +34,16 @@ When CoS (or David) sends bank screenshots or a list of transactions:
       "amount": -12.34,
       "description": "merchant as shown",
       "pending": false,
-      "category": "optional bank label"
+      "envelope": "optional envelope name or id",
+      "category": "optional envelope name or id"
     }
   ]
 }
 3. Sign: negative = money out, positive = money in. Pending purchases: pending true. Pending refunds / bonus: pending true (FigPig keeps those off-book until they post).
 4. Skip rows you cannot date or amount. Never invent merchants. If two screenshots overlap, still send them — FigPig dedupes.
-5. Reply to CoS (not a novel): applied true/false; imported; duplicates; skipped; three merchant names; applyError if any.
-6. Never dump the secret. Never store the screenshots in Drive or email.
+5. Reply to CoS (not a novel): applied true/false; imported; duplicates; skipped; categorized; three merchant names; applyError if any.
+6. Per-row envelope: if a new row includes envelope or category (name or id) and that envelope exists, FigPig assigns it to that row only. Do not send one envelope for the whole batch. Duplicates and already-enveloped rows stay untouched. Keep merchant text as shown so later rules can match (CURSOR USAGE AUG still identifies as cursor usage).
+7. Never dump the secret. Never store the screenshots in Drive or email.
 
 If the API returns 409 (no cloud budget yet), tell CoS: David must open FigPig once and Sync Now. Then retry the same payload. Do not open the site for him.
 ```
