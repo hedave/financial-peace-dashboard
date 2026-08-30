@@ -1,0 +1,33 @@
+name: apply-ingest-split-patch
+on:
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ingest-apply-envelope
+      - name: Apply ingest splits patch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cat patches/ingest-splits.b64.* | tr -d '\n' | base64 -d > /tmp/ingest-splits.patch
+          git apply /tmp/ingest-splits.patch
+          rm -rf patches .github/workflows/apply-ingest-split-patch.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git add -A
+          git status
+          git commit -m "$(cat <<'EOF'
+Apply ingest splits on new uncategorized rows
+
+Accept splits on a single ingest row (one remainder line allowed) so a
+Walmart-style purchase can land as one checking move with envelope lines
+that already exist in the UI. Skip duplicates and already-split rows.
+EOF
+)"
+          git push origin HEAD:fix/ingest-apply-envelope
