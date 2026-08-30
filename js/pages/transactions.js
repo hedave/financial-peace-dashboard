@@ -1190,7 +1190,7 @@ function stashImportStats(stats) {
   window.FigPig.lastImportStats = stats;
 }
 
-function finishImport(stats, modal) {
+export function finishImport(stats, modal) {
   stashImportStats(stats);
   modal?.close?.();
   if (stats.count > 0 || stats.matchedPending > 0) {
@@ -1510,7 +1510,7 @@ export function openImportDialog() {
     title: 'Import bank transactions',
     body: el('div', {},
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
-        'Paste from USAA mobile, or choose a CSV/PDF. Everything stays on this device.',
+        'Paste from USAA mobile, or choose a CSV/PDF. Phone screenshots go to the CoS Grok Bot via API — they should not need this dialog.',
       ),
       el('div', { className: 'form-group' },
         el('label', {}, 'I bank with…'),

@@ -66,6 +66,11 @@ git push -u origin main
 | `SUPABASE_URL` | your Supabase project URL |
 | `SUPABASE_ANON_KEY` | publishable or legacy anon key |
 | `CLOUD_SYNC_ENABLED` | `true` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → `service_role` (Functions only — never put this in the browser app) |
+| `FIGPIG_INGEST_SECRET` | a long random string you also paste into the CoS Grok Bot standing rules |
+| `FIGPIG_OWNER_USER_ID` | your Supabase Auth user UUID (Authentication → Users) |
+
+Bank-drop API: SQL Editor → run `supabase-import-inbox.sql`. `POST /api/ingest-bank` applies rows to `budget_states`. CoS routes screenshots; the FigPig bot calls the API (no browser). `docs/COS-BOT.md` and `docs/FIGPIG-BOT.md`.
 
 4. Deploy. Future pushes to `main` auto-deploy.
 

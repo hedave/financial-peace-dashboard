@@ -14,7 +14,8 @@ import { renderReports } from './pages/reports.js';
 import { renderSettings } from './pages/settings.js';
 import { renderNotes } from './pages/notes.js';
 import { renderAdvisor, prepareAdvisorVisit } from './pages/advisor.js';
-import { isCloudConfigured } from './cloud-sync.js';
+import { isNotesOnlyRole } from './cloud-sync.js';
+import { refreshBankInboxCache, applyPendingBankInbox, inboxTransactionCount } from './bank-inbox.js';
 import { showCloudAuthScreen } from './components/cloud-auth.js';
 import { showToast } from './components/modal.js';
 
@@ -167,11 +168,41 @@ function applyHashRoute() {
   if (intent.openImport) navigate('transactions', { import: true });
 }
 
+let lastInboxCount = 0;
+let inboxWatchBound = false;
+
+function pollBankInbox() {
+  if (isNotesOnlyRole()) return;
+  store.pullFromCloud()
+    .then((result) => {
+      if (result?.applied) window.appRefresh?.();
+      return refreshBankInboxCache();
+    })
+    .then((rows) => {
+      const n = inboxTransactionCount(rows);
+      if (n > 0 && currentPage === 'dashboard') window.appRefresh?.();
+      else if (n > lastInboxCount) {
+        showToast(`${n} USAA row${n === 1 ? '' : 's'} waiting — API apply missed; tap Import on Home`, 'info', 5000);
+      }
+      lastInboxCount = n;
+    })
+    .catch(() => {});
+}
+
+function bindInboxWatch() {
+  if (inboxWatchBound) return;
+  inboxWatchBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pollBankInbox();
+  });
+}
+
 function installFigPigApi() {
   window.FigPig = {
     importBankText,
     importBankFile,
     openImportDialog,
+    applyBankInbox: applyPendingBankInbox,
     selfCheckImport: selfCheckImportReconcile,
     lastImportStats: window.FigPig?.lastImportStats || null,
     APP_BUILD,
@@ -191,6 +222,8 @@ function bootstrap() {
     mainEl.addEventListener('scroll', trackScrollPos, { passive: true });
   }
   renderPage({ reason: 'bootstrap' });
+  bindInboxWatch();
+  pollBankInbox();
   window.addEventListener('hashchange', applyHashRoute);
   store.subscribe(() => {
     // Notes auto-save silently; re-rendering would reset the textarea while typing
@@ -381,7 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260827i';
+const APP_BUILD = '20260830b';
 
 installFigPigApi();
 

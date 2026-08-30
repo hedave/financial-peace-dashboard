@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node scripts/generate-config.js",
     "start": "node scripts/start.mjs",
-    "test:import": "node scripts/test-import-reconcile.mjs"
+    "test:import": "node scripts/test-import-reconcile.mjs",
+    "test:ingest": "node scripts/test-ingest-normalize.mjs"
   }
 }

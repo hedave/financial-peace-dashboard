@@ -3,6 +3,10 @@
   command = "node scripts/generate-config.js"
   publish = "."
 
+[functions]
+  # ingest-bank bundles store + normalizer; config.js is written by the build command
+  included_files = ["js/ingest-normalize.js", "js/config.js"]
+
 [[headers]]
   for = "/*"
   [headers.values]

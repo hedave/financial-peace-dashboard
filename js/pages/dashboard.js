@@ -4,6 +4,13 @@ import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { renderReviewBanner, openPendingReview, openReviewInbox } from '../components/review-inbox.js';
+import {
+  getCachedBankInbox,
+  applyPendingBankInbox,
+  inboxMerchantPreview,
+  inboxTransactionCount,
+} from '../bank-inbox.js';
+import { finishImport } from './transactions.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
 import { openEnvelopeActivity, openUpcomingHolds } from './budget.js';
 import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
@@ -95,6 +102,40 @@ export function renderDashboard(container) {
   // —— Above the fold: act → cash → week ——
   const reviewBanner = renderReviewBanner(inbox);
   if (reviewBanner) container.appendChild(reviewBanner);
+
+  const bankDrops = getCachedBankInbox();
+  const dropCount = inboxTransactionCount(bankDrops);
+  if (dropCount > 0) {
+    const preview = inboxMerchantPreview(bankDrops);
+    const previewLine = preview.length ? ` Includes ${preview.join(', ')}.` : '';
+    container.appendChild(el('div', { className: 'banner banner-action review-banner' },
+      el('div', { className: 'banner-icon' }, '🏦'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, 'Bank drop from CoS'),
+        el('p', {}, `${dropCount} USAA row${dropCount === 1 ? '' : 's'} the API could not auto-apply.${previewLine} Tap Import — same rules as paste.`),
+      ),
+      el('div', { className: 'btn-group', style: 'margin-left:auto' },
+        el('button', {
+          className: 'btn btn-primary btn-sm',
+          onClick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = 'Importing…';
+            try {
+              const result = await applyPendingBankInbox({ includePending: true });
+              if (result.empty) showToast('No bank drops waiting', 'info');
+              else if (result.stats) finishImport(result.stats, null);
+            } catch (err) {
+              console.error(err);
+              showToast(err?.message || 'Could not apply bank drop', 'info');
+              btn.disabled = false;
+              btn.textContent = 'Import';
+            }
+          },
+        }, 'Import'),
+      ),
+    ));
+  }
 
   const overCapEnvelopes = store.getEnvelopesOverSoftCap();
   const notedEnvelopes = store.getEnvelopesWithNotes();

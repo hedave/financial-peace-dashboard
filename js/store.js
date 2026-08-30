@@ -406,6 +406,16 @@ class Store {
     return createDefaultState();
   }
 
+  /** Replace in-memory state (Netlify ingest apply). Does not push to cloud. */
+  hydrateFromObject(raw) {
+    this.state = normalizeState({
+      ...createDefaultState(),
+      ...(raw && typeof raw === 'object' ? raw : {}),
+    });
+    this.processMonthRollover();
+    return this.state;
+  }
+
   writeLocal() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
   }
@@ -512,8 +522,17 @@ class Store {
 
   async pushToCloud({ force = false } = {}) {
     if (!isCloudConfigured() || !(await getSession())) return false;
+    const remote = await loadRemoteState();
+    if (!force && remote?.updated_at) {
+      const remoteTime = new Date(remote.updated_at).getTime();
+      const localTime = Number(this.state._cloudUpdatedAt) || 0;
+      // CoS / ingest may have written cloud while this tab was open.
+      if (Number.isFinite(remoteTime) && remoteTime > localTime + 1000) {
+        await this.pullFromCloud();
+        return false;
+      }
+    }
     if (!force && isBlankBudgetState(this.state)) {
-      const remote = await loadRemoteState();
       if (remote?.state && !isBlankBudgetState(remote.state)) {
         console.warn('Skipped pushing blank local state over cloud budget');
         return false;
@@ -569,6 +588,10 @@ class Store {
       normalizeState(this.state);
       fn(this.state);
       normalizeState(this.state);
+      if (opts.persist === false) {
+        this.notify();
+        return;
+      }
       this.save();
     } catch (e) {
       console.error('Store update failed', e);
@@ -3861,7 +3884,7 @@ class Store {
     return n;
   }
 
-  importTransactions(rows, { includePending = true } = {}) {
+  importTransactions(rows, { includePending = true, persist = true } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
@@ -4089,7 +4112,7 @@ class Store {
         }
         stats.count++;
       });
-    });
+    }, persist === false ? { persist: false } : {});
     return stats;
   }
 

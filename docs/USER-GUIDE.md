@@ -17,7 +17,7 @@ This file is a local reference document (not an in-app help page). Keep a copy w
 7. [New month checklist (recommended)](#7-new-month-checklist-recommended)
 8. [Worked examples](#8-worked-examples)
 9. [Transactions, pending vs cleared](#9-transactions-pending-vs-cleared)
-10. [Bank import (CSV & PDF)](#10-bank-import-csv--pdf)
+10. [Bank import (CSV, PDF & CoS Bot)](#10-bank-import-csv-pdf--cos-bot)
 11. [Always-use-this-envelope rules](#11-always-use-this-envelope-rules)
 12. [Bills](#12-bills)
 13. [Debt snowball](#13-debt-snowball)
@@ -391,9 +391,17 @@ One purchase can split across envelopes (e.g. Walmart = Groceries + Household). 
 
 ---
 
-## 10. Bank import (CSV, paste & PDF)
+## 10. Bank import (CSV, PDF & CoS Bot)
 
-### USAA mobile paste (recommended)
+### Phone screenshot → CoS → FigPig bot (API, no browser)
+
+USAA app → screenshot (one or two) → send to **CoS**. CoS forwards the pictures to the **FigPig** bot. FigPig POSTs `/api/ingest-bank`. You do **not** open FigPig. The next launch or Sync shows the new rows.
+
+If auto-apply fails, Home shows **Bank drop from CoS** as a fallback. Setup: `docs/COS-BOT.md` and `docs/FIGPIG-BOT.md`.
+
+You do **not** need a screenshot on days Grok already has USAA (the finance connector). Ask Grok Build: “sync USAA to FigPig.”
+
+### USAA mobile paste (recommended without the bot)
 
 Transactions → Import → paste the USAA mobile activity list (select-all copy). Handles jammed one-line pastes. Bank **Pending purchases** hit checking immediately (they already left the bank). **Pending refunds / bonus** stay off checking and out of the bonus pot until they post.
 

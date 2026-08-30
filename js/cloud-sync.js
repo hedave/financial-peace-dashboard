@@ -273,3 +273,51 @@ export function schedulePush(pushFn, delayMs = 800) {
     });
   }, delayMs);
 }
+
+function isMissingInboxTable(error) {
+  const msg = String(error?.message || '');
+  return error?.code === '42P01' || /import_inbox/i.test(msg);
+}
+
+/** Pending CoS / Grok bank drops for the budget owner. Empty if table not created yet. */
+export async function listPendingBankInbox() {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session) return [];
+  const ownerId = await budgetOwnerId();
+  if (!ownerId) return [];
+
+  const { data, error } = await sb
+    .from('import_inbox')
+    .select('id, source, account, note, payload, created_at, status')
+    .eq('user_id', ownerId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingInboxTable(error)) return [];
+    throw error;
+  }
+  return data || [];
+}
+
+export async function markBankInbox(id, status, stats = null) {
+  const sb = await getClient();
+  const session = await getSession();
+  if (!sb || !session || !id) return false;
+
+  const { error } = await sb
+    .from('import_inbox')
+    .update({
+      status,
+      applied_at: status === 'pending' ? null : new Date().toISOString(),
+      apply_stats: stats,
+    })
+    .eq('id', id);
+
+  if (error) {
+    if (isMissingInboxTable(error)) return false;
+    throw error;
+  }
+  return true;
+}
