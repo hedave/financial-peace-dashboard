@@ -10,7 +10,7 @@ import {
   addMonths,
 } from './utils.js';
 import {
-  normalizeImportRow, resolveCategoryId,
+  normalizeImportRow, resolveCategoryId, resolveRequestedEnvelope, resolveRequestedSplits,
   isImportDuplicateTransaction,
   clusterDuplicateTransactions,
   findBestPendingMatch,
@@ -3947,15 +3947,27 @@ class Store {
 
           if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
             existing.importCategory = tx.bankCategory;
-            const resolved = resolveCategoryId(
-              tx.bankCategory,
-              tx.description,
+            // Requested envelope/category/splits apply to NEW uncategorized rows only.
+            // Do not recategorize a merge of an already-enveloped (or uncategorized) twin.
+            const incomingRequested = resolveRequestedSplits(
+              tx.requestedSplits,
               s.categories,
-              tx.type,
+              tx.amount,
+            ) || resolveRequestedEnvelope(
+              tx.requestedEnvelope || tx.bankCategory,
+              s.categories,
             );
-            if (resolved) {
-              existing.categoryId = resolved;
-              changed = true;
+            if (!incomingRequested) {
+              const resolved = resolveCategoryId(
+                tx.bankCategory,
+                tx.description,
+                s.categories,
+                tx.type,
+              );
+              if (resolved) {
+                existing.categoryId = resolved;
+                changed = true;
+              }
             }
           }
 
@@ -4058,12 +4070,23 @@ class Store {
           return;
         }
 
-        let categoryId = resolveCategoryId(
-          tx.bankCategory,
-          tx.description,
+        const requestedSplits = resolveRequestedSplits(
+          tx.requestedSplits,
           s.categories,
-          tx.type,
+          tx.amount,
         );
+        const envelopeHint = tx.requestedEnvelope || tx.bankCategory || '';
+        const requestedId = requestedSplits
+          ? null
+          : resolveRequestedEnvelope(envelopeHint, s.categories);
+        let categoryId = requestedSplits
+          ? null
+          : (requestedId || resolveCategoryId(
+            tx.bankCategory,
+            tx.description,
+            s.categories,
+            tx.type,
+          ));
 
         const newTx = {
           id: generateId(),
@@ -4075,6 +4098,7 @@ class Store {
           importCategory: tx.bankCategory || null,
           clearingStatus: 'cleared',
           ...(bankPending ? { bankPending: true } : {}),
+          ...(requestedSplits ? { splits: requestedSplits } : {}),
         };
 
         if (tx.type === 'expense' && !categoryId) {

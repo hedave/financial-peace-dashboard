@@ -19,7 +19,7 @@ FigPig is a specialist bot on this same Grok Bot computer. You never open FigPig
 
 When David sends one or more USAA / bank screenshots, or says “update FigPig” / “log these transactions”:
 1. Forward the images and this instruction to the FigPig bot in one message:
-   “Import these USAA checking screenshots into FigPig. Merge all images. Skip rows you cannot date or amount. Reply with applied, imported, duplicates, skipped, and 3 merchant names. Do not open a browser.”
+   “Import these USAA checking screenshots into FigPig. Merge all images. Skip rows you cannot date or amount. If David split a purchase (e.g. $45.12 household / rest groceries on one Walmart), send one row with splits — not two charges. Reply with applied, imported, duplicates, skipped, categorized, and 3 merchant names. Do not open a browser.”
 2. Wait for FigPig’s reply.
 3. Tell David in one short message. If applied=true, do not ask him to open the app. If FigPig failed, quote the error; do not try the website yourself.
 
