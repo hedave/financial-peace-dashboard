@@ -30,6 +30,10 @@ function parseMoney(raw) {
   return negative ? -Math.abs(n) : n;
 }
 
+function r2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 function isoDate(raw) {
   const s = String(raw || '').trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
@@ -81,9 +85,74 @@ function firstHint(...vals) {
   return null;
 }
 
+function isRestToken(raw) {
+  if (raw == null || raw === '') return true;
+  const s = String(raw).trim().toLowerCase();
+  return s === 'rest' || s === 'remainder' || s === 'leftover';
+}
+
+function splitHint(item) {
+  if (item == null) return null;
+  if (typeof item !== 'object') return firstHint(item);
+  return firstHint(
+    item.envelope,
+    item.Envelope,
+    item.envelopeId,
+    item.envelope_id,
+    item.envelopeID,
+    item.envelopeName,
+    item.envelope_name,
+    item.categoryId,
+    item.category_id,
+    item.CategoryId,
+    item.category,
+    item.Category,
+    item.name,
+    item.id,
+  );
+}
+
+/**
+ * Normalize ingest split lines. One line may omit amount / use "rest" for the leftover.
+ * Returns null unless there are at least two envelope lines that cover the total.
+ */
+export function normalizeIngestSplits(raw, totalAbs) {
+  const list = Array.isArray(raw) ? raw : [];
+  const total = r2(Math.abs(Number(totalAbs) || 0));
+  if (list.length < 2 || !(total > 0)) return null;
+
+  const parts = [];
+  for (const item of list) {
+    const envelope = splitHint(item);
+    if (!envelope) continue;
+    const obj = item && typeof item === 'object' ? item : {};
+    const amountRaw = obj.amount ?? obj.Amount;
+    const restFlag = obj.rest === true
+      || obj.remainder === true
+      || isRestToken(amountRaw);
+    const parsed = restFlag ? null : parseMoney(amountRaw);
+    const amount = parsed == null ? null : r2(Math.abs(parsed));
+    parts.push({ envelope, amount, rest: amount == null || restFlag });
+  }
+  if (parts.length < 2) return null;
+
+  const restParts = parts.filter(p => p.rest);
+  const assigned = r2(parts.reduce((s, p) => s + (p.rest ? 0 : (p.amount || 0)), 0));
+  if (restParts.length > 1) return null;
+  if (restParts.length === 1) {
+    const rest = r2(total - assigned);
+    if (!(rest > 0)) return null;
+    restParts[0].amount = rest;
+  } else if (Math.abs(assigned - total) >= 0.01) {
+    return null;
+  }
+
+  return parts.map(p => ({ envelope: p.envelope, amount: r2(p.amount) }));
+}
+
 /**
  * @param {unknown} raw
- * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null, requestedEnvelope: string|null }[]}
+ * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null, requestedEnvelope: string|null, requestedSplits: { envelope: string, amount: number }[]|null }[]}
  */
 export function normalizeIngestTransactions(raw) {
   const list = Array.isArray(raw) ? raw : [];
@@ -115,6 +184,9 @@ export function normalizeIngestTransactions(raw) {
       row.Category,
       row.bankCategory,
     );
+    const requestedSplits = type === 'expense'
+      ? normalizeIngestSplits(row.splits || row.Splits || row.split, Math.abs(signed))
+      : null;
     out.push({
       date,
       amount: Math.abs(signed),
@@ -123,6 +195,7 @@ export function normalizeIngestTransactions(raw) {
       pending,
       bankCategory,
       requestedEnvelope,
+      requestedSplits,
     });
   }
   return out;
@@ -136,5 +209,6 @@ export function inboxRowsToImportObjects(txs) {
     Status: t.pending ? 'Pending' : 'Posted',
     Category: t.bankCategory || '',
     Envelope: t.requestedEnvelope || '',
+    Splits: t.requestedSplits || [],
   }));
 }

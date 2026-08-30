@@ -1,4 +1,5 @@
 import { todayISO, formatLocalISODate, parseCSV } from './utils.js';
+import { normalizeIngestSplits } from './ingest-normalize.js';
 
 /** Parse currency strings: $1,234.56, (50.00), -50.00 */
 export function parseMoneyValue(str) {
@@ -662,6 +663,41 @@ export function resolveRequestedEnvelope(hint, userCategories) {
   return byNorm?.id || null;
 }
 
+/**
+ * Resolve ingest split lines to envelope ids. All lines must resolve and
+ * cover the transaction total. Otherwise return null (caller may fall back).
+ */
+export function resolveRequestedSplits(parts, userCategories, totalAmount) {
+  if (!Array.isArray(parts) || parts.length < 2 || !Array.isArray(userCategories)) return null;
+  const total = Math.round(Math.abs(Number(totalAmount) || 0) * 100) / 100;
+  if (!(total > 0)) return null;
+  const out = [];
+  for (const part of parts) {
+    if (!part) return null;
+    const id = resolveRequestedEnvelope(
+      part.envelope || part.category || part.categoryId || part.Envelope,
+      userCategories,
+    );
+    const amount = Math.round(Math.abs(Number(part.amount) || 0) * 100) / 100;
+    if (!id || !(amount > 0)) return null;
+    out.push({ categoryId: id, amount });
+  }
+  const sum = Math.round(out.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+  if (Math.abs(sum - total) >= 0.01) return null;
+  return out;
+}
+
+function pickRequestedSplits(row, map, totalAmount) {
+  const raw = row?.splits || row?.Splits || row?.split
+    || map.get('splits') || map.get('split');
+  if (!raw) return null;
+  let list = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch { return null; }
+  }
+  return normalizeIngestSplits(list, totalAmount);
+}
+
 function mapBankLabelToEnvelope(bankCategory, userCategories) {
   const norm = normalizeLabel(bankCategory);
   if (!norm) return null;
@@ -775,35 +811,35 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
   const debit = Math.abs(parseMoneyValue(debitRaw));
   const credit = Math.abs(parseMoneyValue(creditRaw));
 
-  const base = { description, bankCategory, pending, requestedEnvelope: requestedEnvelope || null };
-
+  let amount = 0;
+  let type = 'expense';
   if (debit > 0 || credit > 0) {
     if (credit > 0 && debit === 0) {
-      return { date, amount: credit, type: 'income', ...base };
+      amount = credit;
+      type = 'income';
+    } else {
+      amount = debit || 0;
+      type = 'expense';
     }
-    if (debit > 0 && credit === 0) {
-      return { date, amount: debit, type: 'expense', ...base };
-    }
-    if (debit > 0 && credit > 0) {
-      return { date, amount: debit, type: 'expense', ...base };
-    }
-  }
-
-  // Signed amount column: positive = income, negative = expense (USAA, Chase, etc.)
-  const amountRaw = getField(map, 'amount', 'transaction amount', 'amt');
-  if (amountRaw) {
+  } else {
+    const amountRaw = getField(map, 'amount', 'transaction amount', 'amt');
+    if (!amountRaw) return null;
     const signed = parseMoneyValue(amountRaw);
     if (signed === 0) return null;
-
-    return {
-      date,
-      amount: Math.abs(signed),
-      type: signed < 0 ? 'expense' : 'income',
-      ...base,
-    };
+    amount = Math.abs(signed);
+    type = signed < 0 ? 'expense' : 'income';
   }
 
-  return null;
+  const requestedSplits = type === 'expense' ? pickRequestedSplits(row, map, amount) : null;
+  const base = {
+    description,
+    bankCategory,
+    pending,
+    requestedEnvelope: requestedEnvelope || null,
+    requestedSplits,
+  };
+
+  return { date, amount, type, ...base };
 }
 
 export const DUPLICATE_DATE_WINDOW_DAYS = 7;

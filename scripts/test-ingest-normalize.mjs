@@ -2,8 +2,9 @@ import {
   normalizeIngestTransactions,
   inboxRowsToImportObjects,
   redactSensitive,
+  normalizeIngestSplits,
 } from '../js/ingest-normalize.js';
-import { resolveRequestedEnvelope, normalizeMerchantDescription } from '../js/csv-import.js';
+import { resolveRequestedEnvelope, resolveRequestedSplits, normalizeMerchantDescription } from '../js/csv-import.js';
 import { guessMerchantPattern, findMatchingRule } from '../js/category-rules.js';
 
 function assert(cond, msg) {
@@ -86,5 +87,53 @@ const later = findMatchingRule('CURSOR USAGE AUG 090126', [
   { pattern, categoryId: 'env-dad', createdAt: '2026-08-30' },
 ]);
 assert(later?.categoryId === 'env-dad', 'later CURSOR USAGE AUG still matches import-rule path');
+
+const walmartSplit = normalizeIngestSplits([
+  { envelope: 'Household / Misc', amount: 45.12 },
+  { envelope: 'Groceries' },
+], 100);
+assert(walmartSplit?.length === 2, 'need two split lines');
+assert(walmartSplit[0].amount === 45.12, 'first line keeps $45.12');
+assert(walmartSplit[1].amount === 54.88, 'omitted amount takes the rest');
+assert(walmartSplit[1].envelope === 'Groceries', 'rest line keeps Groceries');
+
+const bothAmounts = normalizeIngestSplits([
+  { category: 'Household / Misc', amount: 45.12 },
+  { envelope: 'Groceries', amount: 54.88 },
+], 100);
+assert(bothAmounts?.[1].amount === 54.88, 'explicit rest amount');
+
+assert(normalizeIngestSplits([
+  { envelope: 'Household / Misc' },
+  { envelope: 'Groceries' },
+], 100) == null, 'two rest lines are invalid');
+assert(normalizeIngestSplits([
+  { envelope: 'Household / Misc', amount: 40 },
+  { envelope: 'Groceries', amount: 50 },
+], 100) == null, 'amounts that do not cover the total are invalid');
+
+const splitRow = normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -100,
+  description: 'WALMART #4428',
+  pending: true,
+  splits: [
+    { envelope: 'Household / Misc', amount: 45.12 },
+    { envelope: 'Groceries' },
+  ],
+}]);
+assert(splitRow[0].requestedSplits?.[0].amount === 45.12, 'ingest captures split amounts');
+assert(splitRow[0].requestedSplits?.[1].amount === 54.88, 'ingest fills rest');
+assert(inboxRowsToImportObjects(splitRow)[0].Splits.length === 2, 'splits travel on import row');
+
+const catsWithHouse = [
+  { id: 'env-house', name: 'Household / Misc', parentId: null },
+  { id: 'env-groceries', name: 'Groceries', parentId: null },
+];
+const resolvedSplit = resolveRequestedSplits(splitRow[0].requestedSplits, catsWithHouse, 100);
+assert(resolvedSplit?.length === 2, 'split envelopes resolve');
+assert(resolvedSplit[0].categoryId === 'env-house' && resolvedSplit[0].amount === 45.12, 'household line');
+assert(resolvedSplit[1].categoryId === 'env-groceries' && resolvedSplit[1].amount === 54.88, 'groceries rest');
+assert(resolveRequestedSplits(splitRow[0].requestedSplits, cats, 100) == null, 'unknown split envelope fails closed');
 
 console.log('test-ingest-normalize: ok');

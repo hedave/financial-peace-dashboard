@@ -494,7 +494,7 @@ resetBooks(100);
 if (!store.state.categories.some(c => String(c.name).trim().toLowerCase() === 'dad')) {
   store.state.categories.push({
     id: 'dad-env', name: 'Dad', icon: '👔', parentId: null, isSinkingFund: false,
-    monthlyBudget: 0, carryOver: 0, goalAmount: 0, note: '', allowDifts: false,
+    monthlyBudget: 0, carryOver: 0, goalAmount: 0, note: '', allowGifts: false,
   });
 }
 const dadEnv = store.state.categories.find(c => String(c.name).trim().toLowerCase() === 'dad');
@@ -600,6 +600,58 @@ const wmDad = store.state.transactions.find(t => /walmart/i.test(t.description))
 if (stats.categorized < 1) fail('explicit dad should categorize walmart', stats);
 if (wmDad?.categoryId !== dadEnv.id) fail('explicit envelope must beat Walmart→Groceries map', wmDad);
 console.log('explicit envelope beats merchant bank-map');
+
+// Ingest split: one $100 Walmart, $45.12 Household / Misc, rest Groceries
+resetBooks(200);
+const hhEnv = store.state.categories.find(c => String(c.name).trim().toLowerCase() === 'household / misc');
+if (!hhEnv || !grocEnv) fail('need Household / Misc and Groceries');
+const wmSplitDesc = 'WALMART #4428 SPLIT TEST';
+stats = store.importTransactions(inboxRowsToImportObjects(normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -100,
+  description: wmSplitDesc,
+  pending: true,
+  splits: [
+    { envelope: 'Household / Misc', amount: 45.12 },
+    { envelope: 'Groceries' },
+  ],
+}])), { includePending: true, persist: false });
+if (stats.count !== 1) fail('split ingest should import 1 row', stats);
+if (stats.categorized < 1) fail('split ingest should count as categorized', stats);
+if (cents(200 - store.state.balances.checking) !== 10000) {
+  fail('split ingest must move checking once by $100', store.state.balances.checking);
+}
+const wmSplit = store.state.transactions.find(t => t.description === wmSplitDesc);
+if (!wmSplit) fail('split Walmart row missing');
+if (wmSplit.categoryId) fail('split row must not have a single envelope', wmSplit);
+if (!store.isSplitTransaction(wmSplit)) fail('split row should have splits', wmSplit);
+const hhLine = wmSplit.splits.find(s => s.categoryId === hhEnv.id);
+const grocLine = wmSplit.splits.find(s => s.categoryId === grocEnv.id);
+if (!hhLine || cents(hhLine.amount) !== 4512) fail('household line should be $45.12', hhLine);
+if (!grocLine || cents(grocLine.amount) !== 5488) fail('groceries rest should be $54.88', grocLine);
+if (wmSplit.splits.length !== 2) fail('exactly two split lines', wmSplit.splits);
+
+// Re-ingest the same $100 with a different split — already-split duplicate stays
+const checkAfterSplit = Number(store.state.balances.checking);
+stats = store.importTransactions(inboxRowsToImportObjects(normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -100,
+  description: wmSplitDesc,
+  pending: true,
+  splits: [
+    { envelope: 'Dad', amount: 20 },
+    { envelope: 'Groceries' },
+  ],
+}])), { includePending: true, persist: false });
+const wmAfter = store.state.transactions.filter(t => t.description === wmSplitDesc);
+if (wmAfter.length !== 1) fail('duplicate split ingest must not add a second Walmart', wmAfter);
+if (wmAfter[0].splits.find(s => s.categoryId === hhEnv.id)?.amount !== 45.12) {
+  fail('already-split duplicate must keep original lines', wmAfter[0]);
+}
+if (cents(store.state.balances.checking - checkAfterSplit) !== 0) {
+  fail('duplicate split ingest must not move checking again', store.state.balances.checking);
+}
+console.log('ingest split: $45.12 Household / Misc + $54.88 Groceries; duplicate untouched');
 
 console.log('all import-reconcile checks passed');
 
