@@ -5,7 +5,11 @@ import {
   areLikelyDuplicatePair,
   normalizeMerchantDescription,
 } from '../js/csv-import.js';
-import { findMatchingRule, descriptionMatchesPattern } from '../js/category-rules.js';
+import { findMatchingRule, descriptionMatchesPattern, guessMerchantPattern } from '../js/category-rules.js';
+import {
+  normalizeIngestTransactions,
+  inboxRowsToImportObjects,
+} from '../js/ingest-normalize.js';
 import { addMonths, getCurrentMonth } from '../js/utils.js';
 import { getGsaEftDates, isGsaEftDate } from '../js/gsa-eft-dates.js';
 
@@ -485,4 +489,118 @@ if (livePrimary().paySchedule.checks.some(c => c.date === '2027-01-15')) {
 }
 console.log('GSA EFT 2027: 26 purple dates; fill + click-toggle ok');
 
+// Ingest: per-row envelope/category on NEW uncategorized rows only
+resetBooks(100);
+if (!store.state.categories.some(c => String(c.name).trim().toLowerCase() === 'dad')) {
+  store.state.categories.push({
+    id: 'dad-env', name: 'Dad', icon: '👔', parentId: null, isSinkingFund: false,
+    monthlyBudget: 0, carryOver: 0, goalAmount: 0, note: '', allowDifts: false,
+  });
+}
+const dadEnv = store.state.categories.find(c => String(c.name).trim().toLowerCase() === 'dad');
+const grocEnv = store.state.categories.find(c => String(c.name).trim().toLowerCase() === 'groceries');
+if (!dadEnv || !grocEnv) fail('need Dad and Groceries envelopes');
+
+const cursorDesc = 'CURSOR USAGE AUG 083026';
+const singleIngest = inboxRowsToImportObjects(normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -10,
+  description: cursorDesc,
+  pending: true,
+  category: 'dad',
+}]));
+const check0 = Number(store.state.balances.checking);
+stats = store.importTransactions(singleIngest, { includePending: true, persist: false });
+if (stats.count !== 1) fail('new pending ingest should import 1', stats);
+if (stats.categorized < 1) fail('category dad should categorize the new row', stats);
+if (cents(check0 - store.state.balances.checking) !== 1000) {
+  fail('checking should move once by $10', {
+    before: check0, after: store.state.balances.checking, stats,
+  });
+}
+const cursorTx = store.state.transactions.find(t => t.description === cursorDesc);
+if (!cursorTx) fail('CURSOR USAGE row missing');
+if (cursorTx.categoryId !== dadEnv.id) fail('CURSOR USAGE should land on Dad', cursorTx);
+if (cursorTx.bankPending !== true) fail('pending ingest should stay bankPending');
+
+const cursorPattern = guessMerchantPattern(cursorDesc);
+if (!cursorPattern || !cursorPattern.includes('cursor')) {
+  fail('merchant normalize should keep CURSOR USAGE identifiable', cursorPattern);
+}
+if (findMatchingRule('CURSOR USAGE AUG 090126', [{
+  pattern: cursorPattern, categoryId: dadEnv.id, createdAt: '2026-08-30',
+}])?.categoryId !== dadEnv.id) {
+  fail('later CURSOR USAGE AUG should still match import-rule path');
+}
+console.log('ingest category dad: imported 1, categorized >= 1, checking −10 once');
+
+// Re-ingest same pending with a different envelope — already-enveloped duplicate stays Dad
+const retryDad = inboxRowsToImportObjects(normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -10,
+  description: cursorDesc,
+  pending: true,
+  envelope: grocEnv.id,
+}]));
+const checkAfterCursor = Number(store.state.balances.checking);
+stats = store.importTransactions(retryDad, { includePending: true, persist: false });
+const cursorAfter = store.state.transactions.filter(t => t.description === cursorDesc);
+if (cursorAfter.length !== 1) fail('duplicate ingest must not add a second CURSOR row', cursorAfter);
+if (cursorAfter[0].categoryId !== dadEnv.id) {
+  fail('already-enveloped duplicate must keep Dad', cursorAfter[0]);
+}
+if (cents(store.state.balances.checking - checkAfterCursor) !== 0) {
+  fail('duplicate ingest must not move checking again', store.state.balances.checking);
+}
+console.log('ingest duplicate of enveloped row: untouched, checking unchanged');
+
+// Batch: two new rows, different envelopes, neither envelope applied to the whole batch
+resetBooks(100);
+const batchIngest = inboxRowsToImportObjects(normalizeIngestTransactions([
+  {
+    date: '2026-08-30',
+    amount: -10,
+    description: 'CURSOR USAGE AUG 083026',
+    pending: true,
+    category: 'dad',
+  },
+  {
+    date: '2026-08-30',
+    amount: -7.5,
+    description: 'INGLES MARKETS 134',
+    pending: true,
+    envelope: 'Groceries',
+  },
+]));
+stats = store.importTransactions(batchIngest, { includePending: true, persist: false });
+if (stats.count !== 2) fail('batch should import 2 new rows', stats);
+if (stats.categorized < 2) fail('batch categorized should count both requested envelopes', stats);
+const batchCursor = store.state.transactions.find(t => t.description === 'CURSOR USAGE AUG 083026');
+const batchIngles = store.state.transactions.find(t => /ingles/i.test(t.description));
+if (batchCursor?.categoryId !== dadEnv.id) fail('row A should be Dad', batchCursor);
+if (batchIngles?.categoryId !== grocEnv.id) fail('row B should be Groceries', batchIngles);
+if (batchCursor?.categoryId === batchIngles?.categoryId) {
+  fail('must not apply one envelope to the whole batch');
+}
+if (cents(100 - store.state.balances.checking) !== 1750) {
+  fail('batch checking should move once per new row (−10 + −7.50)', store.state.balances.checking);
+}
+console.log('ingest batch: Dad + Groceries on their own rows; categorized counts both');
+
+// Explicit envelope beats merchant→envelope mapping (Walmart would otherwise be Groceries)
+resetBooks(50);
+stats = store.importTransactions(inboxRowsToImportObjects(normalizeIngestTransactions([{
+  date: '2026-08-30',
+  amount: -12,
+  description: 'WALMART #4428',
+  pending: true,
+  envelope: 'dad',
+}])), { includePending: true, persist: false });
+const wmDad = store.state.transactions.find(t => /walmart/i.test(t.description));
+if (stats.categorized < 1) fail('explicit dad should categorize walmart', stats);
+if (wmDad?.categoryId !== dadEnv.id) fail('explicit envelope must beat Walmart→Groceries map', wmDad);
+console.log('explicit envelope beats merchant bank-map');
+
 console.log('all import-reconcile checks passed');
+
+

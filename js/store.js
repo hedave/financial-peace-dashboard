@@ -10,7 +10,7 @@ import {
   addMonths,
 } from './utils.js';
 import {
-  normalizeImportRow, resolveCategoryId,
+  normalizeImportRow, resolveCategoryId, resolveRequestedEnvelope,
   isImportDuplicateTransaction,
   clusterDuplicateTransactions,
   findBestPendingMatch,
@@ -3947,15 +3947,23 @@ class Store {
 
           if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
             existing.importCategory = tx.bankCategory;
-            const resolved = resolveCategoryId(
-              tx.bankCategory,
-              tx.description,
+            // Requested envelope/category applies to NEW uncategorized rows only.
+            // Do not recategorize a merge of an already-enveloped (or uncategorized) twin.
+            const incomingRequested = resolveRequestedEnvelope(
+              tx.requestedEnvelope || tx.bankCategory,
               s.categories,
-              tx.type,
             );
-            if (resolved) {
-              existing.categoryId = resolved;
-              changed = true;
+            if (!incomingRequested) {
+              const resolved = resolveCategoryId(
+                tx.bankCategory,
+                tx.description,
+                s.categories,
+                tx.type,
+              );
+              if (resolved) {
+                existing.categoryId = resolved;
+                changed = true;
+              }
             }
           }
 
@@ -4058,7 +4066,9 @@ class Store {
           return;
         }
 
-        let categoryId = resolveCategoryId(
+        const envelopeHint = tx.requestedEnvelope || tx.bankCategory || '';
+        const requestedId = resolveRequestedEnvelope(envelopeHint, s.categories);
+        let categoryId = requestedId || resolveCategoryId(
           tx.bankCategory,
           tx.description,
           s.categories,
