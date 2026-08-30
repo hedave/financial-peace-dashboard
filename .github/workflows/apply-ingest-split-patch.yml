@@ -1,5 +1,11 @@
 name: apply-ingest-split-patch
 on:
+  push:
+    branches:
+      - fix/ingest-apply-envelope
+    paths:
+      - patches/**
+      - .github/workflows/apply-ingest-split-patch.yml
   workflow_dispatch:
 jobs:
   apply:
