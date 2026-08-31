@@ -64,10 +64,17 @@ assert(byId[0].requestedEnvelope === 'env-groceries', 'categoryId captured');
 const mixed = normalizeIngestTransactions([
   { date: '2026-08-30', amount: -10, description: 'A', pending: true, category: 'dad' },
   { date: '2026-08-30', amount: -5, description: 'B', pending: true, envelope: 'Groceries' },
+  { date: '2026-08-30', amount: -4.25, description: 'C', pending: true },
+  { date: 'nope', amount: -3, description: 'bad date' },
+  { date: '2026-08-30', amount: 0, description: 'zero amount' },
+  { date: '2026-08-30', description: 'missing amount' },
 ]);
+assert(mixed.length === 3, `mixed batch should keep 3 dated/amounted rows, got ${mixed.length}`);
 assert(mixed[0].requestedEnvelope === 'dad', 'row A envelope');
 assert(mixed[1].requestedEnvelope === 'Groceries', 'row B envelope');
+assert(mixed[2].requestedEnvelope == null, 'row C has no envelope');
 assert(mixed[0].requestedEnvelope !== mixed[1].requestedEnvelope, 'per-row envelopes');
+assert(!mixed.some(t => /bad date|zero amount|missing amount/i.test(t.description)), 'skip undateable / unamountable');
 
 const cats = [
   { id: 'env-dad', name: 'Dad', parentId: null },

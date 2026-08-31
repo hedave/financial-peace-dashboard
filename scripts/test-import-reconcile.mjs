@@ -554,9 +554,11 @@ if (cents(store.state.balances.checking - checkAfterCursor) !== 0) {
 }
 console.log('ingest duplicate of enveloped row: untouched, checking unchanged');
 
-// Batch: two new rows, different envelopes, neither envelope applied to the whole batch
-resetBooks(100);
-const batchIngest = inboxRowsToImportObjects(normalizeIngestTransactions([
+// Mixed batch: A → Dad, B → Groceries, C uncategorized. Skip undateable / unamountable.
+// Checking is a delta off a manual balance — do not replace it.
+resetBooks(1234.56);
+const mixedVendor = 'UNIQUE VENDOR ZXCV 9911';
+const mixedPayload = [
   {
     date: '2026-08-30',
     amount: -10,
@@ -571,21 +573,83 @@ const batchIngest = inboxRowsToImportObjects(normalizeIngestTransactions([
     pending: true,
     envelope: 'Groceries',
   },
-]));
+  {
+    date: '2026-08-30',
+    amount: -4.25,
+    description: mixedVendor,
+    pending: true,
+  },
+  { date: 'nope', amount: -3, description: 'BAD DATE ROW' },
+  { date: '2026-08-30', amount: 0, description: 'ZERO AMOUNT ROW' },
+  { date: '2026-08-30', description: 'MISSING AMOUNT ROW' },
+];
+const mixedNormalized = normalizeIngestTransactions(mixedPayload);
+if (mixedNormalized.length !== 3) {
+  fail('mixed ingest should drop undateable / unamountable rows', mixedNormalized);
+}
+const batchIngest = inboxRowsToImportObjects(mixedNormalized);
 stats = store.importTransactions(batchIngest, { includePending: true, persist: false });
-if (stats.count !== 2) fail('batch should import 2 new rows', stats);
-if (stats.categorized < 2) fail('batch categorized should count both requested envelopes', stats);
+if (stats.count !== 3) fail('mixed batch should import 3 new rows', stats);
+if (stats.categorized !== 2) fail('mixed categorized should count A and B only', stats);
 const batchCursor = store.state.transactions.find(t => t.description === 'CURSOR USAGE AUG 083026');
 const batchIngles = store.state.transactions.find(t => /ingles/i.test(t.description));
+const batchPlain = store.state.transactions.find(t => t.description === mixedVendor);
+const skippedImported = store.state.transactions.filter(t =>
+  /BAD DATE|ZERO AMOUNT|MISSING AMOUNT/i.test(t.description),
+);
 if (batchCursor?.categoryId !== dadEnv.id) fail('row A should be Dad', batchCursor);
 if (batchIngles?.categoryId !== grocEnv.id) fail('row B should be Groceries', batchIngles);
+if (batchPlain?.categoryId) fail('row C should stay uncategorized', batchPlain);
+if (!batchPlain) fail('row C should still be imported', store.state.transactions);
 if (batchCursor?.categoryId === batchIngles?.categoryId) {
   fail('must not apply one envelope to the whole batch');
 }
-if (cents(100 - store.state.balances.checking) !== 1750) {
-  fail('batch checking should move once per new row (−10 + −7.50)', store.state.balances.checking);
+if (skippedImported.length) fail('undateable / unamountable rows must not import', skippedImported);
+if (cents(1234.56 - store.state.balances.checking) !== 2175) {
+  fail('checking should only move by new rows (−10 + −7.50 + −4.25) off the manual balance', {
+    checking: store.state.balances.checking, stats,
+  });
 }
-console.log('ingest batch: Dad + Groceries on their own rows; categorized counts both');
+console.log('ingest mixed batch: Dad + Groceries + uncategorized; skipped invalid; checking delta-only');
+
+// Re-ingest the same mixed rows with swapped envelopes — already-enveloped stay put; C stays open
+const checkAfterMixed = Number(store.state.balances.checking);
+stats = store.importTransactions(inboxRowsToImportObjects(normalizeIngestTransactions([
+  {
+    date: '2026-08-30',
+    amount: -10,
+    description: 'CURSOR USAGE AUG 083026',
+    pending: true,
+    envelope: 'Groceries',
+  },
+  {
+    date: '2026-08-30',
+    amount: -7.5,
+    description: 'INGLES MARKETS 134',
+    pending: true,
+    category: 'dad',
+  },
+  {
+    date: '2026-08-30',
+    amount: -4.25,
+    description: mixedVendor,
+    pending: true,
+    envelope: 'dad',
+  },
+])), { includePending: true, persist: false });
+const afterA = store.state.transactions.filter(t => t.description === 'CURSOR USAGE AUG 083026');
+const afterB = store.state.transactions.filter(t => /ingles/i.test(t.description));
+const afterC = store.state.transactions.filter(t => t.description === mixedVendor);
+if (afterA.length !== 1 || afterB.length !== 1 || afterC.length !== 1) {
+  fail('duplicate mixed ingest must not add rows', { afterA, afterB, afterC, stats });
+}
+if (afterA[0].categoryId !== dadEnv.id) fail('already-enveloped A must keep Dad', afterA[0]);
+if (afterB[0].categoryId !== grocEnv.id) fail('already-enveloped B must keep Groceries', afterB[0]);
+if (afterC[0].categoryId) fail('uncategorized C must not be recategorized on duplicate ingest', afterC[0]);
+if (cents(store.state.balances.checking - checkAfterMixed) !== 0) {
+  fail('duplicate mixed ingest must not move checking again', store.state.balances.checking);
+}
+console.log('ingest mixed duplicate: envelopes unchanged; C still uncategorized; checking untouched');
 
 // Explicit envelope beats merchant→envelope mapping (Walmart would otherwise be Groceries)
 resetBooks(50);
