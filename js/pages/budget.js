@@ -197,6 +197,14 @@ export function renderBudget(container, arg) {
               ? `Over by ${formatCurrency(Math.abs(unallocated))} — lower some budgets. Checking (${formatCurrency(checkingNow)}) is cash on hand, not part of this formula.`
               : `Over by ${formatCurrency(Math.abs(unallocated))} for this month’s plan.`,
         ),
+      isCurrentMonth && unallocated < -0.005 && store.canWriteBudget()
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-secondary',
+          style: 'margin-top:0.55rem',
+          onClick: () => openRightSizeToAllocate(month),
+        }, 'Preview a shared cut')
+        : null,
     ),
     isCurrentMonth
       ? el('div', { className: 'card' },
@@ -230,6 +238,35 @@ export function renderBudget(container, arg) {
       className: 'tx-form-hint section',
       style: 'margin-top:0',
     }, `Carry-over from last month: ${formatCurrency(carryTotal)} across ${carryCount} envelope${carryCount === 1 ? '' : 's'}. That leftover is already in Remaining — To Allocate is only new income minus this month’s plan. Use Move to shift leftover this month; Allocate changes the ongoing plan.`));
+  }
+
+  if (isCurrentMonth && unallocated < -0.005) {
+    const rightSize = store.planRightSizeToAllocate(month, { includeSinkingFunds: false });
+    container.appendChild(el('div', { className: 'banner banner-warning section' },
+      el('div', { className: 'banner-icon' }, '📐'),
+      el('div', { className: 'banner-text' },
+        el('h3', {}, `To Allocate over by ${formatCurrency(Math.abs(unallocated))}`),
+        el('p', {},
+          `Income is ${formatCurrency(allocatable)}; the plan is ${formatCurrency(budgeted)}. `
+          + `A shared cut of unused leftover on flexible envelopes `
+          + (rightSize.total > 0.005
+            ? `could trim ${formatCurrency(rightSize.total)} of the plan`
+              + (rightSize.shortfall > 0.005
+                ? ` (${formatCurrency(rightSize.shortfall)} still over unless you include sinking or cut by hand)`
+                : ' and land at $0')
+            : 'needs leftover on non-bill envelopes — bills and debts stay')
+          + '. Checking does not change.',
+        ),
+      ),
+      store.canWriteBudget()
+        ? el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-primary',
+          style: 'margin-left:auto',
+          onClick: () => openRightSizeToAllocate(month),
+        }, 'Preview cut')
+        : null,
+    ));
   }
 
   if (isCurrentMonth && overspendShare.overspendTotal > 0.005) {
@@ -353,6 +390,13 @@ export function renderBudget(container, arg) {
       onClick: () => { toolsMenu.removeAttribute('open'); openUpcomingHolds(); },
     }, 'Upcoming hold'));
   }
+  if (isCurrentMonth && unallocated < -0.005 && store.canWriteBudget()) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); openRightSizeToAllocate(month); },
+    }, 'Trim To Allocate'));
+  }
   if (isCurrentMonth && store.getOverspendShare(month).overspendTotal > 0.005 && store.canWriteBudget()) {
     toolsList.appendChild(el('button', {
       type: 'button',
@@ -412,6 +456,13 @@ export function renderBudget(container, arg) {
         onClick: () => openMoveBetweenEnvelopes(),
         title: 'Shift leftover room this month only — does not change next month’s plan',
       }, 'Move between envelopes'),
+      unallocated < -0.005 && store.canWriteBudget()
+        ? el('button', {
+          className: 'btn btn-secondary',
+          onClick: () => openRightSizeToAllocate(month),
+          title: 'Cut unused leftover on flexible envelopes so To Allocate moves toward $0',
+        }, 'Trim To Allocate')
+        : null,
       overspendShare.overspendTotal > 0.005 && store.canWriteBudget()
         ? el('button', {
           className: 'btn btn-secondary budget-action-secondary',
@@ -1561,6 +1612,110 @@ export function openUpcomingHolds() {
           window.appRefresh();
         },
       }, 'Hold from snowball'),
+    ],
+  });
+  modal.modal.classList.add('modal-scrollable');
+}
+
+function openRightSizeToAllocate(month = getCurrentMonth()) {
+  if (!store.canWriteBudget()) {
+    showToast('Trimming the plan stays on the main account', 'info');
+    return;
+  }
+  let includeSinking = false;
+  const preview = el('div', { className: 'overspend-cover-preview' });
+
+  function paint() {
+    const plan = store.planRightSizeToAllocate(month, { includeSinkingFunds: includeSinking });
+    preview.innerHTML = '';
+    const pct = plan.haircutPct > 0 ? Math.round(plan.haircutPct * 100) : 0;
+    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.75rem' },
+      `Lowers monthly budgets (the ongoing plan), not just this month’s leftover. `
+      + `Bills, debts, and Work travel are never cut. Checking does not change. `
+      + (includeSinking ? 'Includes sinking funds.' : 'Sinking funds are left alone.'),
+    ));
+    if (!plan.cuts.length) {
+      preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+        plan.need < 0.005
+          ? 'To Allocate is already at or above $0.'
+          : 'No unused leftover on flexible envelopes to cut. Include sinking, or lower budgets by hand.',
+      ));
+      return;
+    }
+    const list = el('div', { className: 'envelope-move-list' });
+    plan.cuts.forEach(row => {
+      list.appendChild(el('div', { className: 'envelope-move-row' },
+        el('div', { className: 'envelope-move-row-main' },
+          el('strong', {}, `−${formatCurrency(row.take)}`),
+          el('span', {},
+            ` ${row.name}${row.isSinking ? ' · sinking' : ''}`
+            + ` · plan ${formatCurrency(row.budget)} → ${formatCurrency(row.afterBudget)}`,
+          ),
+        ),
+      ));
+    });
+    preview.appendChild(list);
+    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0.75rem 0 0' },
+      `Cuts ${formatCurrency(plan.total)}`
+      + (pct ? ` (~${pct}% of unused leftover in the pool)` : '')
+      + `. To Allocate ${formatCurrency(plan.toAllocateBefore)} → ${formatCurrency(plan.toAllocateAfter)}.`,
+    ));
+    if (plan.shortfall > 0.005) {
+      preview.appendChild(el('p', {
+        className: 'tx-form-hint',
+        style: 'margin:0.5rem 0 0;color:var(--negative)',
+      }, `${formatCurrency(plan.shortfall)} still over — leftover on flexible envelopes isn’t enough.`));
+    }
+  }
+
+  const sinkToggle = el('label', { className: 'form-option', style: 'margin-top:0.5rem' },
+    el('input', {
+      type: 'checkbox',
+      checked: includeSinking ? true : undefined,
+      onChange: (e) => {
+        includeSinking = !!e.target.checked;
+        paint();
+      },
+    }),
+    el('span', {}, 'Include sinking funds in the share'),
+  );
+
+  paint();
+
+  const modal = showModal({
+    title: 'Trim To Allocate',
+    body: el('div', {},
+      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        `The plan is ${formatCurrency(Math.abs(store.getToAllocate()))} bigger than this month’s income. `
+        + 'Take a percentage of unused leftover on flexible envelopes (bigger leftover pays more, capped at that envelope’s monthly budget so it doesn’t go red).',
+      ),
+      sinkToggle,
+      preview,
+    ),
+    footer: [
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => modal.close(),
+      }, 'Cancel'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => {
+          const plan = store.applyRightSizeToAllocate(month, { includeSinkingFunds: includeSinking });
+          if (!plan || !plan.cuts.length) {
+            showToast('Nothing to cut', 'info');
+            return;
+          }
+          showToast(
+            `Trimmed ${formatCurrency(plan.total)} from the plan`
+            + (plan.shortfall > 0.005 ? ` · ${formatCurrency(plan.shortfall)} still over` : ' · To Allocate $0'),
+            'success',
+          );
+          modal.close();
+          window.appRefresh();
+        },
+      }, 'Apply to plan'),
     ],
   });
   modal.modal.classList.add('modal-scrollable');

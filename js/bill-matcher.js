@@ -104,7 +104,7 @@ function scoreMatch(bill, tx, amt) {
  * @returns {object|null} bill
  */
 export function findAutoPayBillForTransaction(tx, bills = []) {
-  if (!tx || tx.type !== 'expense' || tx.billId) return null;
+  if (!tx || tx.type !== 'expense' || tx.billId || tx.ignoreBillMatch) return null;
   const amt = Math.abs(Number(tx.amount)) || 0;
   if (!amt) return null;
 
@@ -139,7 +139,7 @@ export function findAutoPayBillForTransaction(tx, bills = []) {
  * @returns {object|null} bill
  */
 export function findBillForTransaction(tx, bills = []) {
-  if (!tx || tx.type !== 'expense' || tx.billId) return null;
+  if (!tx || tx.type !== 'expense' || tx.billId || tx.ignoreBillMatch) return null;
 
   const unpaid = unpaidBills(bills);
   const amt = Math.abs(Number(tx.amount)) || 0;

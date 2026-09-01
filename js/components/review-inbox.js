@@ -719,6 +719,18 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
           }, 'Link'),
           el('button', {
             type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            title: 'Not this bill — keep the payment and checking',
+            onClick: () => {
+              store.dismissBillMatch(t.id);
+              showToast('Dismissed — payment and checking unchanged');
+              paint();
+              window.appSoftRefresh?.();
+              if (!store.getReviewInbox().billMatches.length) modal?.close();
+            },
+          }, 'Dismiss'),
+          el('button', {
+            type: 'button',
             className: 'btn btn-sm btn-danger',
             onClick: () => confirmDeleteTransaction(t, {
               label: 'this transaction',
@@ -740,7 +752,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
     title: 'Possible bill matches',
     body: el('div', {},
       el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
-        'Link bank expenses to unpaid bills, or delete if the match is wrong.',
+        'Link if this payment is that bill. Dismiss if it is not (e.g. work travel Citi vs household Citi) — keeps the payment and checking, and stops reminding you. Delete only if the row should not exist.',
       ),
       list,
     ),

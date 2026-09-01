@@ -115,6 +115,21 @@ globalThis.localStorage = {
 };
 const { store } = await import('../js/store.js');
 
+function monthDay(day) {
+  const m = getCurrentMonth();
+  const [y, mo] = m.split('-').map(Number);
+  const last = new Date(y, mo, 0).getDate();
+  const d = Math.min(Number(day), last);
+  return `${getCurrentMonth()}-${String(d).padStart(2, '0')}`;
+}
+
+function usaaDay(day) {
+  const iso = monthDay(day);
+  const [, mo, d] = iso.split('-');
+  const y = iso.slice(0, 4);
+  return `${mo}/${d}/${y}`;
+}
+
 function resetBooks(checking = 0) {
   store.state.transactions = [];
   store.state.balances.checking = checking;
@@ -350,7 +365,7 @@ dadCat.carryOver = 0;
 const toAllocBefore = store.getToAllocate();
 const bonusBefore = store.getBonusAvailable();
 stats = store.importTransactions(parseBankCsvText(usaaCsv([
-  { date: '08/27/2026', description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
+  { date: usaaDay(15), description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
 ])), { includePending: true });
 const travelIncome = store.state.transactions.find(t => t.type === 'income' && /federal travel/i.test(t.description));
 if (!travelIncome) fail('Federal Travel Payments should import');
@@ -373,7 +388,7 @@ if (cents(store.getCategoryRemaining(travelCat.id)) !== 128556) {
 }
 
 stats = store.importTransactions(parseBankCsvText(usaaCsv([
-  { date: '08/27/2026', description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
+  { date: usaaDay(15), description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
 ])), { includePending: true });
 if (!(stats.duplicates >= 1)) fail('re-import of Federal Travel Payments should be duplicates', stats);
 if (cents(store.getCategoryRemaining(travelCat.id)) !== 128556) {
@@ -382,7 +397,7 @@ if (cents(store.getCategoryRemaining(travelCat.id)) !== 128556) {
 
 const dadBeforePay = store.getCategoryRemaining(dadCat.id);
 const payId = store.addTransaction({
-  date: '2026-08-27',
+  date: monthDay(15),
   amount: 1020.71,
   type: 'expense',
   categoryId: travelCat.id,
@@ -402,7 +417,7 @@ if (cents(store.getCategoryRemaining(dadCat.id) - dadBeforePay) !== 26485) {
     dadAfter: store.getCategoryRemaining(dadCat.id),
   });
 }
-const leftoverMove = (store.state.monthEnvelopeMoves['2026-08'] || []).find(m =>
+const leftoverMove = (store.state.monthEnvelopeMoves[getCurrentMonth()] || []).find(m =>
   m.fromId === travelCat.id && m.toId === dadCat.id,
 );
 if (!leftoverMove || cents(leftoverMove.amount) !== 26485) {
@@ -415,10 +430,10 @@ resetBooks(0);
 travelCat.carryOver = 0;
 dadCat.carryOver = 0;
 store.importTransactions(parseBankCsvText(usaaCsv([
-  { date: '08/27/2026', description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
+  { date: usaaDay(15), description: 'Federal Travel Payments', amount: 1285.56, status: 'Posted' },
 ])), { includePending: true });
 store.addTransaction({
-  date: '2026-08-27',
+  date: monthDay(15),
   amount: 50,
   type: 'expense',
   categoryId: travelCat.id,
@@ -428,7 +443,7 @@ store.addTransaction({
 if (cents(store.getCategoryRemaining(travelCat.id)) !== 123556) {
   fail('partial payoff should keep leftover on Work travel', store.getCategoryRemaining(travelCat.id));
 }
-if ((store.state.monthEnvelopeMoves['2026-08'] || []).some(m => m.toId === dadCat.id)) {
+if ((store.state.monthEnvelopeMoves[getCurrentMonth()] || []).some(m => m.toId === dadCat.id)) {
   fail('partial payoff must not dump leftover to Dad');
 }
 console.log('partial Work travel payment holds leftover');
@@ -716,6 +731,69 @@ if (cents(store.state.balances.checking - checkAfterSplit) !== 0) {
   fail('duplicate split ingest must not move checking again', store.state.balances.checking);
 }
 console.log('ingest split: $45.12 Household / Misc + $54.88 Groceries; duplicate untouched');
+
+resetBooks(0);
+store.state.categories.forEach(c => { c.monthlyBudget = 0; c.carryOver = 0; });
+const groc = store.state.categories.find(c => c.name === 'Groceries');
+const eat = store.state.categories.find(c => c.name === 'Eating Out / Fast Food');
+const xmas = store.state.categories.find(c => c.name === 'Christmas');
+if (!groc || !eat || !xmas) fail('need Groceries, Eating Out, Christmas');
+groc.monthlyBudget = 400;
+groc.carryOver = 50;
+eat.monthlyBudget = 200;
+eat.carryOver = 50;
+xmas.monthlyBudget = 100;
+xmas.carryOver = 50;
+const over = store.getToAllocate();
+if (!(over < -0.005)) fail('fixture should be over-allocated', over);
+const flex = store.planRightSizeToAllocate(undefined, { includeSinkingFunds: false });
+if (flex.cuts.some(c => c.id === xmas.id)) fail('Christmas must stay out unless sinking is on');
+if (cents(flex.total) !== 60000) fail('flex cut should be 600 (groc 400 + eat 200)', flex);
+if (cents(flex.shortfall) !== cents(Math.abs(over) - 600)) fail('shortfall should be the rest', flex);
+const withSink = store.planRightSizeToAllocate(undefined, { includeSinkingFunds: true });
+if (!withSink.cuts.some(c => c.id === xmas.id)) fail('Christmas should join when sinking is on');
+const checkingBefore = Number(store.state.balances.checking);
+store.applyRightSizeToAllocate(undefined, { includeSinkingFunds: false });
+const grocAfter = store.state.categories.find(c => c.id === groc.id);
+const eatAfter = store.state.categories.find(c => c.id === eat.id);
+const xmasAfter = store.state.categories.find(c => c.id === xmas.id);
+if (cents(grocAfter.monthlyBudget) !== 0 || cents(eatAfter.monthlyBudget) !== 0) {
+  fail('flex apply should zero groc and eat plans', { groc: grocAfter.monthlyBudget, eat: eatAfter.monthlyBudget });
+}
+if (cents(xmasAfter.monthlyBudget) !== 10000) fail('Christmas plan should be unchanged', xmasAfter.monthlyBudget);
+if (cents(store.state.balances.checking - checkingBefore) !== 0) fail('trim must not move checking');
+if (store.getCategoryRemaining(groc.id) < -0.005) fail('groc remaining should not go red', store.getCategoryRemaining(groc.id));
+console.log('right-size To Allocate: bills/sinking protected unless opted in; remaining stays ≥ 0');
+
+resetBooks(0);
+const citiBill = {
+  id: 'bill-citi', name: 'Citi Card', amount: 120, status: 'unpaid',
+  dueDate: monthDay(20), autoPay: false,
+};
+store.state.bills.push(citiBill);
+const travelEnv = store.state.categories.find(c => String(c.name).toLowerCase() === 'work travel');
+store.state.transactions.push({
+  id: 'wt-citi-pay',
+  date: monthDay(15),
+  amount: 1020.71,
+  type: 'expense',
+  categoryId: travelEnv?.id || null,
+  description: 'Citi Card Payment',
+  clearingStatus: 'cleared',
+});
+if (store.getPendingBillMatches().some(m => m.transaction.id === 'wt-citi-pay')) {
+  fail('Work travel envelope should not suggest Citi bill match');
+}
+const rawCiti = store.state.transactions.find(t => t.id === 'wt-citi-pay');
+rawCiti.categoryId = null;
+if (!store.getPendingBillMatches().some(m => m.transaction.id === 'wt-citi-pay')) {
+  fail('uncategorized Citi-named payment should still suggest until dismissed');
+}
+store.dismissBillMatch('wt-citi-pay');
+if (store.getPendingBillMatches().some(m => m.transaction.id === 'wt-citi-pay')) {
+  fail('dismissed bill match should not return');
+}
+console.log('bill match dismiss: Work travel skipped; dismiss keeps the row');
 
 console.log('all import-reconcile checks passed');
 

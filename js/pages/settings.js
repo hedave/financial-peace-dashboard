@@ -520,7 +520,7 @@ export async function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Household of ' + (state.settings.familySize || 7)
-      + ' · Build 20260827i'
+      + ' · Build 20260830d'
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));

@@ -1663,6 +1663,80 @@ class Store {
     return plan;
   }
 
+  /**
+   * Cut monthly budgets pro-rata from leftover on flexible envelopes so
+   * To Allocate moves toward $0. Bills, debts, and Work travel are never cut.
+   * Each cut is capped at min(remaining, monthlyBudget) so remaining stays ≥ 0
+   * and the plan cannot go negative. Checking is unchanged.
+   */
+  planRightSizeToAllocate(month = getCurrentMonth(), { includeSinkingFunds = false } = {}) {
+    const need = r2(Math.max(0, -this.getToAllocate()));
+    const donors = (this.state.categories || [])
+      .filter(c => c && !c.parentId)
+      .filter(c => includeSinkingFunds || !c.isSinkingFund)
+      .filter(c => !this.envelopeHasFixedObligation(c.id))
+      .filter(c => !c.passThrough && String(c.name || '').trim().toLowerCase() !== WORK_TRAVEL_ENVELOPE_NAME)
+      .map(c => {
+        const remaining = this.getCategoryRemaining(c.id, month);
+        const budget = this.getCategoryBudgeted(c.id, month);
+        const capacity = r2(Math.min(Math.max(0, remaining), Math.max(0, budget)));
+        return {
+          id: c.id,
+          name: c.name,
+          isSinking: !!c.isSinkingFund,
+          remaining: r2(remaining),
+          budget: r2(budget),
+          capacity,
+          take: 0,
+        };
+      })
+      .filter(d => d.capacity > 0.005);
+
+    const pool = r2(donors.reduce((s, d) => s + d.capacity, 0));
+    const coverable = r2(Math.min(need, pool));
+    const takes = allocateProRataByWeight(
+      donors.map(d => ({ id: d.id, weight: d.capacity })),
+      coverable,
+    );
+    const takeById = new Map(takes.map(t => [t.id, t.amount]));
+    donors.forEach(d => {
+      d.take = r2(Math.min(d.capacity, takeById.get(d.id) || 0));
+      d.afterRemaining = r2(d.remaining - d.take);
+      d.afterBudget = r2(d.budget - d.take);
+    });
+    const cuts = donors.filter(d => d.take > 0.005)
+      .sort((a, b) => b.take - a.take || a.name.localeCompare(b.name));
+    const total = r2(cuts.reduce((s, d) => s + d.take, 0));
+    return {
+      need,
+      pool,
+      total,
+      shortfall: r2(Math.max(0, need - total)),
+      includeSinkingFunds: !!includeSinkingFunds,
+      haircutPct: pool > 0.005 ? total / pool : 0,
+      toAllocateBefore: r2(this.getToAllocate()),
+      toAllocateAfter: r2(this.getToAllocate() + total),
+      cuts,
+    };
+  }
+
+  applyRightSizeToAllocate(month = getCurrentMonth(), { includeSinkingFunds = false } = {}) {
+    if (!this.canWriteBudget()) return null;
+    const plan = this.planRightSizeToAllocate(month, { includeSinkingFunds });
+    if (!plan.cuts.length) return plan;
+    this.update(s => {
+      plan.cuts.forEach(cut => {
+        const cat = s.categories.find(c => c.id === cut.id);
+        if (!cat) return;
+        cat.monthlyBudget = r2(Math.max(0, (Number(cat.monthlyBudget) || 0) - cut.take));
+      });
+    });
+    return {
+      ...plan,
+      toAllocateAfter: r2(this.getToAllocate()),
+    };
+  }
+
   getCoverIous() {
     return (this.state.overspendCoverIous || [])
       .filter(i => i && i.fromId)
@@ -2255,6 +2329,14 @@ class Store {
     return this.getTransactionsForMonth(month).filter(t => this.transactionNeedsReview(t));
   }
 
+  isPassThroughCategory(categoryId, s = this.state) {
+    if (!categoryId) return false;
+    const cat = (s.categories || []).find(c => c.id === categoryId);
+    if (!cat) return false;
+    return !!cat.passThrough
+      || String(cat.name || '').trim().toLowerCase() === WORK_TRAVEL_ENVELOPE_NAME;
+  }
+
   getPendingBillMatches(month = getCurrentMonth()) {
     const unpaid = (this.state.bills || []).filter(b => b.status !== 'paid');
     const prev = getPreviousMonth(month);
@@ -2268,12 +2350,26 @@ class Store {
       return true;
     });
     return txs
-      .filter(t => t.type === 'expense' && !t.billId)
+      .filter(t => t.type === 'expense' && !t.billId && !t.ignoreBillMatch)
+      .filter(t => !this.isPassThroughCategory(t.categoryId))
       .map(t => {
         const bill = findBillForTransaction(t, unpaid);
         return bill ? { transaction: t, bill } : null;
       })
       .filter(Boolean);
+  }
+
+  /** Keep the payment and checking; stop suggesting bill/debt matches for this row. */
+  dismissBillMatch(txId) {
+    if (!this.canWriteBudget() || !txId) return false;
+    let ok = false;
+    this.update(s => {
+      const tx = s.transactions.find(t => t.id === txId);
+      if (!tx) return;
+      tx.ignoreBillMatch = true;
+      ok = true;
+    });
+    return ok;
   }
 
   getDuplicateTransactionMeta(month = null) {
@@ -2526,7 +2622,8 @@ class Store {
    * @returns {boolean}
    */
   applyAutoPayBillIfMatched(tx, s = this.state, stats = null, alreadyPaidBillIds = null) {
-    if (!tx || tx.type !== 'expense' || tx.billId) return false;
+    if (!tx || tx.type !== 'expense' || tx.billId || tx.ignoreBillMatch) return false;
+    if (this.isPassThroughCategory(tx.categoryId, s)) return false;
     const bill = findAutoPayBillForTransaction(tx, s.bills || []);
     if (!bill || bill.status === 'paid') return false;
     // One auto-pay completion per bill per import — prevents double-advance when
@@ -2550,7 +2647,8 @@ class Store {
    * Checking was already moved as an expense/import; only the debt balance changes.
    */
   applyImportedDebtPayment(tx, s = this.state, stats = null) {
-    if (!tx || tx.debtId) return false;
+    if (!tx || tx.debtId || tx.ignoreBillMatch) return false;
+    if (this.isPassThroughCategory(tx.categoryId, s)) return false;
     if (tx.type !== 'expense' && tx.type !== 'transfer') return false;
     const debt = findDebtForTransaction(tx, s.debts || []);
     if (!debt || debt.archived || !(Number(debt.balance) > 0)) return false;
