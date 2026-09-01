@@ -753,6 +753,34 @@ export function resolveCategoryId(bankCategory, description, userCategories, txT
 }
 
 /**
+ * USAA last-4 / ACH mask (***********1442) or Amazon-style *ORDERID.
+ * Two Venmo PAYMENT rows same day same $ are distinct when these differ.
+ */
+export function extractBankRef(description) {
+  const s = String(description || '');
+  const masked = s.match(/\*{3,}([A-Za-z0-9]{3,})\b/);
+  if (masked) return masked[1].toLowerCase();
+  const starred = s.match(/\*([A-Za-z0-9]{6,})\b/);
+  if (starred) return starred[1].toLowerCase();
+  return '';
+}
+
+export function bankRefsConflict(a, b) {
+  const ra = extractBankRef(a);
+  const rb = extractBankRef(b);
+  return Boolean(ra && rb && ra !== rb);
+}
+
+function appendBankRef(description, original) {
+  const pretty = String(description || '').trim();
+  const orig = String(original || '').trim();
+  const origRef = extractBankRef(orig);
+  if (!origRef || extractBankRef(pretty) === origRef) return pretty;
+  const starChunk = orig.match(/\*{3,}[A-Za-z0-9]{3,}|\*[A-Za-z0-9]{6,}/);
+  return `${pretty} ${starChunk ? starChunk[0] : origRef}`.trim();
+}
+
+/**
  * Convert a raw CSV row into a normalized transaction.
  * Supports USAA (signed Amount), separate Debits/Credits columns, Chase, etc.
  * Returns null if the row should be skipped.
@@ -763,7 +791,7 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
   const dateRaw = getField(map, 'date', 'posted date', 'post date', 'posting date', 'transaction date', 'trans date');
   const date = parseImportDate(dateRaw) || todayISO();
 
-  const description = getField(
+  const pretty = getField(
     map,
     'description',
     'transaction description',
@@ -772,7 +800,9 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
     'name',
     'details',
     'merchant',
-  ) || getField(map, 'original description');
+  );
+  const original = getField(map, 'original description');
+  const description = appendBankRef(pretty || original, original);
 
   const categoryField = getField(
     map,
@@ -890,9 +920,14 @@ export function looksLikeBankTransferLabel(description) {
 export function pickClearerDescription(existing, incoming, { preferIncoming = false } = {}) {
   const a = String(existing || '').trim();
   const b = String(incoming || '').trim();
-  if (preferIncoming && b) return b;
+  if (preferIncoming && b) return extractBankRef(b) || !extractBankRef(a) ? b : a;
   if (!a) return b;
   if (!b) return a;
+  // Keep ***********1442 so two same-day Venmos stay distinguishable after posting.
+  const refA = extractBankRef(a);
+  const refB = extractBankRef(b);
+  if (refA && !refB) return a;
+  if (refB && !refA) return b;
   const ugly = (s) => /\b\d{6}\b/.test(s) || /#\s*\d{3,}/.test(s);
   if (ugly(a) && !ugly(b)) return b;
   if (ugly(b) && !ugly(a)) return a;
@@ -1050,6 +1085,7 @@ export function areLikelyDuplicatePair(a, b, {
   const amtA = Math.round(Math.abs(Number(a.amount) || 0) * 100);
   const amtB = Math.round(Math.abs(Number(b.amount) || 0) * 100);
   if (!amtA || amtA !== amtB) return false;
+  if (bankRefsConflict(a.description, b.description)) return false;
 
   const dayDiff = daysBetween(a.date, b.date);
   // Same calendar day + same amount is NOT always a duplicate:
@@ -1104,6 +1140,7 @@ export function isImportDuplicateTransaction(existing, tx) {
     const bothOutflow = isOutflowType(t.type) && isOutflowType(tx.type);
     if (!sameType && !bothOutflow) return false;
     if (t.type === 'income' || tx.type === 'income') return sameType;
+    if (bankRefsConflict(t.description, tx.description)) return false;
 
     const na = normalizeMerchantDescription(t.description);
     const nb = normalizeMerchantDescription(tx.description);
@@ -1140,8 +1177,8 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
   const amt = Math.round(Math.abs(Number(candidate.amount) || 0) * 100);
   if (!amt) return null;
 
-  let best = null;
-  let bestScore = -1;
+  const incomingRef = extractBankRef(candidate.description);
+  const scored = [];
 
   pending.forEach(tx => {
     const sameType = tx.type === candidate.type;
@@ -1149,6 +1186,7 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
     if (!sameType && !bothOutflow) return;
     const txAmt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
     if (txAmt !== amt) return;
+    if (bankRefsConflict(tx.description, candidate.description)) return;
 
     const dayDiff = daysBetween(tx.date, candidate.date);
     if (dayDiff > dateWindowDays) return;
@@ -1167,13 +1205,18 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
 
     // Score: similarity primary, recency secondary
     const score = sim * 10 + (dateWindowDays - dayDiff);
-    if (score > bestScore) {
-      bestScore = score;
-      best = tx;
-    }
+    scored.push({ tx, score, ref: extractBankRef(tx.description) });
   });
 
-  return best;
+  if (!scored.length) return null;
+  // Posted "Transfer to Venmo" without a last-4 must not guess among 1442 vs 7273.
+  if (!incomingRef) {
+    const distinctRefs = new Set(scored.map(s => s.ref).filter(Boolean));
+    if (distinctRefs.size >= 2) return null;
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].tx;
 }
 
 export function clusterDuplicateTransactions(transactions, options = {}) {
@@ -1312,6 +1355,46 @@ export function selfCheckImportReconcile() {
   const lindt = { date: '2026-08-24', amount: 20, type: 'expense', description: 'Lindt', id: 'l' };
   check('Chick vs Lindt import keeps both', isImportDuplicateTransaction([chick], lindt), false);
   check('Chick vs Lindt not a Review pair', areLikelyDuplicatePair(chick, lindt), false);
+
+  const v1442 = {
+    date: '2026-09-01', amount: 20, type: 'expense',
+    description: 'VENMO            PAYMENT    ***********1442', id: 'v1',
+  };
+  const v7273 = {
+    date: '2026-09-01', amount: 20, type: 'expense',
+    description: 'VENMO            PAYMENT    ***********7273', id: 'v2',
+  };
+  check('venmo last-4 extract 1442', extractBankRef(v1442.description), '1442');
+  check('venmo last-4 extract 7273', extractBankRef(v7273.description), '7273');
+  check('venmo last-4s not import dups', isImportDuplicateTransaction([v1442], v7273), false);
+  check('venmo last-4s not Review pair', areLikelyDuplicatePair(v1442, v7273), false);
+  check('same venmo last-4 is import dup', isImportDuplicateTransaction([v1442], { ...v1442, id: 'v1b' }), true);
+  check(
+    'venmo pending 1442 does not match 7273',
+    !!findBestPendingMatch([{ ...v1442, bankPending: true }], v7273),
+    false,
+  );
+  check(
+    'venmo pending 1442 matches posted 1442',
+    !!findBestPendingMatch([{ ...v1442, bankPending: true }], v1442),
+    true,
+  );
+  const postedPretty = normalizeImportRow({
+    Date: '2026-09-01',
+    Description: 'Transfer to Venmo',
+    'Original Description': 'VENMO            PAYMENT    ***********1442',
+    Amount: '-20.00',
+    Status: 'Posted',
+  });
+  check('posted Venmo keeps last-4 from original', extractBankRef(postedPretty?.description), '1442');
+  check(
+    'ambiguous Transfer to Venmo does not pick among last-4s',
+    !!findBestPendingMatch(
+      [{ ...v1442, bankPending: true }, { ...v7273, bankPending: true }],
+      { date: '2026-09-01', amount: 20, type: 'expense', description: 'Transfer to Venmo' },
+    ),
+    false,
+  );
 
   const clearer = pickClearerDescription('WAL-MART #4428 082626', 'Walmart', { preferIncoming: true });
   check('prefer posted Walmart name', clearer, 'Walmart');

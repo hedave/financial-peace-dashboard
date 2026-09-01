@@ -89,10 +89,11 @@ function cents(n) {
 function usaaCsv(rows) {
   const lines = ['Date,Description,Original Description,Category,Amount,Status'];
   rows.forEach(r => {
+    const orig = r.original != null ? r.original : r.description;
     lines.push([
       r.date,
       r.description,
-      r.description,
+      orig,
       r.category || '',
       Number(r.amount).toFixed(2),
       r.status,
@@ -211,6 +212,43 @@ stats = store.importTransactions(wmFrac, { includePending: true });
 const wmRows = store.state.transactions.filter(t => /wal-?mart/i.test(t.description));
 if (wmRows.length !== 2) fail('Walmart fractionals must stay as two rows', wmRows);
 console.log('Walmart fractionals kept as two rows');
+
+// Same-day Venmo $20 with different last-4s are two payments, not a duplicate
+resetBooks(0);
+const venmoPair = parseBankCsvText(usaaCsv([
+  { date: '09/01/2026', description: 'VENMO            PAYMENT    ***********1442', amount: -20, status: 'Pending' },
+  { date: '09/01/2026', description: 'VENMO            PAYMENT    ***********7273', amount: -20, status: 'Pending' },
+]));
+stats = store.importTransactions(venmoPair, { includePending: true });
+const venmoRows = store.state.transactions.filter(t => /venmo/i.test(t.description));
+if (venmoRows.length !== 2) fail('two Venmo last-4s must both import', venmoRows);
+if (cents(store.state.balances.checking) !== -4000) {
+  fail('two Venmos should hit checking -40', store.state.balances.checking);
+}
+stats = store.importTransactions(venmoPair, { includePending: true });
+if (!(stats.duplicates >= 2) || stats.count !== 0) {
+  fail('re-import of two Venmos should be duplicates', stats);
+}
+if (cents(store.state.balances.checking) !== -4000) {
+  fail('re-import must not double Venmos', store.state.balances.checking);
+}
+
+stats = store.importTransactions(parseBankCsvText(usaaCsv([
+  {
+    date: '09/01/2026',
+    description: 'Transfer to Venmo',
+    original: 'VENMO            PAYMENT    ***********1442',
+    amount: -20,
+    status: 'Posted',
+  },
+])), { includePending: true });
+if (stats.matchedPending < 1) fail('posted Venmo 1442 should merge pending 1442', stats);
+const venmoAfterPost = store.state.transactions.filter(t => /venmo/i.test(t.description));
+if (venmoAfterPost.length !== 2) fail('posted 1442 must not eat 7273', venmoAfterPost);
+if (cents(store.state.balances.checking) !== -4000) {
+  fail('posted Venmo must not double-count', store.state.balances.checking);
+}
+console.log('Venmo last-4s: both $20 imports; posted 1442 merges only 1442');
 
 // 27 Aug file: prior pending USPS already in the log; 50-row USAA export
 // includes posted US Postal Service + pending VACP. Checking = USAA available.
