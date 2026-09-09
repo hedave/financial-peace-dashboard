@@ -4342,6 +4342,17 @@ html[data-reduce-motion="true"] .sticky-note {
     display: none;
   }
 
+  /* FigPig mobile P0: bill + debt cards keep name/amount (Critiquito/Kern) */
+  .bill-card .tx-card-top,
+  .debt-card .tx-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    width: 100%;
+    margin-bottom: 0.35rem;
+  }
+
   .tx-card-date {
     font-size: 0.72rem;
     font-weight: 600;
@@ -4390,6 +4401,43 @@ html[data-reduce-motion="true"] .sticky-note {
   }
 
   .tx-card-actions { display: none; }
+
+  /* FigPig mobile P0: restore Mark Paid / Pay + menu on bill + debt cards */
+  .bill-card .tx-card-actions,
+  .debt-card .tx-card-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+    width: 100%;
+  }
+
+  .bill-card .tx-card-actions .btn,
+  .debt-card .tx-card-actions .btn,
+  .bill-card .tx-more-menu > summary,
+  .debt-card .tx-more-menu > summary {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .bill-card,
+  .debt-card {
+    overflow: visible;
+  }
+
+  .bill-card .tx-more-menu,
+  .debt-card .tx-more-menu {
+    position: relative;
+    z-index: 5;
+  }
+
+  /* P1 cheap: bills summary stays 2x2 on phone (not single column) */
+  .bills-summary.grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.55rem;
+  }
 
   .tx-more-menu > summary.btn {
     min-width: 32px;
