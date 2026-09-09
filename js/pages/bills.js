@@ -221,6 +221,17 @@ export function renderBills(container) {
   renderPanel();
   container.appendChild(tabBar);
   container.appendChild(panel);
+
+  // Sticky secondary Add when list is long enough to scroll (phone CSS)
+  if (allBills.length >= 4) {
+    container.appendChild(el('div', { className: 'bills-sticky-add' },
+      el('button', {
+        type: 'button',
+        className: 'btn btn-primary',
+        onClick: () => openBillForm(),
+      }, '+ Add Bill'),
+    ));
+  }
 }
 
 function billDisplay(bill, state, mode) {
@@ -416,6 +427,10 @@ function billCard(bill, state, { mode = 'upcoming' } = {}) {
         className: 'btn btn-sm btn-primary',
         onClick: (e) => { e.stopPropagation(); markPaid(bill); },
       }, 'Mark Paid'),
+      el('button', {
+        className: 'btn btn-sm btn-secondary',
+        onClick: (e) => { e.stopPropagation(); openBillForm(bill); },
+      }, 'Edit'),
       billMoreMenu(bill)
     )
   );

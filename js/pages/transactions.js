@@ -215,7 +215,7 @@ export function renderTransactions(container, arg) {
   }
 
   const txTools = el('details', { className: 'page-tools-menu' });
-  txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More actions'));
+  txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More · Import'));
   const txToolsList = el('div', { className: 'page-tools-dropdown' });
   txToolsList.appendChild(el('button', {
     type: 'button', className: 'page-tools-item',
