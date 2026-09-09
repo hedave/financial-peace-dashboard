@@ -124,3 +124,15 @@ Use **one account** on every device (you + your wife). Same email/password every
 | Empty budget on new device | On your **main PC** (with data): Settings → **Sync Now**. Then on the other device: Sign Out → Sign In again. Or Settings → Restore Backup. |
 | Wife's Mac shows all zeros | Cloud was empty when she signed in. Push from PC first (Sync Now). Do not rely on a blank device to populate the cloud. |
 | Old localhost data missing | On PC localhost: export JSON backup → live site → Restore Backup, or sign up once from localhost with config enabled |
+
+## CoS bills-read API
+
+Separate from bank ingest. See `docs/BILLS-API.md`.
+
+Netlify env (add; do not reuse ingest secret):
+
+| Variable | Notes |
+| --- | --- |
+| `FIGPIG_BILLS_READ_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/bills_read_token` |
+
+Function: `netlify/functions/bills.mjs` → `GET /api/bills`.

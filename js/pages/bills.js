@@ -136,15 +136,26 @@ export function renderBills(container) {
   const tabBar = el('div', { className: 'chip-bar bills-tabs' });
   function renderTabs() {
     tabBar.innerHTML = '';
+    const narrow = typeof window !== 'undefined'
+      && window.matchMedia('(max-width: 768px)').matches;
     const tabs = [
       {
         id: 'thisMonth',
         label: overdueCount
-          ? `This month (${thisMonthBills.length}) · ${overdueCount} overdue`
-          : `This month (${thisMonthBills.length})`,
+          ? (narrow
+            ? `Month (${thisMonthBills.length}) · ${overdueCount} late`
+            : `This month (${thisMonthBills.length}) · ${overdueCount} overdue`)
+          : (narrow
+            ? `Month (${thisMonthBills.length})`
+            : `This month (${thisMonthBills.length})`),
       },
       { id: 'later', label: `Later (${laterBills.length})` },
-      { id: 'paid', label: `Paid ${getMonthLabel(month).split(' ')[0]} (${paidThisMonth.length})` },
+      {
+        id: 'paid',
+        label: narrow
+          ? `Paid (${paidThisMonth.length})`
+          : `Paid ${getMonthLabel(month).split(' ')[0]} (${paidThisMonth.length})`,
+      },
     ];
     tabs.forEach(t => {
       tabBar.appendChild(el('button', {
@@ -450,6 +461,11 @@ function openBillActivity(bill) {
     ),
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-secondary',
+        onClick: () => { modal.close(); openBillForm(bill); },
+      }, 'Edit'),
       bill.status !== 'paid' ? el('button', {
         type: 'button',
         className: 'btn btn-primary',
