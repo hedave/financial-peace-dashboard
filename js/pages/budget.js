@@ -161,7 +161,7 @@ export function renderBudget(container, arg) {
   const allocatable = store.getAllocatableIncome(month);
   const checkingNow = Number(store.getState().balances?.checking) || 0;
 
-  container.appendChild(el('div', { className: `grid ${isCurrentMonth ? 'grid-4' : 'grid-3'} section` },
+  container.appendChild(el('div', { className: `grid ${isCurrentMonth ? 'grid-4' : 'grid-3'} section budget-summary` },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, `Monthly Income — ${getMonthLabel(month)}`),
       el('div', { className: 'card-value accent' }, formatCurrency(allocatable)),
@@ -371,7 +371,7 @@ export function renderBudget(container, arg) {
   const hasSnapshot = !!store.getState().monthBudgetSnapshots[prevMonth];
 
   const toolsMenu = el('details', { className: 'page-tools-menu' });
-  toolsMenu.appendChild(el('summary', { className: 'btn btn-secondary' }, 'Budget tools'));
+  toolsMenu.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More budget actions'));
   const toolsList = el('div', { className: 'page-tools-dropdown' });
   toolsList.appendChild(el('button', {
     type: 'button',
@@ -445,7 +445,7 @@ export function renderBudget(container, arg) {
       el('button', { className: 'btn btn-primary', onClick: () => addCategory(false) }, '+ Add Category'),
       store.canWriteBudget()
         ? el('button', {
-          className: 'btn btn-secondary',
+          className: 'btn btn-secondary budget-action-secondary',
           onClick: () => openUpcomingHolds(),
           title: 'Hold a known future spend out of snowball — does not change To Allocate',
         }, 'Upcoming hold')
@@ -520,11 +520,13 @@ export function renderBudget(container, arg) {
   const filterBar = el('div', { className: 'chip-bar section' });
   function renderFilterChips() {
     filterBar.innerHTML = '';
+    const narrow = typeof window !== 'undefined'
+      && window.matchMedia('(max-width: 768px)').matches;
     [
       { id: 'all', label: 'All' },
-      { id: 'favorites', label: '★ Favorites' },
-      { id: 'kids', label: 'Kids / family' },
-      { id: 'attention', label: 'Needs attention' },
+      { id: 'favorites', label: narrow ? '★ Favs' : '★ Favorites' },
+      { id: 'kids', label: narrow ? 'Kids' : 'Kids / family' },
+      { id: 'attention', label: narrow ? 'Attention' : 'Needs attention' },
     ].forEach(opt => {
       filterBar.appendChild(el('button', {
         type: 'button',
@@ -549,7 +551,7 @@ export function renderBudget(container, arg) {
           });
           window.appRefresh();
         },
-      }, shareOn ? 'Overspend share on' : 'Overspend share'));
+      }, shareOn ? (narrow ? 'Share on' : 'Overspend share on') : (narrow ? 'Share' : 'Overspend share'));
     }
   }
   renderFilterChips();
@@ -772,6 +774,51 @@ function overspendShareLine(cat, remaining, opts = {}) {
   return null;
 }
 
+function envelopeMoreMenu(cat) {
+  const menu = el('details', { className: 'tx-more-menu' });
+  const summary = el('summary', {
+    className: 'btn btn-sm btn-secondary tx-more-trigger',
+    title: 'More envelope actions',
+  }, '⋯');
+  summary.addEventListener('click', e => e.stopPropagation());
+
+  const items = el('div', { className: 'tx-more-dropdown' });
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: (e) => {
+      e.stopPropagation();
+      menu.removeAttribute('open');
+      editCategory(cat);
+    },
+  }, 'Edit'));
+  items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item tx-more-item-danger',
+    onClick: (e) => {
+      e.stopPropagation();
+      menu.removeAttribute('open');
+      deleteCategory(cat.id);
+    },
+  }, 'Delete'));
+
+  menu.appendChild(summary);
+  menu.appendChild(items);
+
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    const close = e => {
+      if (!menu.contains(e.target)) {
+        menu.removeAttribute('open');
+        document.removeEventListener('click', close, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  });
+
+  return menu;
+}
+
 function envelopeCard(cat, focusId = null, opts = {}) {
   const month = opts.month || getCurrentMonth();
   const isCurrentMonth = opts.isCurrentMonth !== false && month === getCurrentMonth();
@@ -816,19 +863,14 @@ function envelopeCard(cat, focusId = null, opts = {}) {
           overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
           hasNote ? el('span', { className: 'envelope-badge-mini', title: cat.note }, '📝') : null,
         ),
-        el('div', { className: 'btn-group' },
+        el('div', { className: 'btn-group envelope-card-tools' },
           el('button', {
             type: 'button',
             className: `btn btn-sm btn-secondary${isFav ? ' fav-on' : ''}`,
             title: isFav ? 'Unpin favorite' : 'Pin favorite',
             onClick: (e) => { e.stopPropagation(); toggleFavorite(cat.id); },
           }, isFav ? '★' : '☆'),
-          isCurrentMonth
-            ? el('button', { className: 'btn btn-sm btn-secondary', onClick: (e) => { e.stopPropagation(); editCategory(cat); } }, '✏️')
-            : null,
-          isCurrentMonth
-            ? el('button', { className: 'btn btn-sm btn-danger', onClick: (e) => { e.stopPropagation(); deleteCategory(cat.id); } }, '×')
-            : null,
+          isCurrentMonth ? envelopeMoreMenu(cat) : null,
         )
       ),
       el('div', { className: 'envelope-stats' },

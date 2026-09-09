@@ -36,7 +36,7 @@ export function renderDebt(container) {
     el('p', {}, 'Attack the smallest balance first. Put deferred loans (e.g. student loans in school) on hold so they leave the attack list.')
   ));
 
-  container.appendChild(el('div', { className: 'grid grid-4 section' },
+  container.appendChild(el('div', { className: 'grid grid-4 section debt-summary' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Total Debt'),
       el('div', { className: 'card-value negative' }, formatCurrency(total)),
@@ -401,6 +401,10 @@ function debtCard(debt, isTarget, opts = {}) {
           className: 'btn btn-sm btn-primary',
           onClick: (e) => { e.stopPropagation(); makePayment(debt); },
         }, 'Pay'),
+      el('button', {
+        className: 'btn btn-sm btn-secondary',
+        onClick: (e) => { e.stopPropagation(); openDebtForm(debt); },
+      }, 'Edit'),
       debtMoreMenu(debt, { paused })
     )
   );
@@ -410,6 +414,7 @@ function openDebtActivity(debt) {
   const txs = store.getDebtTransactions(debt.id);
   const paidMonth = store.getDebtPaidThisMonth(debt.id);
   const months = store.estimateMonthsToDebtFree();
+  const paused = !!debt.paused;
   const list = el('div', { className: 'envelope-activity-list' });
   let modal;
 
@@ -451,10 +456,17 @@ function openDebtActivity(debt) {
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
       el('button', {
         type: 'button',
-        className: 'btn btn-primary',
-        onClick: () => { modal.close(); makePayment(debt); },
-      }, 'Make payment'),
-    ],
+        className: 'btn btn-secondary',
+        onClick: () => { modal.close(); openDebtForm(debt); },
+      }, 'Edit'),
+      paused
+        ? null
+        : el('button', {
+          type: 'button',
+          className: 'btn btn-primary',
+          onClick: () => { modal.close(); makePayment(debt); },
+        }, 'Make payment'),
+    ].filter(Boolean),
   });
   modal.modal.classList.add('modal-wide');
 }
