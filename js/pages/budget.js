@@ -541,6 +541,9 @@ export function renderBudget(container, arg) {
     });
     if (isCurrentMonth && overspendShare.overspendTotal > 0.005) {
       const shareOn = !!store.getState().settings?.showOverspendShare;
+      const shareLabel = shareOn
+        ? (narrow ? 'Share on' : 'Overspend share on')
+        : (narrow ? 'Share' : 'Overspend share');
       filterBar.appendChild(el('button', {
         type: 'button',
         className: `chip${shareOn ? ' active' : ''}`,
@@ -551,7 +554,7 @@ export function renderBudget(container, arg) {
           });
           window.appRefresh();
         },
-      }, shareOn ? (narrow ? 'Share on' : 'Overspend share on') : (narrow ? 'Share' : 'Overspend share'));
+      }, shareLabel));
     }
   }
   renderFilterChips();
