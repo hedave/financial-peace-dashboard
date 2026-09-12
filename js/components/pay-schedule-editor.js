@@ -1,4 +1,4 @@
-import { el, formatCurrency, formatDate, todayISO } from '../utils.js';
+import { el, formatDate, todayISO } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
 import {
@@ -146,9 +146,22 @@ export function openPayScheduleEditor(source) {
       return;
     }
     checks.forEach(check => {
+      const amtIn = el('input', {
+        type: 'number',
+        step: '0.01',
+        min: 0,
+        className: 'pay-date-amt-input',
+        value: check.amount > 0 ? check.amount : '',
+        placeholder: perCheckIn.value || '0.00',
+        inputMode: 'decimal',
+      });
+      amtIn.addEventListener('change', () => {
+        store.setPayCheckAmount(source.id, check.date, amtIn.value);
+        refreshAfterDateChange();
+      });
       datesList.appendChild(el('div', { className: 'pay-date-row' },
         el('span', { className: 'pay-date-label' }, formatDate(check.date)),
-        el('span', { className: 'pay-date-amt' }, formatCurrency(check.amount)),
+        amtIn,
         el('button', {
           type: 'button',
           className: 'btn btn-sm btn-danger',
@@ -251,10 +264,10 @@ export function openPayScheduleEditor(source) {
         el('label', { className: 'pay-mode-option' }, modeRecurring, ' Recurring (same day/month)'),
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'Typical check amount (optional)'),
+        el('label', {}, 'Typical check amount'),
         perCheckIn,
         el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
-          'Usually filled automatically when CSV deposits import.'
+          'Expected take-home per check. Used for dates that do not have their own amount. CSV deposits overwrite with the real deposit.'
         ),
       ),
       el('div', { className: 'form-group' },

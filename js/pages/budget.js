@@ -1100,7 +1100,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
                 if (store.reverseBonusAllocation(t.bonusAllocationId, t.bonusAllocationMonth || activityMonth)) {
                   showToast('Bonus returned to the free pot', 'success');
                   paint();
-                  window.appRefresh();
+                  window.appSoftRefresh?.();
                 }
               },
             }, 'Undo')
@@ -1111,8 +1111,13 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
                 ? 'Edit date to keep a late post in this month, or change envelope'
                 : 'Edit transaction',
               onClick: () => {
-                modal?.close();
-                openTransactionForm({ transaction: t });
+                openTransactionForm({
+                  transaction: t,
+                  onSaved: () => {
+                    paint();
+                    window.appSoftRefresh?.();
+                  },
+                });
               },
             }, 'Edit'),
         ));
@@ -1251,13 +1256,16 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
         type: 'button',
         className: 'btn btn-primary',
         onClick: () => {
-          modal.close();
-          // Default new expense to the viewed month (1st) so late posts can be dated correctly
+          // Keep this sheet open so you can log several charges in a row
           const defaultDate = isPastMonth ? `${activityMonth}-01` : undefined;
           openTransactionForm({
             type: 'expense',
             categoryId: cat.id,
             ...(defaultDate ? { date: defaultDate } : {}),
+            onSaved: () => {
+              paint();
+              window.appSoftRefresh?.();
+            },
           });
         },
       }, '+ Log expense'),
@@ -1267,8 +1275,12 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
           className: 'btn btn-secondary',
           title: 'Put unmatched bonus or leftover from other envelopes here',
           onClick: () => {
-            modal.close();
-            openAssignBonusToEnvelope(cat);
+            openAssignBonusToEnvelope(cat, {
+              onDone: () => {
+                paint();
+                window.appSoftRefresh?.();
+              },
+            });
           },
         }, 'Assign bonus')
         : null,
@@ -1277,12 +1289,15 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
         className: 'btn btn-secondary',
         title: 'Log a new refund or extra cash and assign it to this envelope',
         onClick: () => {
-          modal.close();
           const defaultDate = isPastMonth ? `${activityMonth}-01` : undefined;
           openTransactionForm({
             type: 'income',
             categoryId: cat.id,
             ...(defaultDate ? { date: defaultDate } : {}),
+            onSaved: () => {
+              paint();
+              window.appSoftRefresh?.();
+            },
           });
         },
       }, '+ New refund'),
@@ -1588,7 +1603,7 @@ export function openUpcomingHolds() {
           onClick: () => {
             store.dismissUpcomingHold(h.id);
             paintList();
-            window.appRefresh();
+            window.appSoftRefresh?.();
           },
         }, 'Dismiss'));
       }
@@ -1598,7 +1613,7 @@ export function openUpcomingHolds() {
         onClick: () => {
           store.deleteUpcomingHold(h.id);
           paintList();
-          window.appRefresh();
+          window.appSoftRefresh?.();
         },
       }, 'Delete'));
       list.appendChild(el('div', { className: 'envelope-move-row' },
@@ -1932,7 +1947,7 @@ function openRepayCoverFromBonus(month = getCurrentMonth()) {
   modal.modal.classList.add('modal-scrollable');
 }
 
-function openAssignBonusToEnvelope(cat) {
+function openAssignBonusToEnvelope(cat, { onDone } = {}) {
   const month = getCurrentMonth();
   const gross = store.getBonusIncomeGross(month);
   const used = store.getBonusAllocated(month);
@@ -1971,8 +1986,8 @@ function openAssignBonusToEnvelope(cat) {
             if (store.reverseBonusAllocation(a.id, month)) {
               showToast('Returned to the bonus pot', 'success');
               modal.close();
-              window.appRefresh();
-              openAssignBonusToEnvelope(cat);
+              onDone?.();
+              openAssignBonusToEnvelope(cat, { onDone });
             }
           },
         }, 'Undo'),
@@ -2053,7 +2068,8 @@ function openAssignBonusToEnvelope(cat) {
           } else {
             showToast('Could not assign that amount', 'info');
           }
-          window.appRefresh();
+          if (onDone) onDone();
+          else window.appRefresh();
         },
       }, 'Assign bonus'),
     ],

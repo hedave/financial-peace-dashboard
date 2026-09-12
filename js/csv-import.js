@@ -1,5 +1,6 @@
 import { todayISO, formatLocalISODate, parseCSV } from './utils.js';
 import { normalizeIngestSplits } from './ingest-normalize.js';
+import { nameInDescription } from './bill-matcher.js';
 
 /** Parse currency strings: $1,234.56, (50.00), -50.00 */
 export function parseMoneyValue(str) {
@@ -760,8 +761,9 @@ export function extractBankRef(description) {
   const s = String(description || '');
   const masked = s.match(/\*{3,}([A-Za-z0-9]{3,})\b/);
   if (masked) return masked[1].toLowerCase();
-  const starred = s.match(/\*([A-Za-z0-9]{6,})\b/);
-  if (starred) return starred[1].toLowerCase();
+  // Amazon-style *XP57B2H33 — require a digit so *MARKETPLACE is not an order id
+  const starred = s.match(/\*([A-Za-z0-9]*\d[A-Za-z0-9]*)\b/);
+  if (starred && starred[1].length >= 6) return starred[1].toLowerCase();
   return '';
 }
 
@@ -776,7 +778,7 @@ function appendBankRef(description, original) {
   const orig = String(original || '').trim();
   const origRef = extractBankRef(orig);
   if (!origRef || extractBankRef(pretty) === origRef) return pretty;
-  const starChunk = orig.match(/\*{3,}[A-Za-z0-9]{3,}|\*[A-Za-z0-9]{6,}/);
+  const starChunk = orig.match(/\*{3,}[A-Za-z0-9]{3,}|\*[A-Za-z0-9]*\d[A-Za-z0-9]{5,}/);
   return `${pretty} ${starChunk ? starChunk[0] : origRef}`.trim();
 }
 
@@ -873,6 +875,34 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
 }
 
 export const DUPLICATE_DATE_WINDOW_DAYS = 7;
+
+/** Mark Paid placeholder vs the bank row (typed $475, USAA $472.87). */
+export function looksLikeBillPaidPlaceholder(description) {
+  return /^bill\s*paid:\s*/i.test(String(description || '').trim());
+}
+
+function billPaidLabel(description) {
+  const m = String(description || '').trim().match(/^bill\s*paid:\s*(.+)$/i);
+  return m ? m[1].trim() : '';
+}
+
+function amountsCloseForBillPaidReview(centsA, centsB) {
+  const diff = Math.abs(centsA - centsB);
+  if (!diff) return true;
+  if (diff <= 1000) return true; // $10
+  const base = Math.max(centsA, centsB);
+  return base > 0 && diff / base <= 0.05;
+}
+
+function billPaidMerchantMatch(a, b) {
+  const onePlaceholder = looksLikeBillPaidPlaceholder(a.description)
+    !== looksLikeBillPaidPlaceholder(b.description);
+  if (!onePlaceholder) return false;
+  const label = billPaidLabel(a.description) || billPaidLabel(b.description);
+  const other = looksLikeBillPaidPlaceholder(a.description) ? b.description : a.description;
+  if (!label || !other) return false;
+  return nameInDescription(label, other) || nameInDescription(other, label);
+}
 
 const OUTFLOW_TYPES = new Set(['expense', 'debt_payment', 'transfer']);
 
@@ -1084,7 +1114,11 @@ export function areLikelyDuplicatePair(a, b, {
 
   const amtA = Math.round(Math.abs(Number(a.amount) || 0) * 100);
   const amtB = Math.round(Math.abs(Number(b.amount) || 0) * 100);
-  if (!amtA || amtA !== amtB) return false;
+  if (!amtA || !amtB) return false;
+  const exactAmt = amtA === amtB;
+  const billPaidTwin = !exactAmt && billPaidMerchantMatch(a, b)
+    && amountsCloseForBillPaidReview(amtA, amtB);
+  if (!exactAmt && !billPaidTwin) return false;
   if (bankRefsConflict(a.description, b.description)) return false;
 
   const dayDiff = daysBetween(a.date, b.date);
@@ -1092,6 +1126,7 @@ export function areLikelyDuplicatePair(a, b, {
   // Chick-fil-A vs Lindt $20 must stay two purchases. Flag only when
   // merchants look related, both are generic bank-transfer labels, or one is a debt payment.
   if (dayDiff === 0) {
+    if (billPaidTwin) return true;
     if (areDescriptionsSimilar(a.description, b.description, crossDaySimilarity)) return true;
     if (shareStrongMerchantToken(a.description, b.description)) return true;
     if (looksLikeBankTransferLabel(a.description) && looksLikeBankTransferLabel(b.description)) return true;
@@ -1102,6 +1137,8 @@ export function areLikelyDuplicatePair(a, b, {
     return false;
   }
   if (dayDiff > dateWindowDays) return false;
+
+  if (billPaidTwin) return true;
 
   // Cross-day same amount: need similar merchant.
   // Use a slightly looser bar within 1–2 days (bank post lag / Amazon split posts).
@@ -1259,6 +1296,18 @@ export function clusterDuplicateTransactions(transactions, options = {}) {
     }
   });
 
+  // Exact-cent buckets miss Mark Paid $475 vs bank $472.87 — pair those separately.
+  const placeholders = txs.filter(t => looksLikeBillPaidPlaceholder(t.description));
+  placeholders.forEach(placeholder => {
+    txs.forEach(other => {
+      if (other.id === placeholder.id) return;
+      if (!areLikelyDuplicatePair(placeholder, other, options)) return;
+      if (!parent.has(placeholder.id)) parent.set(placeholder.id, placeholder.id);
+      if (!parent.has(other.id)) parent.set(other.id, other.id);
+      unite(placeholder.id, other.id);
+    });
+  });
+
   const groups = new Map();
   parent.forEach((_, id) => {
     const root = find(id);
@@ -1395,6 +1444,36 @@ export function selfCheckImportReconcile() {
     ),
     false,
   );
+
+  const billDuke = {
+    date: '2026-09-09', amount: 475, type: 'expense',
+    description: 'Bill paid: Duke', id: 'bd',
+  };
+  const bankDuke = {
+    date: '2026-09-11', amount: 472.87, type: 'expense',
+    description: 'Duke Energy ***********6417', id: 'bk',
+  };
+  check('bill-paid Duke vs bank Duke is Review pair', areLikelyDuplicatePair(billDuke, bankDuke), true);
+  check('bill-paid Duke vs bank Duke is not import dup', isImportDuplicateTransaction([billDuke], bankDuke), false);
+  const dukeGroups = clusterDuplicateTransactions([billDuke, bankDuke]);
+  check('clusters bill-paid Duke with bank Duke', dukeGroups.length === 1 && dukeGroups[0].length === 2, true);
+  const chickNearA = { date: '2026-08-14', amount: 15.61, type: 'expense', description: 'Chick-fil-A', id: 'c1' };
+  const chickNearB = { date: '2026-08-18', amount: 15.69, type: 'expense', description: 'Chick-fil-A', id: 'c2' };
+  check('near Chick-fil-A not a Review pair', areLikelyDuplicatePair(chickNearA, chickNearB), false);
+
+  check('microsoft marketplace is not a bank ref', extractBankRef('MICROSOFT*MARKETPLAC             090226'), '');
+  check('microsoft marketplace posted is not a bank ref', extractBankRef('Microsoft *MARKETPLACE'), '');
+  check('amazon order id still a ref', extractBankRef('AMAZON MKTPL*XP57B2H33'), 'xp57b2h33');
+  const msPend = {
+    date: '2026-09-02', amount: 4.27, type: 'expense',
+    description: 'MICROSOFT*MARKETPLAC             090226', id: 'm1', bankPending: true,
+  };
+  const msPost = {
+    date: '2026-09-02', amount: 4.27, type: 'expense',
+    description: 'Microsoft *MARKETPLACE', id: 'm2',
+  };
+  check('microsoft marketplace pending vs posted is Review pair', areLikelyDuplicatePair(msPend, msPost), true);
+  check('microsoft pending matches posted marketplace', !!findBestPendingMatch([msPend], msPost), true);
 
   const clearer = pickClearerDescription('WAL-MART #4428 082626', 'Walmart', { preferIncoming: true });
   check('prefer posted Walmart name', clearer, 'Walmart');

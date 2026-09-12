@@ -833,6 +833,91 @@ if (store.getPendingBillMatches().some(m => m.transaction.id === 'wt-citi-pay'))
 }
 console.log('bill match dismiss: Work travel skipped; dismiss keeps the row');
 
+{
+  const src = {
+    id: 'add-inc-test',
+    name: 'Additional',
+    amount: 0,
+    type: 'other',
+    paySchedule: {
+      mode: 'recurring',
+      checks: [],
+      recurring: { frequency: 'monthly', day1: 1, day2: null },
+      perCheckAmount: null,
+    },
+    matchTerms: [],
+  };
+  store.state.incomeSources.push(src);
+  store.setIncomeSourceMonthlyAmount(src.id, 1126.20);
+  const live = store.state.incomeSources.find(s => s.id === src.id);
+  if (cents(store.getSourceIncomeForMonth(live)) !== 112620) {
+    fail('typed additional income should count this month', store.getSourceIncomeForMonth(live));
+  }
+  if (cents(live.amount) !== 112620) fail('source.amount should save 1126.20', live.amount);
+  const mid = `${getCurrentMonth()}-15`;
+  store.addPayCheck(src.id, mid, 50);
+  store.setPayCheckAmount(src.id, mid, 200);
+  const afterDate = store.state.incomeSources.find(s => s.id === src.id);
+  const check = (afterDate.paySchedule?.checks || []).find(c => c.date === mid);
+  if (cents(check?.amount) !== 20000) fail('pay-date amount should save 200', check);
+  if (cents(store.getSourceIncomeForMonth(afterDate)) !== 20000) {
+    fail('this month should follow the edited pay date', store.getSourceIncomeForMonth(afterDate));
+  }
+  store.state.incomeSources = store.state.incomeSources.filter(s => s.id !== src.id);
+  console.log('additional income amount: typed 1126.20 counts this month; pay-date amount editable');
+}
+
+{
+  resetBooks(0);
+  const wmHold = parseBankCsvText(usaaCsv([
+    { date: '09/10/2026', description: 'WALMART.COM 80092562             091026', amount: -8.32, status: 'Pending' },
+    { date: '09/10/2026', description: 'Aldi', amount: -21.28, status: 'Posted' },
+  ]));
+  stats = store.importTransactions(wmHold, { includePending: true, pruneMissingBankPending: true });
+  if (cents(store.state.balances.checking) !== -832 - 2128) {
+    fail('pending walmart + aldi should hit checking', store.state.balances.checking);
+  }
+  const dropCsv = parseBankCsvText(usaaCsv([
+    { date: '09/10/2026', description: 'Aldi', amount: -21.28, status: 'Posted' },
+    { date: '09/10/2026', description: 'CHICK-FIL-A #04378               091026', amount: -5.66, status: 'Posted' },
+  ]));
+  stats = store.importTransactions(dropCsv, { includePending: true, pruneMissingBankPending: true });
+  if (stats.droppedPending !== 1) fail('vanished walmart hold should drop', stats);
+  if (store.state.transactions.some(t => /walmart/i.test(t.description) && t.bankPending)) {
+    fail('walmart hold should be gone');
+  }
+  if (cents(store.state.balances.checking) !== -2128 - 566) {
+    fail('checking should reverse the vanished hold', store.state.balances.checking);
+  }
+
+  resetBooks(0);
+  store.importTransactions(wmHold, { includePending: true, pruneMissingBankPending: true });
+  stats = store.importTransactions(wmHold, { includePending: true, pruneMissingBankPending: true });
+  if (stats.droppedPending) fail('still-pending walmart must not drop', stats);
+  if (cents(store.state.balances.checking) !== -832 - 2128) {
+    fail('re-import with hold still present must not move checking again', store.state.balances.checking);
+  }
+
+  resetBooks(0);
+  store.importTransactions(wmHold, { includePending: true });
+  store.importTransactions(dropCsv, { includePending: true });
+  if (!store.state.transactions.some(t => /walmart/i.test(t.description) && t.bankPending)) {
+    fail('ingest/small import must not drop holds');
+  }
+
+  resetBooks(0);
+  store.importTransactions(parseBankCsvText(usaaCsv([
+    { date: '09/10/2026', description: 'WALMART.COM 80092562             091026', amount: -8.32, status: 'Pending' },
+  ])), { includePending: true, pruneMissingBankPending: true });
+  store.importTransactions(parseBankCsvText(usaaCsv([
+    { date: '09/12/2026', description: 'Aldi', amount: -10, status: 'Posted' },
+  ])), { includePending: true, pruneMissingBankPending: true });
+  if (!store.state.transactions.some(t => /walmart/i.test(t.description) && t.bankPending)) {
+    fail('hold on a day not in this file must stay');
+  }
+  console.log('vanished Walmart auth hold: dropped on same-day re-import; ingest/other-day kept');
+}
+
 console.log('all import-reconcile checks passed');
 
 

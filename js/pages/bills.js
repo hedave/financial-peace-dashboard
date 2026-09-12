@@ -437,43 +437,58 @@ function billCard(bill, state, { mode = 'upcoming' } = {}) {
 }
 
 function openBillActivity(bill) {
-  const txs = store.getBillTransactions(bill.id);
-  const list = el('div', { className: 'envelope-activity-list' });
+  const bodyHost = el('div', {});
   let modal;
 
-  if (!txs.length) {
-    list.appendChild(emptyState(
-      '📋',
-      'No linked transactions',
-      'When you mark this bill paid or match it from Review, payments show up here.',
-    ));
-  } else {
-    txs.forEach(t => {
-      list.appendChild(el('div', { className: 'envelope-activity-row' },
-        el('div', { className: 'envelope-activity-main' },
-          el('div', { className: 'envelope-activity-top' },
-            el('strong', {}, formatDate(t.date)),
-            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
-          ),
-          el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
-        ),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => { modal?.close(); openTransactionForm({ transaction: t }); },
-        }, 'Edit'),
+  function paint() {
+    const live = store.getState().bills.find(b => b.id === bill.id) || bill;
+    const txs = store.getBillTransactions(live.id);
+    const list = el('div', { className: 'envelope-activity-list' });
+    if (!txs.length) {
+      list.appendChild(emptyState(
+        '📋',
+        'No linked transactions',
+        'When you mark this bill paid or match it from Review, payments show up here.',
       ));
-    });
+    } else {
+      txs.forEach(t => {
+        list.appendChild(el('div', { className: 'envelope-activity-row' },
+          el('div', { className: 'envelope-activity-main' },
+            el('div', { className: 'envelope-activity-top' },
+              el('strong', {}, formatDate(t.date)),
+              el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
+            ),
+            el('div', { className: 'envelope-activity-desc' }, t.description || '—'),
+          ),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            onClick: () => {
+              openTransactionForm({
+                transaction: t,
+                onSaved: () => {
+                  paint();
+                  window.appSoftRefresh?.();
+                },
+              });
+            },
+          }, 'Edit'),
+        ));
+      });
+    }
+    bodyHost.innerHTML = '';
+    bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
+      `${txs.length} linked transaction${txs.length === 1 ? '' : 's'}`,
+    ));
+    bodyHost.appendChild(list);
+    modal?.setTitle?.(`📋 ${live.name}`);
   }
+
+  paint();
 
   modal = showModal({
     title: `📋 ${bill.name}`,
-    body: el('div', {},
-      el('p', { className: 'envelope-activity-summary' },
-        `${txs.length} linked transaction${txs.length === 1 ? '' : 's'}`,
-      ),
-      list,
-    ),
+    body: bodyHost,
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
       el('button', {

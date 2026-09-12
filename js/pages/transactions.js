@@ -12,6 +12,16 @@ import { parseBankCsvText } from '../csv-import.js';
 
 let openMode = null;
 
+/** Survives delete / appRefresh so search + filters don’t reset mid-cleanup. */
+const txListView = {
+  filter: '',
+  typeFilter: 'all',
+  categoryFilter: 'all',
+  sortKey: 'date',
+  sortDir: 'desc',
+  listLimit: 200,
+};
+
 const TYPE_LABELS = {
   expense: 'Expense',
   income: 'Income',
@@ -134,24 +144,35 @@ function envelopeRemainingShort(categoryId) {
 
 export function renderTransactions(container, arg) {
   // arg: string openMode ('expense'), or { categoryId, type/openMode, typeFilter }
-  let initialCategory = 'all';
-  let initialTypeFilter = 'all';
   if (typeof arg === 'string' && arg) {
     openMode = arg;
   } else if (arg && typeof arg === 'object') {
-    if (arg.categoryId) initialCategory = arg.categoryId;
-    if (arg.typeFilter) initialTypeFilter = arg.typeFilter;
+    if (arg.categoryId) {
+      txListView.categoryFilter = arg.categoryId;
+      txListView.filter = '';
+      txListView.typeFilter = 'all';
+    }
+    if (arg.typeFilter) txListView.typeFilter = arg.typeFilter;
     if (arg.type) openMode = arg.type;
     else if (arg.openMode) openMode = arg.openMode;
   }
 
   const state = store.getState();
-  let filter = '';
-  let typeFilter = initialTypeFilter;
-  let categoryFilter = initialCategory;
-  let sortKey = 'date';
-  let sortDir = 'desc';
-  let listLimit = 200;
+  let filter = txListView.filter;
+  let typeFilter = txListView.typeFilter;
+  let categoryFilter = txListView.categoryFilter;
+  let sortKey = txListView.sortKey;
+  let sortDir = txListView.sortDir;
+  let listLimit = txListView.listLimit;
+
+  function persistListView() {
+    txListView.filter = filter;
+    txListView.typeFilter = typeFilter;
+    txListView.categoryFilter = categoryFilter;
+    txListView.sortKey = sortKey;
+    txListView.sortDir = sortDir;
+    txListView.listLimit = listLimit;
+  }
 
   const filterCat = state.categories.find(c => c.id === categoryFilter);
   const filterBanner = filterCat
@@ -166,6 +187,7 @@ export function renderTransactions(container, arg) {
         style: 'margin-left:auto;align-self:center',
         onClick: () => {
           categoryFilter = 'all';
+          persistListView();
           const catEl = toolbar.querySelector('#tx-cat-filter');
           if (catEl) catEl.value = 'all';
           filterBanner.remove();
@@ -206,6 +228,7 @@ export function renderTransactions(container, arg) {
         style: 'margin-left:auto;align-self:center',
         onClick: () => {
           typeFilter = 'duplicates';
+          persistListView();
           const typeEl = toolbar.querySelector('#tx-type-filter');
           if (typeEl) typeEl.value = 'duplicates';
           renderList();
@@ -290,7 +313,12 @@ export function renderTransactions(container, arg) {
   }, 'Filters & sort');
 
   const toolbar = el('div', { className: 'toolbar tx-toolbar' },
-    el('input', { type: 'search', placeholder: 'Search by description or amount...', id: 'tx-search' }),
+    el('input', {
+      type: 'search',
+      placeholder: 'Search by description or amount...',
+      id: 'tx-search',
+      value: filter,
+    }),
     filtersToggle,
     filterFields,
   );
@@ -311,6 +339,7 @@ export function renderTransactions(container, arg) {
           sortKey = key;
           sortDir = key === 'date' || key === 'amount' ? 'desc' : 'asc';
         }
+        persistListView();
         sortSelect.value = sortOptionValue(sortKey, sortDir);
         renderList();
       },
@@ -358,6 +387,7 @@ export function renderTransactions(container, arg) {
           className: 'btn btn-sm btn-secondary',
           onClick: () => {
             listLimit += 200;
+            persistListView();
             renderList();
           },
         }, `Load 200 more`),
@@ -391,15 +421,25 @@ export function renderTransactions(container, arg) {
   let searchTimer = null;
   toolbar.querySelector('#tx-search').addEventListener('input', e => {
     filter = e.target.value;
+    persistListView();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => renderList(), 180);
   });
-  toolbar.querySelector('#tx-type-filter').addEventListener('change', e => { typeFilter = e.target.value; renderList(); });
-  toolbar.querySelector('#tx-cat-filter').addEventListener('change', e => { categoryFilter = e.target.value; renderList(); });
+  toolbar.querySelector('#tx-type-filter').addEventListener('change', e => {
+    typeFilter = e.target.value;
+    persistListView();
+    renderList();
+  });
+  toolbar.querySelector('#tx-cat-filter').addEventListener('change', e => {
+    categoryFilter = e.target.value;
+    persistListView();
+    renderList();
+  });
   sortSelect.addEventListener('change', e => {
     const [key, dir] = e.target.value.split(':');
     sortKey = key;
     sortDir = dir;
+    persistListView();
     renderList();
   });
 
@@ -1122,6 +1162,7 @@ function formatImportToast(stats) {
     }
     if (stats.debtMatches) parts.push(`${stats.debtMatches} debt payment${stats.debtMatches === 1 ? '' : 's'} linked`);
     if (stats.duplicates) parts.push(`${stats.duplicates} duplicates skipped`);
+    if (stats.droppedPending) parts.push(`${stats.droppedPending} vanished bank hold${stats.droppedPending === 1 ? '' : 's'} dropped`);
     if (stats.skipped) parts.push(`${stats.skipped} rows skipped`);
     const stillPending = store.getPendingTransactions().length;
     if (stillPending) parts.push(`${stillPending} still awaiting bank`);
@@ -1129,9 +1170,10 @@ function formatImportToast(stats) {
   }
   const parts = ['No new transactions imported'];
   if (stats.matchedPending) parts.push(`${stats.matchedPending} pending matched`);
+  if (stats.droppedPending) parts.push(`${stats.droppedPending} vanished bank hold${stats.droppedPending === 1 ? '' : 's'} dropped`);
   if (stats.duplicates) parts.push(`${stats.duplicates} already in your log`);
   if (stats.skipped) parts.push(`${stats.skipped} skipped (pending/cancelled or unparseable)`);
-  if (!stats.duplicates && !stats.skipped && !stats.matchedPending) {
+  if (!stats.duplicates && !stats.skipped && !stats.matchedPending && !stats.droppedPending) {
     parts.push('check that the file has posted transactions with amounts');
   }
   return parts.join(' · ');
@@ -1155,6 +1197,7 @@ const BANK_IMPORT_TIPS = {
       'PDF transaction history with selectable text also works (parsed only on this device).',
       'Running balances and “Page 1 of 3” chrome are ignored. Check the preview count vs your bank.',
       'After import, assign envelopes; use “Always use this envelope” for recurring merchants.',
+      'Walmart (and similar) auth holds that left USAA are dropped on re-import of that day’s activity — checking and envelopes go back.',
     ],
   },
   chase: {
@@ -1193,7 +1236,7 @@ function stashImportStats(stats) {
 export function finishImport(stats, modal) {
   stashImportStats(stats);
   modal?.close?.();
-  if (stats.count > 0 || stats.matchedPending > 0) {
+  if (stats.count > 0 || stats.matchedPending > 0 || stats.droppedPending > 0) {
     window.appRefresh?.();
     openImportSummary(stats);
   } else {
@@ -1206,11 +1249,11 @@ export async function importBankText(text, { includePending = true, showSummary 
   const rows = parseBankCsvText(text);
   const stats = !rows.length
     ? { count: 0, skipped: 0, duplicates: 0, parsed: 0, matchedPending: 0, ruleApplied: 0 }
-    : store.importTransactions(rows, { includePending });
+    : store.importTransactions(rows, { includePending, pruneMissingBankPending: includePending });
   if (!rows.length) stats.skipped = 0;
   stashImportStats(stats);
   if (showSummary) finishImport(stats, null);
-  else if (stats.count > 0 || stats.matchedPending > 0) window.appRefresh?.();
+  else if (stats.count > 0 || stats.matchedPending > 0 || stats.droppedPending > 0) window.appRefresh?.();
   return stats;
 }
 
@@ -1236,10 +1279,10 @@ export async function importBankFile(file, { includePending = true, showSummary 
     if (showSummary) showToast('No transactions found in that file — try paste from USAA mobile', 'info');
     return stats;
   }
-  const stats = store.importTransactions(rows, { includePending });
+  const stats = store.importTransactions(rows, { includePending, pruneMissingBankPending: includePending });
   stashImportStats(stats);
   if (showSummary) finishImport(stats, null);
-  else if (stats.count > 0 || stats.matchedPending > 0) window.appRefresh?.();
+  else if (stats.count > 0 || stats.matchedPending > 0 || stats.droppedPending > 0) window.appRefresh?.();
   return stats;
 }
 
@@ -1275,6 +1318,7 @@ function openImportSummary(stats) {
   const lines = [
     stats.count ? `${stats.count} new transaction${stats.count === 1 ? '' : 's'}` : null,
     stats.matchedPending ? `${stats.matchedPending} merged with existing` : null,
+    stats.droppedPending ? `${stats.droppedPending} vanished bank hold${stats.droppedPending === 1 ? '' : 's'} dropped` : null,
     stats.expense ? `${stats.expense} expenses` : null,
     stats.income ? `${stats.income} income` : null,
     stats.categorized ? `${stats.categorized} auto-categorized` : null,
@@ -1558,6 +1602,7 @@ export function openImportDialog() {
               }
               const stats = store.importTransactions(rows, {
                 includePending: includePendingIn.checked,
+                pruneMissingBankPending: includePendingIn.checked,
               });
               finishImport(stats, modal);
               return;
@@ -1580,6 +1625,7 @@ export function openImportDialog() {
               }
               const stats = store.importTransactions(objects, {
                 includePending: includePendingIn.checked,
+                pruneMissingBankPending: includePendingIn.checked,
               });
               finishImport(stats, modal);
               return;
@@ -1593,6 +1639,7 @@ export function openImportDialog() {
             }
             const stats = store.importTransactions(rows, {
               includePending: includePendingIn.checked,
+              pruneMissingBankPending: includePendingIn.checked,
             });
             finishImport(stats, modal);
           } catch (err) {

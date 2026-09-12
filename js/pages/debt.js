@@ -411,47 +411,63 @@ function debtCard(debt, isTarget, opts = {}) {
 }
 
 function openDebtActivity(debt) {
-  const txs = store.getDebtTransactions(debt.id);
-  const paidMonth = store.getDebtPaidThisMonth(debt.id);
-  const months = store.estimateMonthsToDebtFree();
-  const paused = !!debt.paused;
-  const list = el('div', { className: 'envelope-activity-list' });
+  const bodyHost = el('div', {});
   let modal;
 
-  if (!txs.length) {
-    list.appendChild(emptyState(
-      '❄️',
-      'No payments logged',
-      'Record a payment to build history for this debt.',
-    ));
-  } else {
-    txs.forEach(t => {
-      list.appendChild(el('div', { className: 'envelope-activity-row' },
-        el('div', { className: 'envelope-activity-main' },
-          el('div', { className: 'envelope-activity-top' },
-            el('strong', {}, formatDate(t.date)),
-            el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
-          ),
-          el('div', { className: 'envelope-activity-desc' }, t.description || 'Payment'),
-        ),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => { modal?.close(); openTransactionForm({ transaction: t }); },
-        }, 'Edit'),
+  function paint() {
+    const live = store.getState().debts.find(d => d.id === debt.id)
+      || store.getState().archivedDebts?.find(d => d.id === debt.id)
+      || debt;
+    const txs = store.getDebtTransactions(live.id);
+    const paidMonth = store.getDebtPaidThisMonth(live.id);
+    const months = store.estimateMonthsToDebtFree();
+    const list = el('div', { className: 'envelope-activity-list' });
+    if (!txs.length) {
+      list.appendChild(emptyState(
+        '❄️',
+        'No payments logged',
+        'Record a payment to build history for this debt.',
       ));
-    });
+    } else {
+      txs.forEach(t => {
+        list.appendChild(el('div', { className: 'envelope-activity-row' },
+          el('div', { className: 'envelope-activity-main' },
+            el('div', { className: 'envelope-activity-top' },
+              el('strong', {}, formatDate(t.date)),
+              el('span', { className: 'envelope-activity-amt' }, formatCurrency(t.amount)),
+            ),
+            el('div', { className: 'envelope-activity-desc' }, t.description || 'Payment'),
+          ),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-secondary',
+            onClick: () => {
+              openTransactionForm({
+                transaction: t,
+                onSaved: () => {
+                  paint();
+                  window.appSoftRefresh?.();
+                },
+              });
+            },
+          }, 'Edit'),
+        ));
+      });
+    }
+    bodyHost.innerHTML = '';
+    bodyHost.appendChild(el('p', { className: 'envelope-activity-summary' },
+      `Balance ${formatCurrency(live.balance)} · Paid ${formatCurrency(paidMonth)} this month`,
+      months ? ` · ~${months} mo to debt-free (plan)` : '',
+    ));
+    bodyHost.appendChild(list);
+    modal?.setTitle?.(`❄️ ${live.name}`);
   }
+
+  paint();
 
   modal = showModal({
     title: `❄️ ${debt.name}`,
-    body: el('div', {},
-      el('p', { className: 'envelope-activity-summary' },
-        `Balance ${formatCurrency(debt.balance)} · Paid ${formatCurrency(paidMonth)} this month`,
-        months ? ` · ~${months} mo to debt-free (plan)` : '',
-      ),
-      list,
-    ),
+    body: bodyHost,
     footer: [
       el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => modal.close() }, 'Close'),
       el('button', {
@@ -459,7 +475,7 @@ function openDebtActivity(debt) {
         className: 'btn btn-secondary',
         onClick: () => { modal.close(); openDebtForm(debt); },
       }, 'Edit'),
-      paused
+      debt.paused
         ? null
         : el('button', {
           type: 'button',

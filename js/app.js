@@ -414,7 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20260909b';
+const APP_BUILD = '20260912';
 
 installFigPigApi();
 

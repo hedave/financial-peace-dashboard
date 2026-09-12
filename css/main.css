@@ -3258,6 +3258,18 @@ html[data-reduce-motion="true"] .sticky-note {
   width: 100%;
 }
 
+.income-table .income-amount-input {
+  max-width: 9rem;
+}
+
+.income-card .form-group {
+  margin-bottom: 0.5rem;
+}
+
+.income-card .input-row {
+  margin-bottom: 0.35rem;
+}
+
 .income-total-row {
   margin-top: 1rem;
   padding-top: 1rem;
@@ -3546,6 +3558,10 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .pay-date-label { flex: 1; font-weight: 600; font-size: 0.9rem; }
 .pay-date-amt { color: var(--text-muted); font-size: 0.85rem; }
+.pay-date-amt-input {
+  width: 7rem;
+  text-align: right;
+}
 
 .pay-add-date {
   padding-top: 0.75rem;

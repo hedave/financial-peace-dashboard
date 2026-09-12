@@ -28,6 +28,7 @@ import {
   getUpcomingChecks,
   getChecksForYear,
   getDefaultPerCheckAmount,
+  getChecksPerMonthFromRecurring,
   matchCheckToTransaction,
   resolveCheckStatus,
   resolveIncomeSource,
@@ -766,6 +767,41 @@ class Store {
   syncSourceAmountFromSchedule(source, month = getCurrentMonth()) {
     if (!source || isBonusIncomeSource(source)) return;
     source.amount = sumSourceIncomeForMonth(source, month);
+  }
+
+  /** Set expected income this month. Splits across this month's pay dates (or the recurring pattern). */
+  setIncomeSourceMonthlyAmount(sourceId, monthlyAmount) {
+    const monthly = Math.max(0, Number(monthlyAmount) || 0);
+    this.update(s => {
+      const src = s.incomeSources.find(i => i.id === sourceId);
+      if (!src || isBonusIncomeSource(src)) return;
+      const sched = normalizePaySchedule(src.paySchedule);
+      const month = getCurrentMonth();
+      const monthChecks = sched.checks.filter(c => c.date.startsWith(month));
+      const n = monthChecks.length
+        || getChecksPerMonthFromRecurring(sched.recurring)
+        || 1;
+      const per = n > 0 ? monthly / n : monthly;
+      sched.perCheckAmount = per > 0 ? per : null;
+      monthChecks.forEach(c => { c.amount = per > 0 ? per : null; });
+      src.paySchedule = sched;
+      src.amount = monthly;
+    });
+  }
+
+  setPayCheckAmount(sourceId, date, amount) {
+    const iso = String(date).slice(0, 10);
+    const raw = amount === '' || amount == null ? null : Number(amount);
+    this.update(s => {
+      const src = s.incomeSources.find(i => i.id === sourceId);
+      if (!src) return;
+      const sched = normalizePaySchedule(src.paySchedule);
+      const check = sched.checks.find(c => c.date === iso);
+      if (!check) return;
+      check.amount = Number.isFinite(raw) && raw > 0 ? raw : null;
+      src.paySchedule = sched;
+      this.syncSourceAmountFromSchedule(src);
+    });
   }
 
   getBonusIncomeSource() {
@@ -3982,15 +4018,64 @@ class Store {
     return n;
   }
 
-  importTransactions(rows, { includePending = true, persist = true } = {}) {
+  /**
+   * Walmart-style auth holds: bankPending rows on a day this file covers, but
+   * missing from the file, left the bank. Reverse checking and delete them.
+   * Only call after this import's rows have been applied (posted twins merge first).
+   * CoS ingest must not use this — those batches are not a full day snapshot.
+   */
+  pruneVanishedBankPending(state, imported, stats) {
+    const dates = new Set(
+      (imported || []).map(t => String(t.date || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)),
+    );
+    if (!dates.size) return 0;
+    let n = 0;
+    const keep = [];
+    (state.transactions || []).forEach(tx => {
+      const day = String(tx.date || '').slice(0, 10);
+      if (!tx.bankPending || !dates.has(day)) {
+        keep.push(tx);
+        return;
+      }
+      const stillAtBank = (imported || []).some((row) => {
+        const candidate = {
+          date: row.date,
+          amount: row.amount,
+          type: row.type,
+          description: row.description,
+        };
+        if (isImportDuplicateTransaction([tx], candidate)) return true;
+        return !!findBestPendingMatch([tx], candidate);
+      });
+      if (stillAtBank) {
+        keep.push(tx);
+        return;
+      }
+      const status = tx.clearingStatus === 'pending' ? 'pending' : 'cleared';
+      this.applyCheckingDelta(state, -this.getCheckingDelta(tx.type, tx.amount, status));
+      if (tx.type === 'debt_payment' && tx.debtId) {
+        this.adjustDebtForPayment(state, tx.debtId, -Math.abs(Number(tx.amount) || 0));
+      }
+      this.reverseEarmarkCarry(state, tx, -1);
+      n++;
+    });
+    if (n) {
+      state.transactions = keep;
+      stats.droppedPending = (Number(stats.droppedPending) || 0) + n;
+    }
+    return n;
+  }
+
+  importTransactions(rows, { includePending = true, persist = true, pruneMissingBankPending = false } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
-      matchedPending: 0, parsed: rows.length,
+      matchedPending: 0, droppedPending: 0, parsed: rows.length,
       expenseAmount: 0, incomeAmount: 0,
       incomeIdsForReturnMatch: [],
     };
     const autoPaidBillIds = new Set();
+    const imported = [];
     this.update(s => {
       rows.forEach(row => {
         const tx = normalizeImportRow(row, { includePending });
@@ -3998,6 +4083,7 @@ class Store {
           stats.skipped++;
           return;
         }
+        imported.push(tx);
 
         const candidate = {
           date: tx.date,
@@ -4234,6 +4320,9 @@ class Store {
         }
         stats.count++;
       });
+      if (pruneMissingBankPending && includePending) {
+        this.pruneVanishedBankPending(s, imported, stats);
+      }
     }, persist === false ? { persist: false } : {});
     return stats;
   }

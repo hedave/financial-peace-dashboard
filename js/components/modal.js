@@ -86,11 +86,16 @@ function syncModalCountFromDom() {
  */
 function afterModalStackChange() {
   const n = syncModalCountFromDom();
+  if (stackRefreshTimer) {
+    clearTimeout(stackRefreshTimer);
+    stackRefreshTimer = null;
+  }
   if (n > 0) {
     window.appSoftRefresh?.();
     return;
   }
-  if (stackRefreshTimer) clearTimeout(stackRefreshTimer);
+  // Last sheet closed: refresh the page behind. Nested sheets (review, envelope
+  // activity, confirm) must not rebuild while a parent is still open.
   stackRefreshTimer = setTimeout(() => {
     stackRefreshTimer = null;
     if (getOpenModalCount() !== 0) return;

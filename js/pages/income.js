@@ -22,13 +22,13 @@ export function renderIncome(container) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Income & Balances'),
-    el('p', {}, 'Set pay dates on your calendar — amounts update automatically when income deposits import from CSV')
+    el('p', {}, 'Name the source, type the expected amount, and set pay dates. CSV deposits fill the real check when they import.')
   ));
 
   container.appendChild(el('div', { className: 'section' },
     el('div', { className: 'section-title' }, 'Planned Income Sources'),
     el('p', { className: 'section-hint' },
-      'Name your pay sources and set bank match terms under Edit dates (e.g. “DFAS”, employer name). Imports also match by paycheck amount + pay date. Only truly unmatched deposits go to Bonus Income — so a regular check should not count twice.',
+      'Type expected take-home in This Month. Set bank match terms under Edit dates (e.g. “DFAS”, employer name). Imports also match by paycheck amount + pay date. Unmatched deposits go to Bonus Income.',
     ),
     el('div', { className: 'card' },
       el('div', { className: 'table-wrap income-desktop-list' },
@@ -157,10 +157,28 @@ const TYPE_LABELS = {
   other: 'Other',
 };
 
+function expectedAmountInput(src) {
+  const monthTotal = store.getSourceIncomeForMonth(src, getCurrentMonth());
+  const shown = monthTotal > 0 ? monthTotal : (Number(src.amount) || '');
+  const input = el('input', {
+    type: 'number',
+    step: '0.01',
+    min: '0',
+    className: 'income-amount-input',
+    value: shown === '' ? '' : shown,
+    placeholder: '0.00',
+    inputMode: 'decimal',
+  });
+  input.addEventListener('change', () => {
+    store.setIncomeSourceMonthlyAmount(src.id, input.value);
+    window.appRefresh();
+  });
+  return input;
+}
+
 function incomeRow(src, state) {
   const month = getCurrentMonth();
   const checks = getScheduledChecksForMonth(src, month);
-  const monthTotal = store.getSourceIncomeForMonth(src, month);
   const nameInput = el('input', { type: 'text', value: src.name });
   nameInput.addEventListener('change', () => store.update(s => {
     const i = s.incomeSources.find(x => x.id === src.id);
@@ -181,12 +199,12 @@ function incomeRow(src, state) {
     el('td', {}, nameInput),
     el('td', {}, typeSelect),
     el('td', {},
-      el('span', { style: 'font-weight:600' }, formatCurrency(monthTotal)),
+      expectedAmountInput(src),
       checks.length
         ? el('div', { className: 'schedule-summary' },
           `${checks.length} check${checks.length === 1 ? '' : 's'} on calendar`
         )
-        : el('div', { className: 'schedule-summary' }, 'Set pay dates to calculate'),
+        : el('div', { className: 'schedule-summary' }, 'Type the amount you expect this month'),
     ),
     el('td', {},
       el('button', {
@@ -219,21 +237,33 @@ function confirmDeleteIncomeSource(src) {
 function incomeCard(src, state) {
   const month = getCurrentMonth();
   const checks = getScheduledChecksForMonth(src, month);
-  const monthTotal = store.getSourceIncomeForMonth(src, month);
+
+  const nameInput = el('input', { type: 'text', value: src.name || '' });
+  nameInput.addEventListener('change', () => store.update(s => {
+    const i = s.incomeSources.find(x => x.id === src.id);
+    if (i) i.name = nameInput.value;
+  }));
+
+  const typeSelect = el('select');
+  Object.entries(TYPE_LABELS).forEach(([t, label]) => {
+    typeSelect.appendChild(el('option', { value: t }, label));
+  });
+  typeSelect.value = src.type;
+  typeSelect.addEventListener('change', () => store.update(s => {
+    const i = s.incomeSources.find(x => x.id === src.id);
+    if (i) i.type = typeSelect.value;
+  }));
 
   return el('article', { className: 'tx-card income-card' },
-    el('div', { className: 'tx-card-top' },
-      el('span', { className: 'tx-card-desc' }, src.name || 'Income source'),
-      el('span', { className: 'tx-card-amount' }, formatCurrency(monthTotal))
+    el('div', { className: 'form-group' }, el('label', {}, 'Source'), nameInput),
+    el('div', { className: 'input-row' },
+      el('div', { className: 'form-group' }, el('label', {}, 'Type'), typeSelect),
+      el('div', { className: 'form-group' }, el('label', {}, 'This month'), expectedAmountInput(src)),
     ),
-    el('div', { className: 'tx-card-body' },
-      el('div', { className: 'tx-card-meta' },
-        TYPE_LABELS[src.type] || src.type || 'Other',
-        checks.length
-          ? ` · ${checks.length} check${checks.length === 1 ? '' : 's'} this month`
-          : ' · Set pay dates',
-      ),
-      el('div', { className: 'tx-card-meta' }, scheduleSummary(src)),
+    el('div', { className: 'tx-card-meta' },
+      checks.length
+        ? `${checks.length} check${checks.length === 1 ? '' : 's'} this month · ${scheduleSummary(src)}`
+        : scheduleSummary(src),
     ),
     el('div', { className: 'tx-card-actions' },
       el('button', {

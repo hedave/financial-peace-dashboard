@@ -10,6 +10,14 @@ function duplicateGroupDateLabel(items) {
   return `${formatDate(dates[0])} – ${formatDate(dates[dates.length - 1])}`;
 }
 
+function duplicateGroupAmountLabel(items) {
+  const cents = [...new Set((items || []).map(t => Math.round(Math.abs(Number(t.amount) || 0) * 100)))]
+    .filter(n => n > 0)
+    .sort((a, b) => a - b);
+  if (!cents.length) return formatCurrency(items?.[0]?.amount || 0);
+  return cents.map(c => formatCurrency(c / 100)).join(' / ');
+}
+
 const TX_TYPE_LABELS = {
   expense: 'Expense',
   income: 'Income',
@@ -35,11 +43,11 @@ function confirmDeleteTransaction(t, { onDone, label = 'this transaction' } = {}
           const u = store.undoLastAction();
           if (u.ok) {
             showToast('Transaction restored', 'success');
-            window.appRefresh();
+            onDone?.();
+            window.appSoftRefresh?.();
           }
         });
         onDone?.();
-        window.appRefresh();
       }
     },
   );
@@ -103,7 +111,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
     const items = store.getPendingTransactions();
     list.innerHTML = '';
     if (!items.length) {
-      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'All caught up — nothing awaiting the bank.'));
+      list.appendChild(el('p', { className: 'review-empty-msg' }, 'All caught up — nothing awaiting the bank. Click Close when you’re finished.'));
       return;
     }
     items.forEach(t => {
@@ -124,7 +132,6 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
               showToast('Marked cleared — checking updated', 'success');
               paint();
               window.appSoftRefresh?.();
-              if (!store.getPendingTransactions().length) modal?.close();
             },
           }, 'Mark cleared'),
           el('button', {
@@ -135,7 +142,6 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
               onDone: () => {
                 paint();
                 window.appSoftRefresh?.();
-                if (!store.getPendingTransactions().length) modal?.close();
               },
             }),
           }, 'Delete'),
@@ -228,7 +234,7 @@ export function openDuplicateReview() {
           el('span', { className: 'duplicate-review-group-index' }, `${groupIndex + 1}/${groups.length}`),
           el('strong', {}, duplicateGroupDateLabel(items)),
           ' · ',
-          formatCurrency(items[0].amount),
+          duplicateGroupAmountLabel(items),
           el('span', { className: 'duplicate-review-count' }, `${items.length} entries`),
         ),
         el('button', {
@@ -494,7 +500,7 @@ export function openUncategorizedReview() {
     envelopePicker.refresh();
     list.innerHTML = '';
     if (!txs.length) {
-      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'Nothing left to categorize.'));
+      list.appendChild(el('p', { className: 'review-empty-msg' }, 'Nothing left to categorize. Click Close when you’re finished.'));
       updateRemainingHint();
       return;
     }
@@ -526,7 +532,6 @@ export function openUncategorizedReview() {
                   onSaved: () => {
                     paint();
                     window.appSoftRefresh?.();
-                    if (!store.getReviewInbox().uncategorized.length) modal?.close();
                   },
                 });
               });
@@ -539,7 +544,6 @@ export function openUncategorizedReview() {
               onDone: () => {
                 paint();
                 window.appSoftRefresh?.();
-                if (!store.getReviewInbox().uncategorized.length) modal?.close();
               },
             }),
           }, 'Delete'),
@@ -572,7 +576,6 @@ export function openUncategorizedReview() {
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
           paint();
           window.appSoftRefresh?.();
-          if (!store.getReviewInbox().uncategorized.length) modal?.close();
         },
       }, 'Apply saved rules'),
       list,
@@ -614,7 +617,6 @@ export function openUncategorizedReview() {
               showToast('Deleted selected');
               paint();
               window.appSoftRefresh?.();
-              if (!store.getReviewInbox().uncategorized.length) modal.close();
             },
           );
         },
@@ -656,7 +658,6 @@ export function openUncategorizedReview() {
           );
           paint();
           window.appSoftRefresh?.();
-          if (!store.getReviewInbox().uncategorized.length) modal.close();
         },
       }, 'Assign Selected'),
     ],
@@ -678,7 +679,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
     const next = store.getReviewInbox().billMatches;
     list.innerHTML = '';
     if (!next.length) {
-      list.appendChild(el('p', { style: 'color:var(--text-muted)' }, 'No bill matches left.'));
+      list.appendChild(el('p', { className: 'review-empty-msg' }, 'No bill matches left. Click Close when you’re finished.'));
       return;
     }
     next.forEach(({ transaction: t, bill }) => {
@@ -714,7 +715,6 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
               showToast(`Linked to ${bill.name}`);
               paint();
               window.appSoftRefresh?.();
-              if (!store.getReviewInbox().billMatches.length) modal?.close();
             },
           }, 'Link'),
           el('button', {
@@ -726,7 +726,6 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
               showToast('Dismissed — payment and checking unchanged');
               paint();
               window.appSoftRefresh?.();
-              if (!store.getReviewInbox().billMatches.length) modal?.close();
             },
           }, 'Dismiss'),
           el('button', {
@@ -737,7 +736,6 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
               onDone: () => {
                 paint();
                 window.appSoftRefresh?.();
-                if (!store.getReviewInbox().billMatches.length) modal?.close();
               },
             }),
           }, 'Delete'),
