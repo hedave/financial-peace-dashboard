@@ -915,7 +915,40 @@ console.log('bill match dismiss: Work travel skipped; dismiss keeps the row');
   if (!store.state.transactions.some(t => /walmart/i.test(t.description) && t.bankPending)) {
     fail('hold on a day not in this file must stay');
   }
-  console.log('vanished Walmart auth hold: dropped on same-day re-import; ingest/other-day kept');
+
+  resetBooks(0);
+  store.importTransactions(wmHold, { includePending: true, pruneMissingBankPending: true });
+  stats = store.importTransactions(parseBankCsvText(usaaCsv([
+    { date: '09/10/2026', description: 'Aldi', amount: -21.28, status: 'Posted' },
+  ])), { includePending: true, pruneMissingBankPending: true });
+  if (stats.droppedPending) fail('one-row same-day paste must not drop holds', stats);
+  if (!store.state.transactions.some(t => /walmart/i.test(t.description) && t.bankPending)) {
+    fail('fragment paste must keep the walmart hold');
+  }
+  if (cents(store.state.balances.checking) !== -832 - 2128) {
+    fail('fragment paste must not reverse the hold', store.state.balances.checking);
+  }
+  console.log('vanished Walmart auth hold: dropped on same-day re-import; ingest/other-day/fragment kept');
+}
+
+{
+  store.state._cloudUpdatedAt = 1000;
+  delete store.state._localDirtyAt;
+  store.save();
+  if (!(Number(store.state._localDirtyAt) > 1000)) {
+    fail('save must stamp local dirty after last cloud write', store.state._localDirtyAt);
+  }
+  const { localBudgetClock, shouldApplyRemoteBudget } = await import('../js/store.js');
+  if (shouldApplyRemoteBudget(store.state, 1000)) {
+    fail('equal-or-older remote must not replace dirty local');
+  }
+  if (localBudgetClock(store.state) < Number(store.state._localDirtyAt)) {
+    fail('local clock must include dirty time');
+  }
+  if (!shouldApplyRemoteBudget({ _cloudUpdatedAt: 1000 }, 2000)) {
+    fail('newer remote should apply when local is not dirty');
+  }
+  console.log('cloud dirty clock: save stamps local; older remote does not win');
 }
 
 console.log('all import-reconcile checks passed');
