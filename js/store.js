@@ -482,6 +482,7 @@ class Store {
         ...remote.state,
         _cloudUpdatedAt: remoteTime,
       });
+      delete this.state._localDirtyAt;
       if (keepLocalNotes) {
         this.state.noteBoards = keep.noteBoards;
         this.state.notes = keep.notes;
@@ -499,7 +500,7 @@ class Store {
     if (localRaw) {
       try {
         const local = JSON.parse(localRaw);
-        const localTime = Number(local._cloudUpdatedAt) || 0;
+        const localTime = localBudgetClock(local);
         const localIsBlank = isBlankBudgetState(local);
         const remoteIsBlank = isBlankBudgetState(remote.state);
         if (localIsBlank && !remoteIsBlank) useRemote = true;
@@ -512,6 +513,7 @@ class Store {
 
     if (useRemote) {
       const merged = { ...remote.state, _cloudUpdatedAt: remoteTime };
+      delete merged._localDirtyAt;
       this.state = normalizeState({ ...createDefaultState(), ...merged });
       this.processMonthRollover();
       this.writeLocal();
@@ -526,7 +528,7 @@ class Store {
     const remote = await loadRemoteState();
     if (!force && remote?.updated_at) {
       const remoteTime = new Date(remote.updated_at).getTime();
-      const localTime = Number(this.state._cloudUpdatedAt) || 0;
+      const localTime = localBudgetClock(this.state);
       // CoS / ingest may have written cloud while this tab was open.
       if (Number.isFinite(remoteTime) && remoteTime > localTime + 1000) {
         await this.pullFromCloud();
@@ -543,6 +545,7 @@ class Store {
     const ok = await pushState(payload);
     if (ok) {
       this.state._cloudUpdatedAt = Date.now();
+      delete this.state._localDirtyAt;
       this.writeLocal();
     }
     return ok;
@@ -550,6 +553,7 @@ class Store {
 
   save() {
     try {
+      this.state._localDirtyAt = Date.now();
       this.writeLocal();
     } catch (e) {
       console.error('Failed to write to localStorage', e);
@@ -4019,21 +4023,39 @@ class Store {
   }
 
   /**
+   * True when this import looks like the rest of calendar day `day`, not a
+   * one-row fragment. All already-logged settled rows that day must be in the
+   * file, and the file needs at least two rows that day (or every settled row
+   * when that set is larger).
+   */
+  dayCoveredByImport(state, imported, day) {
+    const onDay = (imported || []).filter(r => String(r.date || '').slice(0, 10) === day);
+    if (!onDay.length) return false;
+    const settled = (state.transactions || []).filter(t =>
+      String(t.date || '').slice(0, 10) === day && !t.bankPending,
+    );
+    const allSettledPresent = settled.every(t => onDay.some(row => isImportDuplicateTransaction([t], {
+      date: row.date,
+      amount: row.amount,
+      type: row.type,
+      description: row.description,
+    })));
+    if (!allSettledPresent) return false;
+    return onDay.length >= Math.max(2, settled.length);
+  }
+
+  /**
    * Walmart-style auth holds: bankPending rows on a day this file covers, but
    * missing from the file, left the bank. Reverse checking and delete them.
    * Only call after this import's rows have been applied (posted twins merge first).
    * CoS ingest must not use this — those batches are not a full day snapshot.
    */
   pruneVanishedBankPending(state, imported, stats) {
-    const dates = new Set(
-      (imported || []).map(t => String(t.date || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)),
-    );
-    if (!dates.size) return 0;
     let n = 0;
     const keep = [];
     (state.transactions || []).forEach(tx => {
       const day = String(tx.date || '').slice(0, 10);
-      if (!tx.bankPending || !dates.has(day)) {
+      if (!tx.bankPending || !this.dayCoveredByImport(state, imported, day)) {
         keep.push(tx);
         return;
       }
@@ -4364,6 +4386,14 @@ function daysUntil(dateStr) {
   const today = new Date(todayISO() + 'T12:00:00');
   const target = new Date(dateStr + 'T12:00:00');
   return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+}
+
+export function localBudgetClock(state) {
+  return Math.max(Number(state?._cloudUpdatedAt) || 0, Number(state?._localDirtyAt) || 0);
+}
+
+export function shouldApplyRemoteBudget(local, remoteTime) {
+  return (Number(remoteTime) || 0) >= localBudgetClock(local);
 }
 
 export const store = new Store();
