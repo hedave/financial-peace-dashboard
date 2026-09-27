@@ -43,14 +43,27 @@ const GENERIC_NAME_WORDS = new Set([
   'card', 'bill', 'payment', 'bank', 'credit', 'loan', 'auto', 'account',
 ]);
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Whole token, or a prefix of a token when the word is long enough that "citi" can match CITICARD. */
+function hasToken(desc, word) {
+  const body = escapeRegExp(word);
+  if (!body) return false;
+  const whole = new RegExp(`(?:^|[^a-z0-9])${body}(?![a-z0-9])`, 'i');
+  if (whole.test(desc)) return true;
+  if (word.length < 4) return false;
+  return new RegExp(`(?:^|[^a-z0-9])${body}`, 'i').test(desc);
+}
+
 export function nameInDescription(entityName, description) {
   const name = String(entityName || '').toLowerCase().trim();
   const desc = String(description || '').toLowerCase();
   if (!name || !desc) return false;
-  if (desc.includes(name)) return true;
-  // 3+ chars so "Citi" matches CITICARD / CITI CARD PAYMENT
+  if (hasToken(desc, name)) return true;
   const words = name.split(/\s+/).filter(w => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
-  return words.some(w => desc.includes(w));
+  return words.some(w => hasToken(desc, w));
 }
 
 function billNameInDescription(billName, description) {
@@ -127,8 +140,18 @@ export function findAutoPayBillForTransaction(tx, bills = []) {
     return sorted[0];
   };
 
-  // Unique auto-pay merchant (Citi statement pay often ≠ planned bill amount)
-  if (named.length === 1) return named[0];
+  // Unique auto-pay merchant. A short name must also be close in amount,
+  // so "Car" does not roll a $200 bill on a $5 card charge.
+  // Longer names still match when the payment differs from the plan (Citi).
+  if (named.length === 1) {
+    const bill = named[0];
+    const shortName = String(bill.name || '').trim().length < 4;
+    if (!shortName) return bill;
+    if (amountsMatch(bill.amount, amt) || amountsClose(bill.amount, amt, {
+      abs: AUTOPAY_CLOSE_ABS,
+      pct: AUTOPAY_CLOSE_PCT,
+    })) return bill;
+  }
   if (amountOk.length) return pickClosest(amountOk);
   return null;
 }

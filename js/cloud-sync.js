@@ -195,6 +195,15 @@ function notesSlice(state) {
   };
 }
 
+/** Document uploaded to Supabase. The app password stays on this device. */
+export function stateForCloud(state) {
+  if (!state || typeof state !== 'object') return state;
+  const settings = state.settings && typeof state.settings === 'object'
+    ? { ...state.settings, passwordHash: null }
+    : state.settings;
+  return { ...state, settings };
+}
+
 export async function loadRemoteState() {
   const sb = await getClient();
   const session = await getSession();
@@ -225,9 +234,28 @@ export async function pushState(state) {
   if (!ownerId) return false;
 
   syncStatus = 'syncing';
-  let payload = { ...state };
+  let payload = stateForCloud(state);
 
   if (household.role === 'notes') {
+    const noteArgs = {
+      p_notes: state?.notes || '',
+      p_notes_updated_at: state?.notesUpdatedAt || null,
+      p_note_boards: Array.isArray(state?.noteBoards) ? state.noteBoards : [],
+    };
+    const rpc = await sb.rpc('update_household_notes', noteArgs);
+    const missingRpc = rpc.error && (
+      rpc.error.code === 'PGRST202'
+      || /update_household_notes|does not exist|42883/i.test(rpc.error.message || '')
+    );
+    if (!rpc.error) {
+      lastSyncedAt = new Date();
+      syncStatus = 'ok';
+      return true;
+    }
+    if (!missingRpc) {
+      syncStatus = 'error';
+      throw rpc.error;
+    }
     const { data, error: readErr } = await sb
       .from('budget_states')
       .select('state, updated_at')
@@ -238,17 +266,29 @@ export async function pushState(state) {
       throw readErr;
     }
     const remote = data?.state && typeof data.state === 'object' ? data.state : {};
-    payload = { ...remote, ...notesSlice(state) };
+    payload = stateForCloud({ ...remote, ...notesSlice(state) });
+    const stamp = new Date().toISOString();
+    const upd = await sb.from('budget_states')
+      .update({ state: payload, updated_at: stamp })
+      .eq('user_id', ownerId)
+      .eq('updated_at', data?.updated_at || '')
+      .select('user_id');
+    if (upd.error) {
+      syncStatus = 'error';
+      throw upd.error;
+    }
+    if (!upd.data || !upd.data.length) {
+      syncStatus = 'error';
+      return false;
+    }
+    lastSyncedAt = new Date();
+    syncStatus = 'ok';
+    return true;
   }
 
   const stamp = new Date().toISOString();
   let error;
-  if (household.role === 'notes') {
-    const upd = await sb.from('budget_states')
-      .update({ state: payload, updated_at: stamp })
-      .eq('user_id', ownerId);
-    error = upd.error;
-  } else {
+  {
     const row = { user_id: ownerId, state: payload, updated_at: stamp };
     const up = await sb.from('budget_states').upsert(row, { onConflict: 'user_id' });
     error = up.error;

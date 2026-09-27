@@ -38,10 +38,9 @@ function settingsAcc(id, title, ...bodyChildren) {
   return det;
 }
 
-export async function renderSettings(container) {
+export function renderSettings(container) {
   const state = store.getState();
   const cloudOn = isCloudConfigured();
-  const cloudEmail = cloudOn ? await getUserEmail() : null;
   const syncInfo = getSyncStatus();
 
   container.innerHTML = '';
@@ -138,7 +137,7 @@ export async function renderSettings(container) {
 
   container.appendChild(settingsAcc('security', 'Security',
     el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem' },
-      'Optional app lock on this device. Not bank-grade encryption — use cloud sign-in for real multi-device privacy.',
+      'Optional app lock on this device. It stays in this browser and is not uploaded. It is not bank-grade encryption.',
     ),
     el('div', { className: 'form-group' },
       el('label', { for: 'pw-input' }, state.settings.passwordHash ? 'New password' : 'Set password'),
@@ -151,8 +150,10 @@ export async function renderSettings(container) {
     el('button', {
       className: 'btn btn-primary btn-sm',
       onClick: async () => {
-        const pw = document.getElementById('pw-input').value;
-        const conf = document.getElementById('pw-confirm').value;
+        const pwEl = document.getElementById('pw-input');
+        const confEl = document.getElementById('pw-confirm');
+        const pw = pwEl ? pwEl.value : '';
+        const conf = confEl ? confEl.value : '';
         if (!pw) {
           showToast('Enter a password', 'info');
           return;
@@ -167,10 +168,7 @@ export async function renderSettings(container) {
         }
         const hash = await hashPassword(pw);
         store.update(s => { s.settings.passwordHash = hash; });
-        document.getElementById('pw-input').value = '';
-        document.getElementById('pw-confirm').value = '';
         showToast('Password set!');
-        window.appRefresh();
       },
     }, 'Save Password'),
     state.settings.passwordHash ? el('button', {
@@ -189,20 +187,15 @@ export async function renderSettings(container) {
     }, 'Remove Password') : null,
   ));
 
+  const emailLine = el('p', {
+    style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+  }, cloudOn ? 'Checking sign-in…' : 'Cloud sync is off.');
+  const shareHost = el('div', {});
+
   container.appendChild(settingsAcc('cloud', 'Cloud Sync',
     cloudOn
       ? el('div', {},
-        cloudEmail
-          ? el('p', { style: 'font-size:0.85rem;margin-bottom:0.75rem' },
-            `Signed in as ${cloudEmail}`,
-            syncInfo.lastSyncedAt
-              ? el('span', { style: 'display:block;color:var(--text-muted);font-size:0.8rem;margin-top:0.25rem' },
-                `Last synced: ${syncInfo.lastSyncedAt.toLocaleString()}`)
-              : null,
-          )
-          : el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem' },
-            'Not signed in — reload the app to sign in and sync across devices.',
-          ),
+        emailLine,
         el('div', { className: 'btn-group' },
           el('button', {
             className: 'btn btn-secondary btn-sm',
@@ -220,15 +213,19 @@ export async function renderSettings(container) {
             className: 'btn btn-secondary btn-sm',
             onClick: async () => {
               try {
-                await store.pushToCloud({ force: true });
-                showToast('Synced to cloud!');
+                const result = await store.pushToCloud();
+                showToast(result === 'pulled'
+                  ? 'This device updated from the newer cloud copy'
+                  : result === 'pushed'
+                    ? 'Synced to cloud!'
+                    : 'Nothing uploaded');
                 window.appRefresh();
               } catch (e) {
                 showToast(e.message || 'Sync failed', 'info');
               }
             },
           }, 'Sync Now'),
-          cloudEmail ? el('button', {
+          cloudOn ? el('button', {
             className: 'btn btn-secondary btn-sm',
             onClick: async () => {
               await signOut();
@@ -242,12 +239,32 @@ export async function renderSettings(container) {
             ? 'You are on a notes-only login. Stickies sync to the household. Money edits stay on the main account.'
             : 'Your login owns the budget. Create a notes-only code so your spouse can add stickies on her own account without changing transactions.',
         ),
-        await householdSharePanel(cloudEmail),
+        shareHost,
       )
       : el('p', { style: 'font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
         'Cloud sync is not configured on this deploy. See DEPLOY.md to connect Supabase.',
       ),
   ));
+
+  if (cloudOn) {
+    getUserEmail().then(email => {
+      if (!emailLine.isConnected) return;
+      emailLine.textContent = email
+        ? `Signed in as ${email}`
+        : 'Not signed in. Reload the app to sign in and sync across devices.';
+      if (email && syncInfo.lastSyncedAt) {
+        emailLine.appendChild(el('span', {
+          style: 'display:block;color:var(--text-muted);font-size:0.8rem;margin-top:0.25rem',
+        }, `Last synced: ${syncInfo.lastSyncedAt.toLocaleString()}`));
+      }
+    }).catch(() => {
+      if (emailLine.isConnected) emailLine.textContent = 'Could not check sign-in.';
+    });
+    householdSharePanel(true).then(node => {
+      if (!shareHost.isConnected || !node) return;
+      shareHost.replaceChildren(node);
+    }).catch(() => {});
+  }
 
   container.appendChild(settingsAcc('data', 'Data Management',
     el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },

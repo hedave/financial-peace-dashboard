@@ -1,4 +1,44 @@
 import { el } from '../utils.js';
+
+export function formatStickyStamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+export function stickyTimeLabel(note) {
+  const created = note?.createdAt || note?.updatedAt || '';
+  if (!created) return { added: '', edited: '' };
+  const createdMs = new Date(created).getTime();
+  const updated = note?.updatedAt || '';
+  const updatedMs = updated ? new Date(updated).getTime() : createdMs;
+  const edited = Number.isFinite(updatedMs)
+    && Number.isFinite(createdMs)
+    && updatedMs - createdMs > 60 * 1000;
+  return {
+    added: `Added ${formatStickyStamp(created)}`,
+    edited: edited ? `Edited ${formatStickyStamp(updated)}` : '',
+    created,
+    updated: edited ? updated : '',
+  };
+}
+
+function paintStickyWhen(host, note) {
+  const label = stickyTimeLabel(note);
+  host.replaceChildren();
+  if (!label.added) return;
+  host.appendChild(el('time', { dateTime: label.created }, label.added));
+  if (label.edited) {
+    host.appendChild(el('time', { dateTime: label.updated }, label.edited));
+  }
+}
 import { store } from '../store.js';
 import { showToast, confirmDialog, showModal } from '../components/modal.js';
 
@@ -193,16 +233,24 @@ function renderSticky(boardId, note) {
   bodyIn.value = note.text || '';
 
   const savedEl = el('span', { className: 'sticky-note-saved' }, '');
+  const whenEl = el('div', { className: 'sticky-note-when' });
+  paintStickyWhen(whenEl, note);
+  let savedTitle = note.title || '';
+  let savedText = note.text || '';
 
   const scheduleSave = () => {
+    if (titleIn.value === savedTitle && bodyIn.value === savedText) return;
     const key = note.id;
     savedEl.textContent = 'Saving…';
     clearTimeout(stickyTimers.get(key));
     stickyTimers.set(key, setTimeout(() => {
-      store.patchStickyNote(boardId, note.id, {
+      const saved = store.patchStickyNote(boardId, note.id, {
         title: titleIn.value,
         text: bodyIn.value,
       });
+      savedTitle = titleIn.value;
+      savedText = bodyIn.value;
+      if (saved) paintStickyWhen(whenEl, saved);
       savedEl.textContent = 'Saved';
     }, 400));
   };
@@ -244,6 +292,7 @@ function renderSticky(boardId, note) {
     swatches,
     el('div', { className: 'sticky-note-tools' }, savedEl, delBtn),
   ));
+  card.appendChild(whenEl);
   card.appendChild(titleIn);
   card.appendChild(bodyIn);
 

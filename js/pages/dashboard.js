@@ -85,8 +85,15 @@ export function renderDashboard(container) {
           btn.disabled = true;
           btn.textContent = 'Syncing…';
           try {
-            await store.pushToCloud({ force: true });
-            showToast('Synced to cloud', 'success');
+            const result = await store.pushToCloud();
+            showToast(
+              result === 'pulled'
+                ? 'This device updated from the newer cloud copy'
+                : result === 'pushed'
+                  ? 'Synced to cloud'
+                  : 'Nothing uploaded',
+              result === 'pushed' ? 'success' : 'info',
+            );
             refreshSyncChip();
             window.appRefresh();
           } catch {
@@ -1007,6 +1014,7 @@ export function allocateSurplus() {
         + ` · Income left: ${formatCurrency(forecast.incomeLeft || 0)}`
         + ` · Bills still due: ${formatCurrency(forecast.billsLeft || 0)}`
         + ` · Envelope plan left: ${formatCurrency(forecast.envelopeLeft || 0)}`
+        + ((forecast.pendingOut || 0) > 0.005 ? ` · Pending still in checking: ${formatCurrency(forecast.pendingOut)}` : '')
         + ((forecast.upcomingHold || 0) > 0.005 ? ` · Upcoming hold: ${formatCurrency(forecast.upcomingHold)}` : '')
         + ` · Cushion: ${formatCurrency(forecast.buffer || 0)}`,
       ),

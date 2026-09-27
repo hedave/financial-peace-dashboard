@@ -16,7 +16,7 @@ const TRAIL_MMDDYY = /\s+\d{6}\s*$/;
 /** Strip account/routing-style numbers so they never enter import rows. */
 export function redactSensitivePdfText(text) {
   let t = String(text || '');
-  t = t.replace(/\b\d{8,}\b/g, '[REDACTED]');
+  t = t.replace(/\b\d{12,}\b/g, '[REDACTED]');
   t = t.replace(/(Account\s*Number\s*)\d+/gi, '$1[REDACTED]');
   t = t.replace(/(Routing\s*Number\s*)\d+/gi, '$1[REDACTED]');
   t = t.replace(/accountId=[^\s&#"']+/gi, 'accountId=[REDACTED]');
@@ -92,12 +92,16 @@ export function parseUsaaPdfText(rawText) {
 
     const dm = line.match(DATE_LINE);
     if (dm) {
+      if (cur && (AMOUNT_TAIL.test(cur.description || '') || REFUND.test(cur.description || ''))) {
+        flush(cur.description || '');
+      }
       cur = null;
       const date = toIsoDate(dm[1], dm[2], dm[3]);
       if (!date) return;
       let desc = (dm[4] || '').trim();
       desc = desc.replace(TRAIL_MMDDYY, '').replace(/[.…]+$/g, '').trim();
       cur = { date, description: desc };
+      if (AMOUNT_TAIL.test(desc) || REFUND.test(desc)) flush(desc);
       return;
     }
 
@@ -121,6 +125,10 @@ export function parseUsaaPdfText(rawText) {
       }
     }
   });
+
+  if (cur && (AMOUNT_TAIL.test(cur.description || '') || REFUND.test(cur.description || ''))) {
+    flush(cur.description || '');
+  }
 
   return rows;
 }

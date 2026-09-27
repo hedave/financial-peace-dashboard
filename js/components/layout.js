@@ -167,8 +167,15 @@ function buildSyncChip() {
     chip.disabled = true;
     chip.textContent = 'Syncing…';
     try {
-      await store.pushToCloud({ force: true });
-      showToast('Synced to cloud', 'success');
+      const result = await store.pushToCloud();
+      showToast(
+        result === 'pulled'
+          ? 'This device updated from the newer cloud copy'
+          : result === 'pushed'
+            ? 'Synced to cloud'
+            : 'Nothing uploaded',
+        result === 'pushed' ? 'success' : 'info',
+      );
     } catch (err) {
       console.warn(err);
       showToast('Sync failed — try Settings', 'info');

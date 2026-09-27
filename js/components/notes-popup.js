@@ -1,7 +1,7 @@
 import { el } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
-import { getActiveNotesBoardId } from '../pages/notes.js';
+import { getActiveNotesBoardId, stickyTimeLabel } from '../pages/notes.js';
 
 /**
  * Quick sticky access from sidebar — last Notes board viewed, else first board.
@@ -36,6 +36,7 @@ export function showNotesPopup() {
       },
         n.title ? el('strong', {}, n.title) : null,
         el('span', {}, preview),
+        el('span', { className: 'quick-sticky-when' }, stickyTimeLabel(n).added),
       ));
     });
   }

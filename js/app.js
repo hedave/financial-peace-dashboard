@@ -1,7 +1,7 @@
 import { store } from './store.js';
 import { renderLayout, updateActiveNav, updateNavBadges, refreshSyncChip } from './components/layout.js';
 import { renderWizard } from './components/wizard.js';
-import { hashPassword } from './utils.js';
+import { hashPassword, passwordMatches } from './utils.js';
 import { applyTheme } from './themes.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderIncome } from './pages/income.js';
@@ -161,11 +161,13 @@ function getRouteIntent() {
 
 function applyHashRoute() {
   const intent = getRouteIntent();
-  if (intent.page) {
-    navigate(intent.page, intent.openImport ? { import: true } : null);
+  if (intent.page && intent.page !== currentPage) {
+    navigate(intent.page, intent.openImport ? { import: true } : null, true);
     return;
   }
-  if (intent.openImport) navigate('transactions', { import: true });
+  if (!intent.page && intent.openImport && currentPage !== 'transactions') {
+    navigate('transactions', { import: true }, true);
+  }
 }
 
 let lastInboxCount = 0;
@@ -215,6 +217,9 @@ function bootstrap() {
   if (intent.page) currentPage = intent.page;
   else if (intent.openImport) currentPage = 'transactions';
   if (intent.openImport) pageArg = { import: true };
+  if (typeof location !== 'undefined' && !location.hash) {
+    history.replaceState(null, '', `#/${currentPage}`);
+  }
 
   mainEl = renderLayout(shell, currentPage, navigate);
   bindScrollTracking();
@@ -241,7 +246,7 @@ function bootstrap() {
   });
 }
 
-function navigate(page, arg) {
+function navigate(page, arg, fromHash = false) {
   if (page === 'advisor' && currentPage !== 'advisor') {
     prepareAdvisorVisit();
   }
@@ -249,6 +254,10 @@ function navigate(page, arg) {
   trackScrollPos();
   currentPage = page;
   pageArg = arg || null;
+  if (!fromHash && typeof location !== 'undefined') {
+    const nextHash = `#/${page}`;
+    if (location.hash !== nextHash) location.hash = nextHash;
+  }
   updateActiveNav(page);
   renderPage({ reason: 'navigate', scrollTop: true });
 }
@@ -258,8 +267,11 @@ function navigate(page, arg) {
  * - Same-page soft re-renders (rule delete, budget edits, etc.): restore scroll
  * - Navigation: jump to top
  */
+let renderGeneration = 0;
+
 function renderPage(opts = {}) {
   if (!mainEl) return;
+  const generation = ++renderGeneration;
   const navigating = !!opts.scrollTop;
   const samePage = !navigating && renderPage._lastPage === currentPage;
 
@@ -283,6 +295,7 @@ function renderPage(opts = {}) {
   mainEl.innerHTML = '';
   const renderer = PAGES[currentPage];
   const finish = () => {
+    if (generation !== renderGeneration) return;
     pageArg = null;
     updateNavBadges();
     refreshSyncChip();
@@ -336,11 +349,15 @@ function showLockScreen() {
 
   const tryUnlock = async () => {
     const pw = document.getElementById('lock-pw').value;
-    const hash = await hashPassword(pw);
-    if (hash === store.getState().settings.passwordHash) {
+    const stored = store.getState().settings.passwordHash;
+    if (await passwordMatches(pw, stored)) {
       unlocked = true;
+      if (!String(stored || '').startsWith('s1:')) {
+        const upgraded = await hashPassword(pw);
+        store.update(s => { s.settings.passwordHash = upgraded; });
+      }
       lock.remove();
-      init();
+      continueAfterUnlock();
     } else {
       const input = document.getElementById('lock-pw');
       input.style.borderColor = 'var(--danger)';
@@ -397,13 +414,27 @@ function bindVisualViewport() {
 
 bindVisualViewport();
 
-async function startApp() {
-  const cloud = await store.initCloud();
-  if (cloud.configured && !cloud.signedIn) {
-    showCloudAuthScreen(() => init());
-    return;
+async function continueAfterUnlock() {
+  try {
+    const cloud = await store.initCloud();
+    if (cloud.configured && !cloud.signedIn) {
+      showCloudAuthScreen(() => init());
+      return;
+    }
+  } catch (err) {
+    console.error('Startup failed', err);
   }
   init();
+}
+
+async function startApp() {
+  const state = store.getState();
+  applyTheme(state.settings);
+  if (state.settings.passwordHash && !unlocked) {
+    showLockScreen();
+    return;
+  }
+  await continueAfterUnlock();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

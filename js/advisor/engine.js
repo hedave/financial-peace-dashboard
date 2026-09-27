@@ -510,7 +510,9 @@ function answerAfterSnowballCash(snap) {
   const bills = pd.billsBeforePay || [];
 
   const buffer = r2(cap.buffer || 0);
-  const afterSnowball = r2(checking - surplus);
+  const todayMax = r2(cap.freeCash ?? 0);
+  const sendAmt = r2(Math.max(0, Math.min(surplus > 0 ? surplus : 0, todayMax)));
+  const afterSnowball = r2(checking - sendAmt);
   const afterBills = r2(afterSnowball - billsTotal);
   const afterNextPay = nextPayAmt > 0 ? r2(afterBills + nextPayAmt) : null;
 
@@ -519,8 +521,11 @@ function answerAfterSnowballCash(snap) {
   );
 
   const paragraphs = [
-    surplus > 0
-      ? `If we send the full safe surplus (${formatCurrency(surplus)}) to ${target ? target.name : 'debt'} from checking right now, here is the cash path.`
+    sendAmt > 0
+      ? `If we send ${formatCurrency(sendAmt)} to ${target ? target.name : 'debt'} from checking today, here is the cash path.`
+        + (surplus > sendAmt + 0.02
+          ? ` Month-end forecast is ${formatCurrency(surplus)} once income still expected lands.`
+          : '')
       : raw > 0.02
         ? `Budget leftover is ${formatCurrency(raw)}, but after holding bills`
           + (billsTotal ? ` (${formatCurrency(billsTotal)})` : '')
@@ -532,8 +537,8 @@ function answerAfterSnowballCash(snap) {
 
   const bullets = [
     `1. Checking now: ${formatCurrency(checking)}`,
-    surplus > 0
-      ? `2. − Snowball extra to ${target ? target.name : 'debt'}: ${formatCurrency(surplus)}`
+    sendAmt > 0
+      ? `2. − Snowball extra to ${target ? target.name : 'debt'}: ${formatCurrency(sendAmt)}`
       : `2. − Snowball extra: ${formatCurrency(0)} (nothing safe to send)`,
     `3. Checking after snowball: ${formatCurrency(afterSnowball)}`,
     billsTotal > 0
@@ -541,9 +546,9 @@ function answerAfterSnowballCash(snap) {
       : `4. − Bills before next pay: ${formatCurrency(0)} (none held)`,
     `5. Checking after those bills: ${formatCurrency(afterBills)}`
       + (afterBills < -0.02
-        ? ' ⚠️ negative — update checking or bills'
+        ? ' Warning: negative. Update checking or bills'
         : buffer > 0 && afterBills + 0.02 < buffer
-          ? ` (below ${formatCurrency(buffer)} cushion — tight)`
+          ? ` (below ${formatCurrency(buffer)} cushion, tight)`
           : buffer > 0
             ? ` (cushion target ${formatCurrency(buffer)})`
             : afterBills < 1
@@ -557,9 +562,9 @@ function answerAfterSnowballCash(snap) {
     `Envelope room still “assigned” (virtual): ${formatCurrency(envelopeLeft)} — already in the checking numbers above, not extra cash.`,
   ];
 
-  if (cap.capped && raw > surplus + 0.02) {
+  if (surplus > sendAmt + 0.02) {
     bullets.push(
-      `Cap detail: leftover ${formatCurrency(raw)} − bills ${formatCurrency(billsTotal)} − cushion ${formatCurrency(buffer)} = free ${formatCurrency(freeCash)} → safe surplus ${formatCurrency(surplus)}.`,
+      `Safe today is ${formatCurrency(sendAmt)}. Month-end forecast is ${formatCurrency(surplus)} after income still expected. Bills before next pay are ${formatCurrency(billsTotal)}. Cushion is ${formatCurrency(buffer)}.`,
     );
   }
 
@@ -569,8 +574,8 @@ function answerAfterSnowballCash(snap) {
 
   return {
     id: 'after_snowball',
-    title: surplus > 0
-      ? `Cash after snowballing ${formatCurrency(surplus)}`
+    title: sendAmt > 0
+      ? `Cash after snowballing ${formatCurrency(sendAmt)}`
       : 'Cash if we snowball surplus (nothing safe yet)',
     paragraphs,
     bullets: [

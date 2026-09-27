@@ -159,7 +159,7 @@ export function createDefaultState() {
     celebrations: [],
     notes: '',
     notesUpdatedAt: null,
-    /** Sticky-note boards: [{ id, title, stickies: [{ id, title, text, color, updatedAt }] }] */
+    /** Sticky-note boards: [{ id, title, stickies: [{ id, title, text, color, createdAt, updatedAt }] }] */
     noteBoards: [],
     removedDefaultCategories: [],
     categoryRules: [],

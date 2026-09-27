@@ -1,6 +1,6 @@
--- Run in Supabase SQL Editor (once) so a second login can share the household budget.
--- Notes-only members can read/update the owner's budget_states row.
--- The app only writes note boards for that role.
+-- Run in Supabase SQL Editor (safe to re-run) so a second login can share notes.
+-- Notes-only members can read the owner's budget. Money writes stay on the owner.
+-- Notes saves go through update_household_notes.
 
 create table if not exists household_members (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -56,6 +56,7 @@ drop policy if exists "Users insert own budget" on budget_states;
 drop policy if exists "Users update own budget" on budget_states;
 drop policy if exists "Owner or member can read" on budget_states;
 drop policy if exists "Owner or member can update" on budget_states;
+drop policy if exists "Owner updates own budget" on budget_states;
 drop policy if exists "Users insert own budget v2" on budget_states;
 
 create policy "Owner or member can read"
@@ -72,15 +73,10 @@ create policy "Users insert own budget v2"
   on budget_states for insert
   with check (auth.uid() = user_id);
 
-create policy "Owner or member can update"
+create policy "Owner updates own budget"
   on budget_states for update
-  using (
-    auth.uid() = user_id
-    or exists (
-      select 1 from household_members m
-      where m.user_id = auth.uid() and m.owner_id = budget_states.user_id
-    )
-  );
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create or replace function join_household(invite_code text)
 returns json
@@ -105,6 +101,9 @@ begin
   if inv.expires_at < now() then
     raise exception 'That code expired — ask for a new one';
   end if;
+  if inv.owner_id = auth.uid() then
+    raise exception 'That code belongs to this login. Share it with the other person.';
+  end if;
 
   insert into household_members (user_id, owner_id, role)
   values (auth.uid(), inv.owner_id, inv.role)
@@ -119,3 +118,48 @@ end;
 $$;
 
 grant execute on function join_household(text) to authenticated;
+
+create or replace function update_household_notes(
+  p_notes text,
+  p_notes_updated_at text,
+  p_note_boards jsonb
+) returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  oid uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in';
+  end if;
+
+  select owner_id into oid
+  from household_members
+  where user_id = auth.uid() and role = 'notes';
+
+  if oid is null then
+    raise exception 'Not a notes member';
+  end if;
+
+  update budget_states
+    set state = jsonb_set(
+          jsonb_set(
+            jsonb_set(coalesce(state, '{}'::jsonb), '{notes}', to_jsonb(coalesce(p_notes, ''))),
+            '{notesUpdatedAt}', to_jsonb(p_notes_updated_at)
+          ),
+          '{noteBoards}', coalesce(p_note_boards, '[]'::jsonb)
+        ),
+        updated_at = now()
+    where user_id = oid;
+
+  if not found then
+    raise exception 'No budget';
+  end if;
+
+  return now();
+end;
+$$;
+
+grant execute on function update_household_notes(text, text, jsonb) to authenticated;

@@ -378,21 +378,20 @@ export function renderTransactions(container, arg) {
     }
 
     const visible = txs.slice(0, listLimit);
-    const moreNote = txs.length > listLimit
-      ? el('div', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
-        el('p', { style: 'margin:0 0 0.5rem' },
-          `Showing ${visible.length} of ${txs.length} transactions`),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          onClick: () => {
-            listLimit += 200;
-            persistListView();
-            renderList();
-          },
-        }, `Load 200 more`),
-      )
-      : null;
+    const makeMoreNote = () => el('div', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
+      el('p', { style: 'margin:0 0 0.5rem' },
+        `Showing ${visible.length} of ${txs.length} transactions`),
+      el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-secondary',
+        onClick: () => {
+          listLimit += 200;
+          persistListView();
+          renderList();
+        },
+      }, 'Load 200 more'),
+    );
+    const moreNote = txs.length > listLimit ? makeMoreNote() : null;
 
     // Desktop: multi-column table
     listEl.appendChild(el('div', { className: 'card tx-desktop-list' },
@@ -411,7 +410,7 @@ export function renderTransactions(container, arg) {
           )
         )
       ),
-      moreNote ? moreNote.cloneNode(true) : null
+      txs.length > listLimit ? makeMoreNote() : null
     ));
 
     // Mobile: card list

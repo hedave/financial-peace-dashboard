@@ -57,7 +57,9 @@ export function renderDebt(container) {
       el('div', { className: 'card-title' }, 'Est. Months (snowball)'),
       el('div', { className: 'card-value accent' }, snowball.length ? `~${months}` : '0'),
       el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
-        paused.length ? 'On-hold debts not in ETA' : 'At today’s surplus + mins'),
+        paused.length
+          ? 'On-hold debts not in ETA. Interest is not included.'
+          : 'At today’s surplus + minimums. Interest is not included.'),
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Month-end snowball'),

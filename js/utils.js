@@ -174,11 +174,29 @@ export function downloadFile(content, filename, mime) {
   URL.revokeObjectURL(url);
 }
 
-export async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
+async function sha256Hex(text) {
+  const data = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+  const digest = await sha256Hex(`${saltHex}:${password}`);
+  return `s1:${saltHex}:${digest}`;
+}
+
+export async function passwordMatches(password, stored) {
+  const raw = String(stored || '');
+  if (raw.startsWith('s1:')) {
+    const parts = raw.split(':');
+    const saltHex = parts[1];
+    const digest = parts[2];
+    if (!saltHex || !digest) return false;
+    return (await sha256Hex(`${saltHex}:${password}`)) === digest;
+  }
+  return (await sha256Hex(password)) === raw;
 }
 
 const DOM_PROPS = new Set(['checked', 'disabled', 'selected', 'readOnly', 'multiple', 'value', 'hidden']);

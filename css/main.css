@@ -2152,6 +2152,25 @@ body.modal-open .modal-backdrop {
   text-align: right;
 }
 
+.sticky-note-when {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0.35rem 0.65rem 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.quick-sticky-when {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  opacity: 0.8;
+}
+
 .sticky-board-hint {
   font-size: 0.78rem;
   color: var(--text-muted);

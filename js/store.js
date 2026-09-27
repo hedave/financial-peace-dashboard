@@ -260,7 +260,8 @@ function normalizeState(state) {
         title: 'Notes',
         text: state.notes,
         color: 'yellow',
-        updatedAt: state.notesUpdatedAt || new Date().toISOString(),
+        createdAt: state.notesUpdatedAt || null,
+        updatedAt: state.notesUpdatedAt || null,
       }],
     }];
   }
@@ -280,6 +281,8 @@ function normalizeState(state) {
       if (typeof n.text !== 'string') n.text = '';
       if (typeof n.title !== 'string') n.title = '';
       if (!n.color) n.color = 'yellow';
+      if (!n.updatedAt && n.createdAt) n.updatedAt = n.createdAt;
+      if (!n.createdAt && n.updatedAt) n.createdAt = n.updatedAt;
     });
   });
   if (!Array.isArray(state.removedDefaultCategories)) state.removedDefaultCategories = [];
@@ -292,6 +295,9 @@ function normalizeState(state) {
   }
   if (!state.monthBonusAllocations || typeof state.monthBonusAllocations !== 'object') {
     state.monthBonusAllocations = {};
+  }
+  if (!state.monthPlanExtras || typeof state.monthPlanExtras !== 'object') {
+    state.monthPlanExtras = {};
   }
   if (!Array.isArray(state.overspendCoverIous)) state.overspendCoverIous = [];
   if (!Array.isArray(state.upcomingHolds)) state.upcomingHolds = [];
@@ -432,9 +438,12 @@ class Store {
       return { configured: true, signedIn: false };
     }
     await refreshHousehold();
-    if (isNotesOnlyRole()) await this.forcePullFromCloud().catch(() => this.pullFromCloud());
+    if (isNotesOnlyRole()) await this.forcePullFromCloud({ keepNewerNotes: true }).catch(() => this.pullFromCloud());
     else await this.pullFromCloud();
     this.cloudReady = true;
+    if (this.state._localDirtyAt && isCloudConfigured()) {
+      schedulePush(() => this.pushToCloud());
+    }
     return { configured: true, signedIn: true };
   }
 
@@ -446,17 +455,39 @@ class Store {
     return !isBlankBudgetState(this.state);
   }
 
-  async forcePullFromCloud() {
+  keepDevicePassword(next) {
+    const localHash = this.state?.settings?.passwordHash || null;
+    if (!next.settings || typeof next.settings !== 'object') next.settings = {};
+    next.settings.passwordHash = localHash;
+    return next;
+  }
+
+  async forcePullFromCloud({ keepNewerNotes = false } = {}) {
     const remote = await loadRemoteState();
     if (!remote?.state || typeof remote.state !== 'object') {
       throw new Error('No budget found in the cloud. Sync from your live site first (Settings → Sync Now).');
     }
+    const localNotes = {
+      noteBoards: this.state.noteBoards,
+      notes: this.state.notes,
+      notesUpdatedAt: this.state.notesUpdatedAt,
+    };
     const remoteTime = new Date(remote.updated_at || 0).getTime();
-    this.state = normalizeState({
+    const next = this.keepDevicePassword(normalizeState({
       ...createDefaultState(),
       ...remote.state,
       _cloudUpdatedAt: remoteTime,
-    });
+    }));
+    const remoteNotesAt = remote.state.notesUpdatedAt;
+    const keepLocalNotes = keepNewerNotes
+      && localNotes.notesUpdatedAt
+      && (!remoteNotesAt || String(localNotes.notesUpdatedAt) > String(remoteNotesAt));
+    if (keepLocalNotes) {
+      next.noteBoards = localNotes.noteBoards;
+      next.notes = localNotes.notes;
+      next.notesUpdatedAt = localNotes.notesUpdatedAt;
+    }
+    this.state = next;
     this.processMonthRollover();
     this.writeLocal();
     this.notify();
@@ -477,11 +508,11 @@ class Store {
       const keepLocalNotes = keep.notesUpdatedAt
         && (!remoteNotesAt || String(keep.notesUpdatedAt) > String(remoteNotesAt));
       const remoteTime = new Date(remote.updated_at || 0).getTime();
-      this.state = normalizeState({
+      this.state = this.keepDevicePassword(normalizeState({
         ...createDefaultState(),
         ...remote.state,
         _cloudUpdatedAt: remoteTime,
-      });
+      }));
       delete this.state._localDirtyAt;
       if (keepLocalNotes) {
         this.state.noteBoards = keep.noteBoards;
@@ -514,7 +545,7 @@ class Store {
     if (useRemote) {
       const merged = { ...remote.state, _cloudUpdatedAt: remoteTime };
       delete merged._localDirtyAt;
-      this.state = normalizeState({ ...createDefaultState(), ...merged });
+      this.state = this.keepDevicePassword(normalizeState({ ...createDefaultState(), ...merged }));
       this.processMonthRollover();
       this.writeLocal();
       this.notify();
@@ -532,13 +563,13 @@ class Store {
       // CoS / ingest may have written cloud while this tab was open.
       if (Number.isFinite(remoteTime) && remoteTime > localTime + 1000) {
         await this.pullFromCloud();
-        return false;
+        return 'pulled';
       }
     }
     if (!force && isBlankBudgetState(this.state)) {
       if (remote?.state && !isBlankBudgetState(remote.state)) {
         console.warn('Skipped pushing blank local state over cloud budget');
-        return false;
+        return 'skipped';
       }
     }
     const payload = { ...this.state };
@@ -547,8 +578,9 @@ class Store {
       this.state._cloudUpdatedAt = Date.now();
       delete this.state._localDirtyAt;
       this.writeLocal();
+      return 'pushed';
     }
-    return ok;
+    return false;
   }
 
   save() {
@@ -611,6 +643,7 @@ class Store {
 
   saveSilently() {
     try {
+      this.state._localDirtyAt = Date.now();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
     } catch (e) {
       console.error('Failed to write to localStorage', e);
@@ -676,12 +709,14 @@ class Store {
   }
 
   addStickyNote(boardId, { title = '', text = '', color = 'yellow' } = {}) {
+    const now = new Date().toISOString();
     const note = {
       id: generateId(),
       title: String(title || ''),
       text: String(text || ''),
       color: color || 'yellow',
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     this.update(s => {
       const b = (s.noteBoards || []).find(x => x.id === boardId);
@@ -696,13 +731,24 @@ class Store {
   patchStickyNote(boardId, noteId, patch = {}) {
     const b = (this.state.noteBoards || []).find(x => x.id === boardId);
     const n = b?.stickies?.find(x => x.id === noteId);
-    if (!n) return;
-    if (patch.title !== undefined) n.title = String(patch.title);
-    if (patch.text !== undefined) n.text = String(patch.text);
-    if (patch.color !== undefined) n.color = patch.color;
-    n.updatedAt = new Date().toISOString();
+    if (!n) return null;
+    let contentChanged = false;
+    if (patch.title !== undefined && String(patch.title) !== n.title) {
+      n.title = String(patch.title);
+      contentChanged = true;
+    }
+    if (patch.text !== undefined && String(patch.text) !== n.text) {
+      n.text = String(patch.text);
+      contentChanged = true;
+    }
+    const colorChanged = patch.color !== undefined && patch.color !== n.color;
+    if (colorChanged) n.color = patch.color;
+    if (!n.createdAt) n.createdAt = n.updatedAt || new Date().toISOString();
+    if (!contentChanged && !colorChanged) return n;
+    if (contentChanged) n.updatedAt = new Date().toISOString();
     this.syncLegacyNotesFromStickies();
     this.saveSilently();
+    return n;
   }
 
   deleteStickyNote(boardId, noteId) {
@@ -732,10 +778,12 @@ class Store {
     if (this.state.lastMonthProcessed === current) return;
 
     let cursor = this.state.lastMonthProcessed;
+    let rolled = false;
     if (cursor && cursor !== current) {
       // Walk each skipped month so June isn't skipped when May → July
       let guard = 0;
       while (cursor && cursor < current && guard < 36) {
+        rolled = true;
         this.saveMonthBudgetSnapshot(cursor, false);
         this.state.categories.forEach(cat => {
           // remaining = budget + opening carry + that month's envelope moves − spent.
@@ -753,7 +801,11 @@ class Store {
       rollRecurringBillsForNewMonth(this.state.bills, current);
     }
     this.state.lastMonthProcessed = current;
+    if (rolled) this.state._localDirtyAt = Date.now();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+    if (rolled && this.cloudReady && isCloudConfigured()) {
+      schedulePush(() => this.pushToCloud());
+    }
   }
 
   // --- Income ---
@@ -1265,11 +1317,20 @@ class Store {
     return kind === 'debt' || kind === 'bill';
   }
 
-  isDebtMinInBudget(debt) {
-    const min = Number(debt.minPayment) || 0;
+  unpaidDebtMin(debt, month = getCurrentMonth()) {
+    const min = Number(debt?.minPayment) || 0;
+    if (!min) return 0;
+    const paid = this.getDebtPaidThisMonth(debt.id, month);
+    return Math.max(0, Math.round((min - paid) * 100) / 100);
+  }
+
+  isDebtMinInBudget(debt, month = getCurrentMonth()) {
+    const min = Number(debt?.minPayment) || 0;
     if (!min || !debt.categoryId) return false;
-    const cat = this.state.categories.find(c => c.id === debt.categoryId);
-    return !!(cat && Number(cat.monthlyBudget) > 0);
+    const unpaid = this.unpaidDebtMin(debt, month);
+    if (unpaid <= 0) return true;
+    const remaining = Math.max(0, this.getCategoryRemaining(debt.categoryId, month));
+    return remaining + 0.005 >= unpaid;
   }
 
   getDebtPaidThisMonth(debtId, month = getCurrentMonth()) {
@@ -1284,21 +1345,24 @@ class Store {
       .reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
   }
 
-  getMinDebtPaymentsOutsideBudget() {
-    // On-hold debts (e.g. deferred student loans) don't claim budget mins
-    return this.getSnowballDebts().reduce((s, d) => {
-      if (this.isDebtMinInBudget(d)) return s;
-      return s + (Number(d.minPayment) || 0);
-    }, 0);
+  getMinDebtPaymentsOutsideBudget(month = getCurrentMonth()) {
+    return this.getRemainingMinDebtPaymentsOutsideBudget(month);
   }
 
   getRemainingMinDebtPaymentsOutsideBudget(month = getCurrentMonth()) {
-    return this.getSnowballDebts().reduce((s, d) => {
-      if (this.isDebtMinInBudget(d)) return s;
-      const min = Number(d.minPayment) || 0;
-      if (!min) return s;
-      const paid = this.getDebtPaidThisMonth(d.id, month);
-      return s + Math.max(0, min - paid);
+    const remainingByCat = new Map();
+    return this.getSnowballDebts().reduce((sum, debt) => {
+      const unpaid = this.unpaidDebtMin(debt, month);
+      if (unpaid <= 0) return sum;
+      let covered = 0;
+      if (debt.categoryId) {
+        const rem = remainingByCat.has(debt.categoryId)
+          ? remainingByCat.get(debt.categoryId)
+          : Math.max(0, this.getCategoryRemaining(debt.categoryId, month));
+        covered = Math.min(unpaid, rem);
+        remainingByCat.set(debt.categoryId, Math.round((rem - covered) * 100) / 100);
+      }
+      return sum + (unpaid - covered);
     }, 0);
   }
 
@@ -1404,11 +1468,15 @@ class Store {
    * Current month = live monthlyBudget; past months use snapshot when available.
    */
   getCategoryBudgeted(categoryId, month = getCurrentMonth()) {
+    let base;
     if (month === getCurrentMonth()) {
       const cat = this.state.categories.find(c => c.id === categoryId);
-      return Number(cat?.monthlyBudget) || 0;
+      base = Number(cat?.monthlyBudget) || 0;
+    } else {
+      base = Number(this.getBudgetForMonth(categoryId, month)) || 0;
     }
-    return Number(this.getBudgetForMonth(categoryId, month)) || 0;
+    const extra = Number(this.state.monthPlanExtras?.[month]?.[categoryId]) || 0;
+    return Math.round((base + extra) * 100) / 100;
   }
 
   getCategoryRemaining(categoryId, month = getCurrentMonth(), opts = {}) {
@@ -2109,9 +2177,10 @@ class Store {
     const debtMinsLeft = r2(this.getRemainingMinDebtPaymentsOutsideBudget(month));
     const envelopeLeft = this.getStillAssignedEnvelopeCash(month);
     const upcomingHold = this.getUpcomingHoldReserve({ mode: 'forecast', month });
+    const pendingOut = this.getPendingOutflowStillInChecking();
 
     const grossIn = r2(checking + incomeLeft);
-    const livingAndObligations = r2(billsLeft + debtMinsLeft + envelopeLeft);
+    const livingAndObligations = r2(billsLeft + debtMinsLeft + envelopeLeft + pendingOut);
     // After income + after funding the plan + bills/mins, leave cushion + known upcoming
     const projected = r2(grossIn - livingAndObligations - buffer - upcomingHold);
     const safe = Math.max(0, projected);
@@ -2123,6 +2192,7 @@ class Store {
       billsLeft,
       debtMinsLeft,
       envelopeLeft,
+      pendingOut,
       upcomingHold,
       buffer,
       undatedBillCount,
@@ -2236,7 +2306,8 @@ class Store {
 
     // After snowball + bills, leave cushion in checking + known upcoming holds
     const upcomingHold = this.getUpcomingHoldReserve({ mode: 'today' });
-    const reserved = Math.round((billsTotal + buffer + upcomingHold) * 100) / 100;
+    const pendingOut = this.getPendingOutflowStillInChecking();
+    const reserved = Math.round((billsTotal + buffer + upcomingHold + pendingOut) * 100) / 100;
     const freeCash = Math.max(0, Math.round((checking - reserved) * 100) / 100);
 
     const undatedBillCount = bills.filter(b => b.undated).length;
@@ -2254,6 +2325,7 @@ class Store {
       reserved,
       freeCash,
       upcomingHold,
+      pendingOut,
       hasNextPay: !!nextPayDate,
     };
   }
@@ -3205,27 +3277,36 @@ class Store {
     const debts = this.getSnowballDebts();
     if (!debts.length) return 0;
     let months = 0;
-    const surplus = this.getSurplusForSnowball();
+    let extraPool = this.getSurplusForSnowball();
     const sim = debts.map(d => ({ balance: Number(d.balance) || 0, min: Number(d.minPayment) || 0 }));
     let safety = 600;
     while (sim.some(d => d.balance > 0.005) && safety-- > 0) {
       months++;
-      let extra = surplus;
+      let extra = extraPool;
       for (const d of sim) {
         if (d.balance <= 0.005) continue;
-        // Min + cascading extra from debts paid off earlier this simulated month
-        const available = d.min + extra;
+        const available = Math.round((d.min + extra) * 100) / 100;
         const pay = Math.min(d.balance, available);
         d.balance = Math.round((d.balance - pay) * 100) / 100;
-        extra = Math.round((available - pay) * 100) / 100;
-        if (d.balance > 0.005) {
+        const leftover = Math.round((available - pay) * 100) / 100;
+        if (d.balance <= 0.005) {
+          extraPool = Math.round((extraPool + d.min) * 100) / 100;
+          d.min = 0;
+          extra = leftover;
+        } else {
           extra = 0;
-          break;
         }
-        // Paid off — leftover extra continues to the next debt this month
       }
     }
     return months;
+  }
+
+  getPendingOutflowStillInChecking() {
+    return Math.round((this.state.transactions || []).reduce((sum, tx) => {
+      if (!tx || tx.clearingStatus !== 'pending') return sum;
+      if (tx.type !== 'expense' && tx.type !== 'debt_payment' && tx.type !== 'transfer') return sum;
+      return sum + Math.abs(Number(tx.amount) || 0);
+    }, 0) * 100) / 100;
   }
 
   // --- Baby Step ---
@@ -3371,10 +3452,14 @@ class Store {
         delete debt.paidOffDate;
       }
       if (payload.categoryId && payload.budgetBump) {
-        const cat = s.categories.find(c => c.id === payload.categoryId);
-        if (cat) {
-          cat.monthlyBudget = Math.max(0, (Number(cat.monthlyBudget) || 0) - payload.budgetBump);
+        const month = payload.month || getCurrentMonth();
+        const bag = s.monthPlanExtras?.[month];
+        if (bag && bag[payload.categoryId] != null) {
+          bag[payload.categoryId] = Math.max(0, Math.round(((Number(bag[payload.categoryId]) || 0) - payload.budgetBump) * 100) / 100);
         }
+      }
+      if (payload.debtId) {
+        s.archivedDebts = (s.archivedDebts || []).filter(d => d.id !== payload.debtId);
       }
       ok = true;
     });
@@ -3678,13 +3763,16 @@ class Store {
       debt.balance = Math.max(0, (Number(debt.balance) || 0) - pay);
       s.balances.checking = (Number(s.balances.checking) || 0) - pay;
       let budgetBump = 0;
-      // Give those dollars a budget job so To Allocate / surplus don't stay free to re-spend
+      const bumpMonth = getCurrentMonth();
+      // One-month plan offset. The ongoing monthlyBudget stays put for next month.
       if (debt.categoryId) {
-        const cat = s.categories.find(c => c.id === debt.categoryId);
-        if (cat) {
-          budgetBump = pay;
-          cat.monthlyBudget = Math.round(((Number(cat.monthlyBudget) || 0) + pay) * 100) / 100;
+        if (!s.monthPlanExtras || typeof s.monthPlanExtras !== 'object') s.monthPlanExtras = {};
+        if (!s.monthPlanExtras[bumpMonth] || typeof s.monthPlanExtras[bumpMonth] !== 'object') {
+          s.monthPlanExtras[bumpMonth] = {};
         }
+        const prev = Number(s.monthPlanExtras[bumpMonth][debt.categoryId]) || 0;
+        s.monthPlanExtras[bumpMonth][debt.categoryId] = Math.round((prev + pay) * 100) / 100;
+        budgetBump = pay;
       }
       const txId = generateId();
       s.transactions.unshift({
@@ -3704,6 +3792,7 @@ class Store {
         debtId: debt.id,
         categoryId: debt.categoryId || null,
         budgetBump,
+        month: bumpMonth,
       };
       if (debt.balance <= 0) {
         debt.balance = 0;
