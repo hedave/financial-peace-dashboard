@@ -420,6 +420,7 @@ class Store {
       ...(raw && typeof raw === 'object' ? raw : {}),
     });
     this.processMonthRollover();
+    this.linkOutstandingAutoPay();
     return this.state;
   }
 
@@ -429,17 +430,20 @@ class Store {
 
   async initCloud() {
     if (!isCloudConfigured()) {
+      this.linkOutstandingAutoPay();
       this.cloudReady = true;
       return { configured: false, signedIn: false };
     }
     const session = await getSession();
     if (!session) {
+      this.linkOutstandingAutoPay();
       this.cloudReady = true;
       return { configured: true, signedIn: false };
     }
     await refreshHousehold();
     if (isNotesOnlyRole()) await this.forcePullFromCloud({ keepNewerNotes: true }).catch(() => this.pullFromCloud());
     else await this.pullFromCloud();
+    this.linkOutstandingAutoPay();
     this.cloudReady = true;
     if (this.state._localDirtyAt && isCloudConfigured()) {
       schedulePush(() => this.pushToCloud());
@@ -2725,6 +2729,39 @@ class Store {
       const paidDate = tx.date || todayISO();
       completeBillPaymentCycle(bill, paidDate, paidAmt);
     });
+  }
+
+  /**
+   * Link auto-pay bills to imported expenses that never matched (Bridgecrest vs
+   * "Tesla (Bridgecrest)"). Oldest payment first, one cycle per payment.
+   * @returns {number} bills advanced
+   */
+  linkOutstandingAutoPay() {
+    if (!this.canWriteBudget()) return 0;
+    const s = this.state;
+    if (!s) return 0;
+    let total = 0;
+    for (let pass = 0; pass < 36; pass++) {
+      const txs = (s.transactions || [])
+        .filter(t => t && t.type === 'expense' && !t.billId && !t.ignoreBillMatch)
+        .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+          || String(a.id || '').localeCompare(String(b.id || '')));
+      let linked = false;
+      for (const tx of txs) {
+        if (this.applyAutoPayBillIfMatched(tx, s)) {
+          total += 1;
+          linked = true;
+          break;
+        }
+      }
+      if (!linked) break;
+    }
+    if (total) {
+      s._localDirtyAt = Date.now();
+      this.writeLocal();
+      try { this.notify(); } catch { /* listeners are optional at startup */ }
+    }
+    return total;
   }
 
   /**

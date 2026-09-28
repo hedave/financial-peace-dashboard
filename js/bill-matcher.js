@@ -57,13 +57,33 @@ function hasToken(desc, word) {
   return new RegExp(`(?:^|[^a-z0-9])${body}`, 'i').test(desc);
 }
 
+/** Drop parentheses and other punctuation glued onto a name token. */
+function bareNameWord(word) {
+  return String(word || '').replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+}
+
+/**
+ * Search words for a bill or debt name.
+ * "Tesla (Bridgecrest)" contributes both tesla and bridgecrest.
+ */
+function nameWords(entityName) {
+  const raw = String(entityName || '').toLowerCase();
+  const found = [];
+  const push = (word) => {
+    const bare = bareNameWord(word);
+    if (bare.length >= 3 && !GENERIC_NAME_WORDS.has(bare)) found.push(bare);
+  };
+  raw.split(/\s+/).forEach(push);
+  for (const match of raw.matchAll(/\(([^)]*)\)/g)) push(match[1]);
+  return [...new Set(found)];
+}
+
 export function nameInDescription(entityName, description) {
   const name = String(entityName || '').toLowerCase().trim();
   const desc = String(description || '').toLowerCase();
   if (!name || !desc) return false;
   if (hasToken(desc, name)) return true;
-  const words = name.split(/\s+/).filter(w => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
-  return words.some(w => hasToken(desc, w));
+  return nameWords(name).some(w => hasToken(desc, w));
 }
 
 function billNameInDescription(billName, description) {

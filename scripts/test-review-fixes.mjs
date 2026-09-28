@@ -16,6 +16,22 @@ expect(nameInDescription('Car', 'CARD PAYMENT') === false, 'bill word "car" must
 expect(nameInDescription('Citi', 'CITI CARD PAYMENT') === true, 'Citi should match CITI CARD PAYMENT');
 expect(nameInDescription('Citi', 'CITICARD 123') === true, 'Citi should match CITICARD');
 expect(nameInDescription('Ford', 'STANFORD PARK') === false, 'Ford must not match Stanford');
+expect(
+  nameInDescription('Tesla (Bridgecrest)', 'Bridgecrest DT RETAIL') === true,
+  'Tesla (Bridgecrest) should match a Bridgecrest bank line',
+);
+expect(
+  nameInDescription('Tesla (Bridgecrest)', 'BRIDGECREST') === true,
+  'parentheses around Bridgecrest should still match the bank word',
+);
+expect(
+  nameInDescription('T-Mobile', 'MOBILE PAYMENT') === false,
+  'a hyphenated name must stay one word',
+);
+expect(
+  nameInDescription('Van (Card)', 'CARD PAYMENT') === false,
+  'a generic word inside parentheses must not match',
+);
 
 const shortBill = {
   id: 'b-car', name: 'Car', amount: 200, status: 'unpaid', autoPay: true, dueDate: '2026-09-20',
@@ -33,6 +49,21 @@ expect(
     [{ id: 'b-citi', name: 'Citi', amount: 200, status: 'unpaid', autoPay: true, dueDate: '2026-09-20' }],
   )?.id === 'b-citi',
   'unique Citi auto-pay still matches when the payment amount differs',
+);
+expect(
+  findAutoPayBillForTransaction(
+    { type: 'expense', amount: 380, description: 'Bridgecrest DT RETAIL', date: '2026-08-28' },
+    [{
+      id: 'b-tesla',
+      name: 'Tesla (Bridgecrest)',
+      amount: 380,
+      status: 'pending',
+      autoPay: true,
+      recurring: true,
+      dueDate: '2026-07-28',
+    }],
+  )?.id === 'b-tesla',
+  'Bridgecrest $380 should auto-pay the Tesla (Bridgecrest) bill',
 );
 
 const pdfRows = parseUsaaPdfText('Jan 2, 2026 Grocery Store -$12.50\n');
@@ -175,6 +206,32 @@ fresh().updatedAt = '2026-09-01T15:04:00.000Z';
 store.patchStickyNote(board.id, freshId, { text: 'Amazon $58.20' });
 expect(fresh().createdAt === '2026-09-01T15:04:00.000Z', 'editing keeps the original added time');
 expect(fresh().updatedAt !== '2026-09-01T15:04:00.000Z', 'editing records a new edited time');
+
+quietBooks();
+store.state.bills = [{
+  id: 'b-tesla',
+  name: 'Tesla (Bridgecrest)',
+  amount: 380,
+  dueDate: '2026-07-28',
+  autoPay: true,
+  recurring: true,
+  status: 'pending',
+}];
+store.state.transactions = [
+  { id: 'tx-jun', date: '2026-06-29', amount: 380, type: 'expense', description: 'Bridgecrest DT RETAIL' },
+  { id: 'tx-jul', date: '2026-07-28', amount: 380, type: 'expense', description: 'Bridgecrest DT RETAIL' },
+  { id: 'tx-aug', date: '2026-08-28', amount: 380, type: 'expense', description: 'Bridgecrest DT RETAIL' },
+];
+const linkedCycles = store.linkOutstandingAutoPay();
+const teslaBill = () => store.state.bills.find(b => b.id === 'b-tesla');
+const txById = (id) => store.state.transactions.find(t => t.id === id);
+expect(linkedCycles === 2, `July and August Bridgecrest should pay two Tesla cycles, got ${linkedCycles}`);
+expect(!txById('tx-jun').billId, 'June 29 is too early to pay the July 28 Tesla bill');
+expect(txById('tx-jul').billId === 'b-tesla', 'July Bridgecrest should link to the Tesla bill');
+expect(txById('tx-aug').billId === 'b-tesla', 'August Bridgecrest should link to the Tesla bill');
+expect(teslaBill().dueDate === '2026-09-28', `Tesla due date should roll to 2026-09-28, got ${teslaBill().dueDate}`);
+expect(teslaBill().status === 'pending', 'recurring Tesla bill stays open for the next cycle');
+expect(teslaBill().lastPaidDate === '2026-08-28', 'last Tesla payment should be the August draft');
 
 if (failures.length) {
   console.error('test-review-fixes failed:');
