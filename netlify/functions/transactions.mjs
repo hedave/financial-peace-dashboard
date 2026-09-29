@@ -11,8 +11,8 @@ import {
  * Auth: Authorization: Bearer <FIGPIG_TX_WRITE_TOKEN>
  * (alternate header: x-figpig-tx-write-token)
  * Never reuses FIGPIG_INGEST_SECRET or FIGPIG_BILLS_READ_TOKEN.
- * Applies rows through store.importTransactions (dedupe, pending settle, checking).
- * Synced rows land uncategorized: no rules, bill auto-match, auto-pay, or envelopes.
+ * Applies rows through store.importTransactions (dedupe, pending settle, checking,
+ * merchant category rules). Bill auto-match, auto-pay, and envelope assignment stay off.
  */
 
 const MAX_ROWS = 200;
@@ -219,7 +219,7 @@ function applyRows(remoteState, importRows) {
   const stats = store.importTransactions(importRows, {
     includePending: true,
     persist: false,
-    uncategorized: true,
+    bankSync: true,
   });
   const after = store.getState();
   const afterCount = Array.isArray(after.transactions) ? after.transactions.length : 0;

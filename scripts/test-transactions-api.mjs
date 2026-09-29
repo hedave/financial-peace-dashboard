@@ -71,8 +71,6 @@ function budgetWithManual() {
     debts: [],
     categoryRules: [
       { pattern: 'ingles', categoryId: 'env-groc-sync-test', createdAt: '2026-01-01' },
-      { pattern: 'usps', categoryId: 'env-house-sync-test', createdAt: '2026-01-01' },
-      { pattern: 'duke energy', categoryId: 'env-util-sync-test', createdAt: '2026-01-01' },
     ],
     _manual: manual,
   };
@@ -268,36 +266,51 @@ console.log('pending-then-posted settles one row: ok');
   assert.notEqual(res.json.checkingAfter, 0);
   assert.notEqual(res.json.checkingAfter, checkingBefore);
   const synced = (remote.state.transactions || []).find(t => t.externalId === 'plaid-ingles-1');
-  assertUncategorized(synced, 'ingles synced row');
+  assert.ok(synced, 'ingles synced row missing');
+  assert.equal(synced.categoryId, 'env-groc-sync-test', 'ingles should get seeded merchant rule');
+  assert.equal(synced.billId ?? null, null, 'ingles must not auto-match a bill');
 }
 console.log('manual transaction survives import: ok');
 
-// --- synced row has no category and no bill match ---
+// --- merchant rule categorizes; unmatched row stays uncategorized; auto-pay unpaid ---
 {
   const seed = budgetWithManual();
   seedRemote(seed);
   const res = await call({
     body: {
-      rows: [{
-        date: '2026-09-20',
-        amount: -87.43,
-        description: 'DUKE ENERGY',
-        pending: false,
-        externalId: 'plaid-duke-1',
-      }],
+      rows: [
+        {
+          date: '2026-09-26',
+          amount: -8.15,
+          description: 'INGLES MARKETS',
+          pending: false,
+          externalId: 'plaid-ingles-rule-1',
+        },
+        {
+          date: '2026-09-20',
+          amount: -87.43,
+          description: 'DUKE ENERGY',
+          pending: false,
+          externalId: 'plaid-duke-1',
+        },
+      ],
     },
   });
   assert.equal(res.status, 200, res.text);
-  assert.equal(res.json.added, 1, res.json);
-  assert.equal(res.json.checkingAfter, 912.57);
-  const synced = (remote.state.transactions || []).find(t => t.externalId === 'plaid-duke-1');
-  assertUncategorized(synced, 'duke energy synced row');
+  assert.equal(res.json.added, 2, res.json);
+  assert.equal(res.json.checkingAfter, 904.42);
+  const ingles = (remote.state.transactions || []).find(t => t.externalId === 'plaid-ingles-rule-1');
+  assert.ok(ingles, 'ingles synced row missing');
+  assert.equal(ingles.categoryId, 'env-groc-sync-test', 'matching merchant rule should set category');
+  assert.equal(ingles.billId ?? null, null);
+  const duke = (remote.state.transactions || []).find(t => t.externalId === 'plaid-duke-1');
+  assertUncategorized(duke, 'duke energy synced row with no rule');
   const bill = (remote.state.bills || []).find(b => b.id === 'bill-duke');
   assert.ok(bill, 'Duke Energy bill missing after sync');
   assert.equal(bill.status, 'unpaid', 'auto-pay bill must stay unpaid');
   assert.equal(bill.paidDate ?? null, null);
 }
-console.log('synced row has no category and no bill match: ok');
+console.log('merchant rule categorizes; unmatched stays uncategorized; auto-pay unpaid: ok');
 
 globalThis.fetch = origFetch;
 console.log('test-transactions-api: ok');

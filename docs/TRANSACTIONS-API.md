@@ -1,8 +1,8 @@
 # FigPig add-only `/api/transactions` (bank sync)
 
-Write path for CoS / the finance connector. Add-only: new rows go through FigPig’s existing import (`store.importTransactions`) for **dedupe**, **pending settle**, and **checking math**. Synced rows land **uncategorized**. David assigns envelopes himself.
+Write path for CoS / the finance connector. Add-only: new rows go through FigPig’s existing import (`store.importTransactions`) for **dedupe**, **pending settle**, **checking math**, and **merchant categorization rules** (same as a manual CSV import). A row lands uncategorized only when no rule matches. David assigns envelopes and pays bills himself.
 
-Does **not** run categorization rules, bill auto-match, auto-pay, or envelope assignment. Does **not** use `FIGPIG_INGEST_SECRET` or `FIGPIG_BILLS_READ_TOKEN`. Does **not** write `balances.checking` directly. Does **not** delete or edit existing manual transactions.
+Does **not** run bill auto-match, auto-pay, or envelope assignment from bank labels / payload hints. Does **not** use `FIGPIG_INGEST_SECRET` or `FIGPIG_BILLS_READ_TOKEN`. Does **not** write `balances.checking` directly. Does **not** delete or edit existing manual transactions.
 
 ## Endpoint
 
@@ -113,6 +113,6 @@ Counts only. No transaction bodies.
 | `skipped` | Rows the existing importer refused |
 | `checkingAfter` | Checking balance after import math (not a raw overwrite) |
 
-A synced row has **no** `categoryId`, **no** splits, and **no** bill/debt link. A matching auto-pay bill stays unpaid until David marks it.
+If a saved merchant rule matches, the row gets that rule’s category. Otherwise it stays uncategorized (no bill/debt link, no envelope from bank labels). A matching auto-pay bill stays unpaid until David marks it.
 
 `409` if there is no cloud budget yet (open FigPig once and Sync Now), or if the cloud row changed during apply (retry the same payload).
