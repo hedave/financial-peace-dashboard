@@ -147,4 +147,4 @@ Netlify env (add; do not reuse ingest or bills-read secrets):
 | --- | --- |
 | `FIGPIG_TX_WRITE_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/tx_write_token` |
 
-Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Merchant category rules run (uncategorized only when no rule matches). No bill auto-match, auto-pay, or envelope assignment. Does not write `balances.checking` directly; import math updates it.
+Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Merchant category rules run (uncategorized only when no rule matches). No bill auto-match, auto-pay, or envelope assignment. Optional `checkingBalance` overwrites `state.balances.checking` after import; omit it and import math updates checking.

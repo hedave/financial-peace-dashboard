@@ -312,5 +312,99 @@ console.log('manual transaction survives import: ok');
 }
 console.log('merchant rule categorizes; unmatched stays uncategorized; auto-pay unpaid: ok');
 
+// --- checkingBalance overwrites import math ---
+{
+  const bad = validateSyncBody({
+    checkingBalance: -1,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(bad.status, 400);
+  assert.match(bad.error, /checkingBalance/);
+
+  const tooBig = validateSyncBody({
+    checkingBalance: 1e7 + 0.01,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(tooBig.status, 400);
+
+  const nan = validateSyncBody({
+    checkingBalance: Number.NaN,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(nan.status, 400);
+
+  const inf = validateSyncBody({
+    checkingBalance: Number.POSITIVE_INFINITY,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(inf.status, 400);
+
+  const asString = validateSyncBody({
+    checkingBalance: '2532.05',
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(asString.status, 400);
+
+  const okZero = validateSyncBody({
+    checkingBalance: 0,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(okZero.checkingBalance, 0);
+
+  const okMax = validateSyncBody({
+    checkingBalance: 1e7,
+    rows: [{ date: '2026-09-29', amount: -5, description: 'x' }],
+  });
+  assert.equal(okMax.checkingBalance, 1e7);
+
+  const seed = budgetWithManual();
+  seedRemote(seed);
+  const withBalance = await call({
+    header: { 'x-forwarded-for': '10.0.0.2' },
+    body: {
+      checkingBalance: 2532.05,
+      rows: [{
+        date: '2026-09-26',
+        amount: -8.15,
+        description: 'USAA OVERRIDE',
+        pending: false,
+        externalId: 'plaid-checking-override-1',
+      }],
+    },
+  });
+  assert.equal(withBalance.status, 200, withBalance.text);
+  assert.equal(withBalance.json.added, 1);
+  assert.equal(withBalance.json.checkingAfter, 2532.05, 'response checkingAfter must be the posted bank number');
+  assert.equal(
+    remote.state.balances.checking,
+    2532.05,
+    `saved checking must be 2532.05, not import math; got ${remote.state.balances.checking}`,
+  );
+  assert.notEqual(remote.state.balances.checking, 1000 - 8.15);
+}
+console.log('checkingBalance overwrites import math: ok');
+
+// --- omitting checkingBalance leaves import math ---
+{
+  const seed = budgetWithManual();
+  seedRemote(seed);
+  const res = await call({
+    header: { 'x-forwarded-for': '10.0.0.3' },
+    body: {
+      rows: [{
+        date: '2026-09-26',
+        amount: -8.15,
+        description: 'USAA IMPORT MATH',
+        pending: false,
+        externalId: 'plaid-checking-math-1',
+      }],
+    },
+  });
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.json.checkingAfter, 991.85);
+  assert.equal(remote.state.balances.checking, 991.85);
+}
+console.log('omitting checkingBalance leaves import math: ok');
+
 globalThis.fetch = origFetch;
 console.log('test-transactions-api: ok');
