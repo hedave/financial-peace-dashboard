@@ -2,7 +2,7 @@
  * Behavior checks for the review fixes.
  * Run after the import suite. Uses a fake localStorage and the real store.
  */
-import { nameInDescription, findAutoPayBillForTransaction } from '../js/bill-matcher.js';
+import { nameInDescription, findAutoPayBillForTransaction, findExactBillForTransaction } from '../js/bill-matcher.js';
 import { parseUsaaPdfText } from '../js/pdf-import.js';
 import { getPreviousMonth } from '../js/utils.js';
 import { stateForCloud } from '../js/cloud-sync.js';
@@ -31,6 +31,40 @@ expect(
 expect(
   nameInDescription('Van (Card)', 'CARD PAYMENT') === false,
   'a generic word inside parentheses must not match',
+);
+expect(
+  nameInDescription('Property and Casualty', 'USAA P&C BILLPYMNT') === true,
+  'P&C should match a Property and Casualty bill',
+);
+expect(
+  nameInDescription('Property and Casualty', 'AND MORE STUFF') === false,
+  'the word and must not match Property and Casualty',
+);
+expect(
+  findExactBillForTransaction(
+    { type: 'expense', amount: 122.01, description: 'USAA P&C BILLPYMNT', date: '2026-09-11' },
+    [{
+      id: 'b-pc',
+      name: 'Property and Casualty',
+      amount: 122.01,
+      status: 'pending',
+      dueDate: '2026-09-10',
+    }],
+  )?.id === 'b-pc',
+  'exact $122.01 P&C payment should match the Property and Casualty bill',
+);
+expect(
+  findExactBillForTransaction(
+    { type: 'expense', amount: 124.68, description: 'USAA P&C BILLPYMNT', date: '2026-09-11' },
+    [{
+      id: 'b-pc',
+      name: 'Property and Casualty',
+      amount: 122.01,
+      status: 'pending',
+      dueDate: '2026-09-10',
+    }],
+  ) == null,
+  'a $124.68 P&C draft is not an exact match for a $122.01 bill',
 );
 
 const shortBill = {
@@ -232,6 +266,33 @@ expect(txById('tx-aug').billId === 'b-tesla', 'August Bridgecrest should link to
 expect(teslaBill().dueDate === '2026-09-28', `Tesla due date should roll to 2026-09-28, got ${teslaBill().dueDate}`);
 expect(teslaBill().status === 'pending', 'recurring Tesla bill stays open for the next cycle');
 expect(teslaBill().lastPaidDate === '2026-08-28', 'last Tesla payment should be the August draft');
+
+quietBooks();
+store.state.bills = [{
+  id: 'b-pc',
+  name: 'Property and Casualty',
+  amount: 122.01,
+  dueDate: '2026-09-10',
+  autoPay: false,
+  recurring: true,
+  status: 'pending',
+  categoryId: 'ins',
+}];
+store.state.transactions = [{
+  id: 'tx-pc',
+  date: '2026-09-11',
+  amount: 122.01,
+  type: 'expense',
+  description: 'USAA P&C BILLPYMNT',
+}];
+expect(store.linkOutstandingAutoPay() === 1, 'exact P&C payment should link on load');
+const pcTx = () => store.state.transactions.find(t => t.id === 'tx-pc');
+const pcBill = () => store.state.bills.find(b => b.id === 'b-pc');
+expect(pcTx().billId === 'b-pc', 'P&C payment should be tied to the bill');
+expect(pcTx().categoryId === 'ins', 'linking should file the payment in the bill envelope');
+expect(!store.transactionNeedsReview(pcTx()), 'a linked categorized payment should leave review');
+expect(pcBill().dueDate === '2026-10-10', `P&C due date should roll to 2026-10-10, got ${pcBill().dueDate}`);
+expect(pcBill().status === 'pending', 'recurring P&C bill stays open for the next cycle');
 
 if (failures.length) {
   console.error('test-review-fixes failed:');

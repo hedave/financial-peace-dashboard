@@ -20,7 +20,7 @@ import {
   looksLikeFederalTravelPayment,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
-import { findBillForTransaction, findAutoPayBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
+import { findBillForTransaction, findAutoPayBillForTransaction, findExactBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
 import {
   normalizePaySchedule,
   getScheduledChecksForMonth,
@@ -2725,6 +2725,9 @@ class Store {
       const bill = s.bills.find(b => b.id === billId);
       if (!tx || !bill || bill.status === 'paid') return;
       tx.billId = billId;
+      if (!tx.categoryId && !(tx.splits || []).length && bill.categoryId) {
+        tx.categoryId = bill.categoryId;
+      }
       const paidAmt = Math.abs(Number(tx.amount)) || Number(bill.amount);
       const paidDate = tx.date || todayISO();
       completeBillPaymentCycle(bill, paidDate, paidAmt);
@@ -2748,7 +2751,7 @@ class Store {
           || String(a.id || '').localeCompare(String(b.id || '')));
       let linked = false;
       for (const tx of txs) {
-        if (this.applyAutoPayBillIfMatched(tx, s)) {
+        if (this.applyAutoPayBillIfMatched(tx, s) || this.applyExactBillIfMatched(tx, s)) {
           total += 1;
           linked = true;
           break;
@@ -2788,6 +2791,27 @@ class Store {
       stats.billMatches = (stats.billMatches || 0) + 1;
       stats.autoPayBills = (stats.autoPayBills || 0) + 1;
     }
+    return true;
+  }
+
+  /**
+   * Penny-exact unique bill (P&C vs Property and Casualty). Copies the bill envelope
+   * so the row leaves the uncategorized review queue.
+   */
+  applyExactBillIfMatched(tx, s = this.state, stats = null, alreadyPaidBillIds = null) {
+    if (!tx || tx.type !== 'expense' || tx.billId || tx.ignoreBillMatch) return false;
+    if (this.isPassThroughCategory(tx.categoryId, s)) return false;
+    const bill = findExactBillForTransaction(tx, s.bills || []);
+    if (!bill || bill.status === 'paid') return false;
+    if (alreadyPaidBillIds?.has(bill.id)) return false;
+    tx.billId = bill.id;
+    if (!tx.categoryId && !(tx.splits || []).length && bill.categoryId) {
+      tx.categoryId = bill.categoryId;
+    }
+    const paidAmt = Math.abs(Number(tx.amount) || 0) || Number(bill.amount) || 0;
+    completeBillPaymentCycle(bill, tx.date || todayISO(), paidAmt);
+    alreadyPaidBillIds?.add(bill.id);
+    if (stats) stats.billMatches = (stats.billMatches || 0) + 1;
     return true;
   }
 
@@ -4368,7 +4392,10 @@ class Store {
               stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
               if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
               if (!bankSync) {
-                if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
+                if (
+                  !this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)
+                  && !this.applyExactBillIfMatched(existing, s, stats, autoPaidBillIds)
+                ) {
                   if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
                   else this.applyImportedDebtPayment(existing, s, stats);
                 }
@@ -4492,7 +4519,10 @@ class Store {
           stats.expenseAmount += Math.abs(Number(tx.amount) || 0);
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
           if (!bankSync) {
-            if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
+            if (
+              !this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)
+              && !this.applyExactBillIfMatched(newTx, s, stats, autoPaidBillIds)
+            ) {
               if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
               else this.applyImportedDebtPayment(newTx, s, stats);
             }

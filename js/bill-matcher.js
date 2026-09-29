@@ -40,7 +40,7 @@ export function amountDelta(a, b) {
 }
 
 const GENERIC_NAME_WORDS = new Set([
-  'card', 'bill', 'payment', 'bank', 'credit', 'loan', 'auto', 'account',
+  'card', 'bill', 'payment', 'bank', 'credit', 'loan', 'auto', 'account', 'and',
 ]);
 
 function escapeRegExp(value) {
@@ -78,12 +78,35 @@ function nameWords(entityName) {
   return [...new Set(found)];
 }
 
+/** Short bank labels that do not share words with the bill name. */
+const NAME_ALIASES = [
+  { short: 'p&c', long: 'property and casualty' },
+];
+
+function hasAliasForm(text, form) {
+  const raw = String(text || '').toLowerCase();
+  if (form.includes('&')) {
+    const tight = form.replace(/\s*&\s*/g, '&');
+    return hasToken(raw, tight);
+  }
+  const words = form.split(/\s+/).filter(w => w.length >= 3 && w !== 'and');
+  return words.length > 0 && words.every(w => hasToken(raw, w));
+}
+
+function aliasNameMatch(entityName, description) {
+  return NAME_ALIASES.some(alias =>
+    (hasAliasForm(entityName, alias.long) && hasAliasForm(description, alias.short))
+    || (hasAliasForm(entityName, alias.short) && hasAliasForm(description, alias.long))
+  );
+}
+
 export function nameInDescription(entityName, description) {
   const name = String(entityName || '').toLowerCase().trim();
   const desc = String(description || '').toLowerCase();
   if (!name || !desc) return false;
   if (hasToken(desc, name)) return true;
-  return nameWords(name).some(w => hasToken(desc, w));
+  if (nameWords(name).some(w => hasToken(desc, w))) return true;
+  return aliasNameMatch(name, desc);
 }
 
 function billNameInDescription(billName, description) {
@@ -206,6 +229,22 @@ export function findBillForTransaction(tx, bills = []) {
   if (byName.length === 1) return byName[0];
 
   return null;
+}
+
+/**
+ * One unpaid bill, same name (including P&C = Property and Casualty), penny-level amount.
+ * Safe to complete without a review tap. Close-but-not-equal amounts stay suggestions.
+ */
+export function findExactBillForTransaction(tx, bills = []) {
+  if (!tx || tx.type !== 'expense' || tx.billId || tx.ignoreBillMatch) return null;
+  const amt = Math.abs(Number(tx.amount) || 0);
+  if (!amt) return null;
+  const hits = unpaidBills(bills).filter(b =>
+    billNameInDescription(b.name, tx.description)
+    && billDueNearTransaction(b, tx)
+    && amountsMatch(b.amount, amt)
+  );
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
