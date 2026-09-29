@@ -863,12 +863,18 @@ export function normalizeImportRow(row, { includePending = true } = {}) {
   }
 
   const requestedSplits = type === 'expense' ? pickRequestedSplits(row, map, amount) : null;
+  const externalId = pickExactField(map, [
+    'externalid',
+    'external_id',
+    'external id',
+  ]);
   const base = {
     description,
     bankCategory,
     pending,
     requestedEnvelope: requestedEnvelope || null,
     requestedSplits,
+    ...(externalId ? { externalId } : {}),
   };
 
   return { date, amount, type, ...base };
@@ -1164,6 +1170,10 @@ export function isLikelyDuplicateTransaction(existing, tx, options = {}) {
  * must NOT be blocked — only exact rows or same-day amount+type.
  */
 export function isImportDuplicateTransaction(existing, tx) {
+  if (tx?.externalId) {
+    const id = String(tx.externalId);
+    if ((existing || []).some(t => t.externalId && String(t.externalId) === id)) return true;
+  }
   if (isDuplicateTransaction(existing, tx)) return true;
 
   const amt = Math.round(Math.abs(Number(tx.amount) || 0) * 100);
@@ -1216,6 +1226,12 @@ export function findBestPendingMatch(transactions, candidate, options = {}) {
 
   const incomingRef = extractBankRef(candidate.description);
   const scored = [];
+
+  if (candidate.externalId) {
+    const id = String(candidate.externalId);
+    const byExt = pending.find(t => t.externalId && String(t.externalId) === id);
+    if (byExt) return byExt;
+  }
 
   pending.forEach(tx => {
     const sameType = tx.type === candidate.type;

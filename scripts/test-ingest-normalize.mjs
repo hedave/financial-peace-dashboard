@@ -133,6 +133,16 @@ assert(splitRow[0].requestedSplits?.[0].amount === 45.12, 'ingest captures split
 assert(splitRow[0].requestedSplits?.[1].amount === 54.88, 'ingest fills rest');
 assert(inboxRowsToImportObjects(splitRow)[0].Splits.length === 2, 'splits travel on import row');
 
+const withExt = normalizeIngestTransactions([{
+  date: '2026-09-28',
+  amount: -5.66,
+  description: 'Chick-fil-A',
+  pending: false,
+  externalId: 'plaid-txn-id',
+}]);
+assert(withExt[0].externalId === 'plaid-txn-id', 'ingest keeps externalId');
+assert(inboxRowsToImportObjects(withExt)[0].ExternalId === 'plaid-txn-id', 'externalId travels on import row');
+
 const catsWithHouse = [
   { id: 'env-house', name: 'Household / Misc', parentId: null },
   { id: 'env-groceries', name: 'Groceries', parentId: null },

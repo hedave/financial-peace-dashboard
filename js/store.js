@@ -4214,7 +4214,12 @@ class Store {
     return n;
   }
 
-  importTransactions(rows, { includePending = true, persist = true, pruneMissingBankPending = false } = {}) {
+  importTransactions(rows, {
+    includePending = true,
+    persist = true,
+    pruneMissingBankPending = false,
+    bankSync = false,
+  } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
@@ -4238,6 +4243,7 @@ class Store {
           amount: tx.amount,
           type: tx.type,
           description: tx.description,
+          ...(tx.externalId ? { externalId: tx.externalId } : {}),
         };
         const bankPending = !!tx.pending;
 
@@ -4245,6 +4251,11 @@ class Store {
           const existingBankHold = !!existing.bankPending || isTransactionPending(existing);
           const incomingPosted = !bankPending;
           let changed = false;
+
+          if (tx.externalId && existing.externalId !== tx.externalId) {
+            existing.externalId = tx.externalId;
+            changed = true;
+          }
 
           if (incomingPosted) {
             if (tx.date && tx.date !== existing.date) {
@@ -4277,7 +4288,12 @@ class Store {
             changed = true;
           }
 
-          if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
+          if (
+            !bankSync
+            && tx.bankCategory
+            && !existing.categoryId
+            && !this.isSplitTransaction(existing)
+          ) {
             existing.importCategory = tx.bankCategory;
             // Requested envelope/category/splits apply to NEW uncategorized rows only.
             // Do not recategorize a merge of an already-enveloped (or uncategorized) twin.
@@ -4321,7 +4337,8 @@ class Store {
           }
 
           if (
-            existing.type === 'income' && tx.type === 'income'
+            !bankSync
+            && existing.type === 'income' && tx.type === 'income'
             && !existing.categoryId
             && !this.isSplitTransaction(existing)
           ) {
@@ -4350,9 +4367,11 @@ class Store {
               stats.expense++;
               stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
               if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
-              if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
-                if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
-                else this.applyImportedDebtPayment(existing, s, stats);
+              if (!bankSync) {
+                if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
+                  if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
+                  else this.applyImportedDebtPayment(existing, s, stats);
+                }
               }
             }
             stats.matchedPending++;
@@ -4388,6 +4407,17 @@ class Store {
           stats.duplicates++;
         };
 
+        if (tx.externalId) {
+          const extId = String(tx.externalId);
+          const byExt = (s.transactions || []).find(
+            t => t.externalId && String(t.externalId) === extId,
+          );
+          if (byExt) {
+            settleExisting(byExt);
+            return;
+          }
+        }
+
         // Match a pending manual log → clear in place when the bank row posts
         const pendingMatch = findBestPendingMatch(s.transactions, candidate);
         if (pendingMatch) {
@@ -4402,23 +4432,27 @@ class Store {
           return;
         }
 
-        const requestedSplits = resolveRequestedSplits(
-          tx.requestedSplits,
-          s.categories,
-          tx.amount,
-        );
+        const requestedSplits = bankSync
+          ? null
+          : resolveRequestedSplits(
+            tx.requestedSplits,
+            s.categories,
+            tx.amount,
+          );
         const envelopeHint = tx.requestedEnvelope || tx.bankCategory || '';
-        const requestedId = requestedSplits
+        const requestedId = (bankSync || requestedSplits)
           ? null
           : resolveRequestedEnvelope(envelopeHint, s.categories);
-        let categoryId = requestedSplits
+        let categoryId = bankSync
           ? null
-          : (requestedId || resolveCategoryId(
-            tx.bankCategory,
-            tx.description,
-            s.categories,
-            tx.type,
-          ));
+          : (requestedSplits
+            ? null
+            : (requestedId || resolveCategoryId(
+              tx.bankCategory,
+              tx.description,
+              s.categories,
+              tx.type,
+            )));
 
         const newTx = {
           id: generateId(),
@@ -4427,10 +4461,11 @@ class Store {
           type: tx.type,
           categoryId,
           description: tx.description,
-          importCategory: tx.bankCategory || null,
+          importCategory: bankSync ? null : (tx.bankCategory || null),
           clearingStatus: 'cleared',
           ...(bankPending ? { bankPending: true } : {}),
           ...(requestedSplits ? { splits: requestedSplits } : {}),
+          ...(tx.externalId ? { externalId: String(tx.externalId) } : {}),
         };
 
         if (tx.type === 'expense' && !categoryId) {
@@ -4441,7 +4476,7 @@ class Store {
         }
 
         // Pending inbound ACH is already in USAA available — credit checking now.
-        if (tx.type === 'income') {
+        if (!bankSync && tx.type === 'income') {
           this.earmarkFederalTravelIncome(s, newTx);
         }
         if (tx.type === 'income' && this.applyImportedIncome(s, newTx)) {
@@ -4449,16 +4484,18 @@ class Store {
         }
 
         s.transactions.push(newTx);
-        this.settleWorkTravelLeftoverToDad(s, newTx);
+        if (!bankSync) this.settleWorkTravelLeftoverToDad(s, newTx);
 
         if (tx.type === 'expense') {
           s.balances.checking -= tx.amount;
           stats.expense++;
           stats.expenseAmount += Math.abs(Number(tx.amount) || 0);
           if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
-          if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
-            if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
-            else this.applyImportedDebtPayment(newTx, s, stats);
+          if (!bankSync) {
+            if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
+              if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
+              else this.applyImportedDebtPayment(newTx, s, stats);
+            }
           }
         } else {
           s.balances.checking += tx.amount;
