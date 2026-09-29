@@ -4214,7 +4214,12 @@ class Store {
     return n;
   }
 
-  importTransactions(rows, { includePending = true, persist = true, pruneMissingBankPending = false } = {}) {
+  importTransactions(rows, {
+    includePending = true,
+    persist = true,
+    pruneMissingBankPending = false,
+    uncategorized = false,
+  } = {}) {
     const stats = {
       count: 0, income: 0, expense: 0, categorized: 0, ruleApplied: 0,
       billMatches: 0, autoPayBills: 0, incomeLinked: 0, skipped: 0, duplicates: 0,
@@ -4283,7 +4288,12 @@ class Store {
             changed = true;
           }
 
-          if (tx.bankCategory && !existing.categoryId && !this.isSplitTransaction(existing)) {
+          if (
+            !uncategorized
+            && tx.bankCategory
+            && !existing.categoryId
+            && !this.isSplitTransaction(existing)
+          ) {
             existing.importCategory = tx.bankCategory;
             // Requested envelope/category/splits apply to NEW uncategorized rows only.
             // Do not recategorize a merge of an already-enveloped (or uncategorized) twin.
@@ -4319,7 +4329,11 @@ class Store {
             changed = true;
           }
 
-          if (!existing.categoryId && !this.isSplitTransaction(existing)) {
+          if (
+            !uncategorized
+            && !existing.categoryId
+            && !this.isSplitTransaction(existing)
+          ) {
             if (this.applyRulesToTransaction(existing, s)) {
               stats.ruleApplied++;
               changed = true;
@@ -4327,7 +4341,8 @@ class Store {
           }
 
           if (
-            existing.type === 'income' && tx.type === 'income'
+            !uncategorized
+            && existing.type === 'income' && tx.type === 'income'
             && !existing.categoryId
             && !this.isSplitTransaction(existing)
           ) {
@@ -4355,10 +4370,12 @@ class Store {
             } else if (existing.type === 'expense' || existing.type === 'debt_payment' || existing.type === 'transfer') {
               stats.expense++;
               stats.expenseAmount += Math.abs(Number(existing.amount) || 0);
-              if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
-              if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
-                if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
-                else this.applyImportedDebtPayment(existing, s, stats);
+              if (!uncategorized) {
+                if (existing.categoryId || this.isSplitTransaction(existing)) stats.categorized++;
+                if (!this.applyAutoPayBillIfMatched(existing, s, stats, autoPaidBillIds)) {
+                  if (findBillForTransaction(existing, s.bills)) stats.billMatches++;
+                  else this.applyImportedDebtPayment(existing, s, stats);
+                }
               }
             }
             stats.matchedPending++;
@@ -4419,23 +4436,27 @@ class Store {
           return;
         }
 
-        const requestedSplits = resolveRequestedSplits(
-          tx.requestedSplits,
-          s.categories,
-          tx.amount,
-        );
+        const requestedSplits = uncategorized
+          ? null
+          : resolveRequestedSplits(
+            tx.requestedSplits,
+            s.categories,
+            tx.amount,
+          );
         const envelopeHint = tx.requestedEnvelope || tx.bankCategory || '';
-        const requestedId = requestedSplits
+        const requestedId = (uncategorized || requestedSplits)
           ? null
           : resolveRequestedEnvelope(envelopeHint, s.categories);
-        let categoryId = requestedSplits
+        let categoryId = uncategorized
           ? null
-          : (requestedId || resolveCategoryId(
-            tx.bankCategory,
-            tx.description,
-            s.categories,
-            tx.type,
-          ));
+          : (requestedSplits
+            ? null
+            : (requestedId || resolveCategoryId(
+              tx.bankCategory,
+              tx.description,
+              s.categories,
+              tx.type,
+            )));
 
         const newTx = {
           id: generateId(),
@@ -4444,14 +4465,14 @@ class Store {
           type: tx.type,
           categoryId,
           description: tx.description,
-          importCategory: tx.bankCategory || null,
+          importCategory: uncategorized ? null : (tx.bankCategory || null),
           clearingStatus: 'cleared',
           ...(bankPending ? { bankPending: true } : {}),
           ...(requestedSplits ? { splits: requestedSplits } : {}),
           ...(tx.externalId ? { externalId: String(tx.externalId) } : {}),
         };
 
-        if (tx.type === 'expense' && !categoryId) {
+        if (!uncategorized && tx.type === 'expense' && !categoryId) {
           if (this.applyRulesToTransaction(newTx, s)) {
             stats.ruleApplied++;
             if (newTx.categoryId || newTx.splits) stats.categorized++;
@@ -4459,7 +4480,7 @@ class Store {
         }
 
         // Pending inbound ACH is already in USAA available — credit checking now.
-        if (tx.type === 'income') {
+        if (!uncategorized && tx.type === 'income') {
           this.earmarkFederalTravelIncome(s, newTx);
         }
         if (tx.type === 'income' && this.applyImportedIncome(s, newTx)) {
@@ -4467,16 +4488,18 @@ class Store {
         }
 
         s.transactions.push(newTx);
-        this.settleWorkTravelLeftoverToDad(s, newTx);
+        if (!uncategorized) this.settleWorkTravelLeftoverToDad(s, newTx);
 
         if (tx.type === 'expense') {
           s.balances.checking -= tx.amount;
           stats.expense++;
           stats.expenseAmount += Math.abs(Number(tx.amount) || 0);
-          if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
-          if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
-            if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
-            else this.applyImportedDebtPayment(newTx, s, stats);
+          if (!uncategorized) {
+            if (newTx.categoryId || this.isSplitTransaction(newTx)) stats.categorized++;
+            if (!this.applyAutoPayBillIfMatched(newTx, s, stats, autoPaidBillIds)) {
+              if (findBillForTransaction(newTx, s.bills)) stats.billMatches++;
+              else this.applyImportedDebtPayment(newTx, s, stats);
+            }
           }
         } else {
           s.balances.checking += tx.amount;

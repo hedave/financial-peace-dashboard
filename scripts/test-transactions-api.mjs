@@ -50,7 +50,7 @@ function budgetWithManual() {
     date: '2026-09-01',
     amount: 42,
     type: 'expense',
-    categoryId: null,
+    categoryId: 'env-dining-sync-test',
     description: 'Manual coffee log',
     memo: 'typed by hand',
     clearingStatus: 'cleared',
@@ -58,11 +58,32 @@ function budgetWithManual() {
   return {
     transactions: [structuredClone(manual)],
     balances: { checking: 1000, emergencyFund: 0, savings: [] },
-    bills: [],
+    bills: [{
+      id: 'bill-duke',
+      name: 'Duke Energy',
+      amount: 87.43,
+      status: 'unpaid',
+      autoPay: true,
+      dueDate: '2026-09-20',
+      recurring: true,
+      categoryId: 'env-util-sync-test',
+    }],
     debts: [],
-    categoryRules: [],
+    categoryRules: [
+      { pattern: 'ingles', categoryId: 'env-groc-sync-test', createdAt: '2026-01-01' },
+      { pattern: 'usps', categoryId: 'env-house-sync-test', createdAt: '2026-01-01' },
+      { pattern: 'duke energy', categoryId: 'env-util-sync-test', createdAt: '2026-01-01' },
+    ],
     _manual: manual,
   };
+}
+
+function assertUncategorized(tx, label) {
+  assert.ok(tx, `${label}: missing row`);
+  assert.equal(tx.categoryId ?? null, null, `${label}: expected no category, got ${tx.categoryId}`);
+  assert.equal(tx.billId ?? null, null, `${label}: expected no bill match, got ${tx.billId}`);
+  assert.equal(tx.debtId ?? null, null, `${label}: expected no debt link, got ${tx.debtId}`);
+  assert.ok(!Array.isArray(tx.splits) || tx.splits.length === 0, `${label}: expected no splits`);
 }
 
 function makeReq({ token = TOKEN, header, body, method = 'POST' } = {}) {
@@ -175,6 +196,7 @@ console.log('400 on unknown field: ok');
   assert.equal(second.json.checkingAfter, checkingAfterAdd, 'checking must not move on duplicate');
   const copies = (remote.state.transactions || []).filter(t => t.externalId === 'plaid-dup-1');
   assert.equal(copies.length, 1, 'duplicate must not insert a second row');
+  assertUncategorized(copies[0], 'duplicate-path synced row');
 }
 console.log('duplicate row adds nothing: ok');
 
@@ -210,6 +232,7 @@ console.log('duplicate row adds nothing: ok');
   const twins = (remote.state.transactions || []).filter(t => t.externalId === 'plaid-settle-1');
   assert.equal(twins.length, 1, 'pending then posted must stay one row');
   assert.equal(!!twins[0].bankPending, false, 'posted settle should clear bankPending');
+  assertUncategorized(twins[0], 'settled pending synced row');
 }
 console.log('pending-then-posted settles one row: ok');
 
@@ -240,11 +263,41 @@ console.log('pending-then-posted settles one row: ok');
   assert.equal(still.memo, manualSnap.memo);
   assert.equal(still.clearingStatus, manualSnap.clearingStatus);
   assert.equal(still.type, manualSnap.type);
+  assert.equal(still.categoryId, manualSnap.categoryId, 'manual envelope must stay');
   assert.equal(res.json.checkingAfter, checkingBefore - 8.15);
   assert.notEqual(res.json.checkingAfter, 0);
   assert.notEqual(res.json.checkingAfter, checkingBefore);
+  const synced = (remote.state.transactions || []).find(t => t.externalId === 'plaid-ingles-1');
+  assertUncategorized(synced, 'ingles synced row');
 }
 console.log('manual transaction survives import: ok');
+
+// --- synced row has no category and no bill match ---
+{
+  const seed = budgetWithManual();
+  seedRemote(seed);
+  const res = await call({
+    body: {
+      rows: [{
+        date: '2026-09-20',
+        amount: -87.43,
+        description: 'DUKE ENERGY',
+        pending: false,
+        externalId: 'plaid-duke-1',
+      }],
+    },
+  });
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.json.added, 1, res.json);
+  assert.equal(res.json.checkingAfter, 912.57);
+  const synced = (remote.state.transactions || []).find(t => t.externalId === 'plaid-duke-1');
+  assertUncategorized(synced, 'duke energy synced row');
+  const bill = (remote.state.bills || []).find(b => b.id === 'bill-duke');
+  assert.ok(bill, 'Duke Energy bill missing after sync');
+  assert.equal(bill.status, 'unpaid', 'auto-pay bill must stay unpaid');
+  assert.equal(bill.paidDate ?? null, null);
+}
+console.log('synced row has no category and no bill match: ok');
 
 globalThis.fetch = origFetch;
 console.log('test-transactions-api: ok');

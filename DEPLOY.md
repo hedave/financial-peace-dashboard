@@ -147,4 +147,4 @@ Netlify env (add; do not reuse ingest or bills-read secrets):
 | --- | --- |
 | `FIGPIG_TX_WRITE_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/tx_write_token` |
 
-Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Does not write `balances.checking` directly; import math updates it.
+Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Synced rows land uncategorized (no rules, bill match, auto-pay, or envelopes). Does not write `balances.checking` directly; import math updates it.

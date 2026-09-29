@@ -1,8 +1,8 @@
 # FigPig add-only `/api/transactions` (bank sync)
 
-Write path for CoS / the finance connector. Add-only: new rows go through FigPig’s existing import (`store.importTransactions`). Dedupe, pending settle, categorization, bill auto-match, and checking math run exactly as a manual CSV/paste import.
+Write path for CoS / the finance connector. Add-only: new rows go through FigPig’s existing import (`store.importTransactions`) for **dedupe**, **pending settle**, and **checking math**. Synced rows land **uncategorized**. David assigns envelopes himself.
 
-Does **not** use `FIGPIG_INGEST_SECRET` or `FIGPIG_BILLS_READ_TOKEN`. Does **not** write `balances.checking` directly. Does **not** delete or edit existing manual transactions.
+Does **not** run categorization rules, bill auto-match, auto-pay, or envelope assignment. Does **not** use `FIGPIG_INGEST_SECRET` or `FIGPIG_BILLS_READ_TOKEN`. Does **not** write `balances.checking` directly. Does **not** delete or edit existing manual transactions.
 
 ## Endpoint
 
@@ -112,5 +112,7 @@ Counts only. No transaction bodies.
 | `settledPending` | Pending rows updated in place when the posted twin arrived |
 | `skipped` | Rows the existing importer refused |
 | `checkingAfter` | Checking balance after import math (not a raw overwrite) |
+
+A synced row has **no** `categoryId`, **no** splits, and **no** bill/debt link. A matching auto-pay bill stays unpaid until David marks it.
 
 `409` if there is no cloud budget yet (open FigPig once and Sync Now), or if the cloud row changed during apply (retry the same payload).
