@@ -150,9 +150,17 @@ export function normalizeIngestSplits(raw, totalAbs) {
   return parts.map(p => ({ envelope: p.envelope, amount: r2(p.amount) }));
 }
 
+function pickExternalId(row) {
+  if (!row || typeof row !== 'object') return null;
+  const raw = row.externalId ?? row.external_id ?? row.ExternalId;
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim().slice(0, 128);
+  return s || null;
+}
+
 /**
  * @param {unknown} raw
- * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null, requestedEnvelope: string|null, requestedSplits: { envelope: string, amount: number }[]|null }[]}
+ * @returns {{ date: string, amount: number, type: 'income'|'expense', description: string, pending: boolean, bankCategory: string|null, requestedEnvelope: string|null, requestedSplits: { envelope: string, amount: number }[]|null, externalId?: string }[]}
  */
 export function normalizeIngestTransactions(raw) {
   const list = Array.isArray(raw) ? raw : [];
@@ -165,6 +173,7 @@ export function normalizeIngestTransactions(raw) {
     const pending = row.pending === true
       || /pending/i.test(String(row.status || row.Status || ''));
     const type = signed < 0 ? 'expense' : 'income';
+    const externalId = pickExternalId(row);
     const description = redactSensitive(
       row.description || row.Description || row.merchant || row.merchant_name || row.name || 'USAA transaction',
     );
@@ -196,6 +205,7 @@ export function normalizeIngestTransactions(raw) {
       bankCategory,
       requestedEnvelope,
       requestedSplits,
+      ...(externalId ? { externalId } : {}),
     });
   }
   return out;
@@ -210,5 +220,6 @@ export function inboxRowsToImportObjects(txs) {
     Category: t.bankCategory || '',
     Envelope: t.requestedEnvelope || '',
     Splits: t.requestedSplits || [],
+    ...(t.externalId ? { ExternalId: t.externalId } : {}),
   }));
 }

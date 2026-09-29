@@ -136,3 +136,15 @@ Netlify env (add; do not reuse ingest secret):
 | `FIGPIG_BILLS_READ_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/bills_read_token` |
 
 Function: `netlify/functions/bills.mjs` → `GET /api/bills`.
+
+## CoS transaction write API
+
+Add-only bank sync. See `docs/TRANSACTIONS-API.md`.
+
+Netlify env (add; do not reuse ingest or bills-read secrets):
+
+| Variable | Notes |
+| --- | --- |
+| `FIGPIG_TX_WRITE_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/tx_write_token` |
+
+Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Does not write `balances.checking` directly; import math updates it.

@@ -4238,6 +4238,7 @@ class Store {
           amount: tx.amount,
           type: tx.type,
           description: tx.description,
+          ...(tx.externalId ? { externalId: tx.externalId } : {}),
         };
         const bankPending = !!tx.pending;
 
@@ -4245,6 +4246,11 @@ class Store {
           const existingBankHold = !!existing.bankPending || isTransactionPending(existing);
           const incomingPosted = !bankPending;
           let changed = false;
+
+          if (tx.externalId && existing.externalId !== tx.externalId) {
+            existing.externalId = tx.externalId;
+            changed = true;
+          }
 
           if (incomingPosted) {
             if (tx.date && tx.date !== existing.date) {
@@ -4388,6 +4394,17 @@ class Store {
           stats.duplicates++;
         };
 
+        if (tx.externalId) {
+          const extId = String(tx.externalId);
+          const byExt = (s.transactions || []).find(
+            t => t.externalId && String(t.externalId) === extId,
+          );
+          if (byExt) {
+            settleExisting(byExt);
+            return;
+          }
+        }
+
         // Match a pending manual log → clear in place when the bank row posts
         const pendingMatch = findBestPendingMatch(s.transactions, candidate);
         if (pendingMatch) {
@@ -4431,6 +4448,7 @@ class Store {
           clearingStatus: 'cleared',
           ...(bankPending ? { bankPending: true } : {}),
           ...(requestedSplits ? { splits: requestedSplits } : {}),
+          ...(tx.externalId ? { externalId: String(tx.externalId) } : {}),
         };
 
         if (tx.type === 'expense' && !categoryId) {
