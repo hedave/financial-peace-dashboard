@@ -12,7 +12,9 @@ import {
  * (alternate header: x-figpig-tx-write-token)
  * Never reuses FIGPIG_INGEST_SECRET or FIGPIG_BILLS_READ_TOKEN.
  * Applies rows through store.importTransactions (dedupe, pending settle, checking,
- * merchant category rules). Bill auto-match, auto-pay, and envelope assignment stay off.
+ * merchant category rules). Optional top-level checkingBalance overwrites
+ * state.balances.checking after import (does not recompute from rows).
+ * Bill auto-match, auto-pay, and envelope assignment stay off.
  */
 
 const MAX_ROWS = 200;
@@ -20,9 +22,10 @@ const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 10;
 const hits = new Map(); // best-effort per instance
 
-const BODY_KEYS = new Set(['rows']);
+const BODY_KEYS = new Set(['rows', 'checkingBalance']);
 const ROW_KEYS = new Set(['date', 'amount', 'description', 'pending', 'externalId']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const CHECKING_BALANCE_MAX = 1e7;
 
 function json(status, body) {
   return new Response(JSON.stringify(body), {
@@ -107,19 +110,26 @@ function money2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-export function publicSyncResult(stats, { added, checkingAfter }) {
+export function publicSyncResult(stats, { added, checkingAfter, checkingExact }) {
   return {
     added: Number(added) || 0,
     duplicates: Number(stats?.duplicates) || 0,
     settledPending: Number(stats?.matchedPending) || 0,
     skipped: Number(stats?.skipped) || 0,
-    checkingAfter: money2(checkingAfter),
+    checkingAfter: checkingExact ? checkingAfter : money2(checkingAfter),
   };
+}
+
+function parseCheckingBalance(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > CHECKING_BALANCE_MAX) {
+    return { status: 400, error: 'checkingBalance must be a finite number between 0 and 1e7' };
+  }
+  return { value };
 }
 
 /**
  * Strict body check. Rejects unknown keys on the object and on each row.
- * @returns {{ status: number, error: string } | { rows: object[] }}
+ * @returns {{ status: number, error: string } | { rows: object[], checkingBalance?: number }}
  */
 export function validateSyncBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -128,6 +138,12 @@ export function validateSyncBody(body) {
   const extra = unknownKeys(body, BODY_KEYS);
   if (extra.length) {
     return { status: 400, error: `Unknown field: ${extra[0]}` };
+  }
+  let checkingBalance;
+  if ('checkingBalance' in body) {
+    const parsed = parseCheckingBalance(body.checkingBalance);
+    if (parsed.error) return parsed;
+    checkingBalance = parsed.value;
   }
   if (!Array.isArray(body.rows)) {
     return { status: 400, error: 'rows must be an array' };
@@ -171,7 +187,7 @@ export function validateSyncBody(body) {
     }
   }
 
-  return { rows: body.rows };
+  return { rows: body.rows, checkingBalance };
 }
 
 async function loadBudget(url, key, ownerId) {
@@ -211,7 +227,7 @@ function withStoreLock(fn) {
   return run;
 }
 
-function applyRows(remoteState, importRows) {
+function applyRows(remoteState, importRows, checkingBalance) {
   store.hydrateFromObject(remoteState);
   const beforeCount = Array.isArray(store.getState().transactions)
     ? store.getState().transactions.length
@@ -222,11 +238,18 @@ function applyRows(remoteState, importRows) {
     bankSync: true,
   });
   const after = store.getState();
+  if (checkingBalance !== undefined) {
+    if (!after.balances || typeof after.balances !== 'object') {
+      after.balances = {};
+    }
+    after.balances.checking = checkingBalance;
+  }
   const afterCount = Array.isArray(after.transactions) ? after.transactions.length : 0;
   return {
     stats,
     added: Math.max(0, afterCount - beforeCount),
     checkingAfter: after.balances?.checking,
+    checkingExact: checkingBalance !== undefined,
   };
 }
 
@@ -279,12 +302,12 @@ export default async (req) => {
     if (!remote?.state) {
       return { missing: true };
     }
-    let applied = applyRows(remote.state, importRows);
+    let applied = applyRows(remote.state, importRows, checked.checkingBalance);
     let saved = await saveBudget(supabaseUrl, serviceKey, ownerId, store.getState(), remote.updated_at);
     if (!saved.ok) {
       remote = await loadBudget(supabaseUrl, serviceKey, ownerId);
       if (!remote?.state) throw new Error('Budget disappeared during apply');
-      applied = applyRows(remote.state, importRows);
+      applied = applyRows(remote.state, importRows, checked.checkingBalance);
       saved = await saveBudget(supabaseUrl, serviceKey, ownerId, store.getState(), remote.updated_at);
     }
     return { missing: false, saved: saved.ok, ...applied };
@@ -306,6 +329,7 @@ export default async (req) => {
   return json(200, publicSyncResult(result.stats, {
     added: result.added,
     checkingAfter: result.checkingAfter,
+    checkingExact: result.checkingExact,
   }));
 };
 
