@@ -1,4 +1,5 @@
-import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState, getCurrentMonth, getMonthLabel } from '../utils.js';
+import { icon } from '../icons.js';
+import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState, getCurrentMonth, getMonthLabel, labelFor } from '../utils.js';
 // Recurring bills: after pay, store advances due date +1 month and sets unpaid again.
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
@@ -69,15 +70,17 @@ export function renderBills(container) {
   const monthBillLoad = Math.round((thisMonthTotal + paidThisMonthTotal) * 100) / 100;
 
   container.innerHTML = '';
-  container.appendChild(el('div', { className: 'page-header' },
-    el('h2', {}, 'Bills & Payments'),
-    el('p', {},
-      `${getMonthLabel(month)} — this month’s dues here; after you pay, next cycle waits under Later until the 1st.`,
+  container.appendChild(el('div', { className: 'page-header page-header--action' },
+    el('div', { className: 'page-header__titles' },
+      el('h2', {}, 'Bills'),
+      el('p', {}, `${getMonthLabel(month)} · paid bills move to Later until the 1st`),
     ),
-  ));
-
-  container.appendChild(el('div', { className: 'btn-group section' },
-    el('button', { className: 'btn btn-primary', onClick: () => openBillForm() }, '+ Add Bill'),
+    el('button', {
+      type: 'button',
+      className: 'btn btn-tertiary page-header__action',
+      onClick: () => openBillForm(),
+      'aria-label': 'Add bill',
+    }, icon('plus', 20), 'Add'),
   ));
 
   if (!allBills.length) {
@@ -92,7 +95,7 @@ export function renderBills(container) {
       el('div', {
         className: `card-value money${thisMonthTotal > 0 ? ' accent' : ' positive'}`,
       }, formatCurrency(thisMonthTotal)),
-      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+      el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0' },
         thisMonthBills.length
           ? `${thisMonthBills.length} bill${thisMonthBills.length === 1 ? '' : 's'}${overdueCount ? ` · ${overdueCount} overdue` : ''}`
           : 'All caught up for this month',
@@ -101,7 +104,7 @@ export function renderBills(container) {
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, `Paid in ${getMonthLabel(month).split(' ')[0]}`),
       el('div', { className: 'card-value money positive' }, formatCurrency(paidThisMonthTotal)),
-      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+      el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0' },
         paidThisMonth.length
           ? `${paidThisMonth.length} payment${paidThisMonth.length === 1 ? '' : 's'} recorded`
           : 'None marked paid yet',
@@ -110,14 +113,14 @@ export function renderBills(container) {
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'This month’s bill load'),
       el('div', { className: 'card-value money' }, formatCurrency(monthBillLoad)),
-      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+      el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0' },
         'Still due + already paid this month',
       ),
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Later (upcoming)'),
       el('div', { className: 'card-value money' }, formatCurrency(laterTotal)),
-      el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+      el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0' },
         laterBills.length
           ? `${laterBills.length} bill${laterBills.length === 1 ? '' : 's'} after this month`
           : 'No future-dated bills',
@@ -169,27 +172,39 @@ export function renderBills(container) {
   function renderPanel() {
     panel.innerHTML = '';
     if (billsTab === 'thisMonth') {
-      panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
-        'Due this calendar month, plus anything still unpaid from earlier (overdue). Future dues are under Later.',
+      panel.appendChild(el('p', { className: 'tx-form-hint mb-3' },
+        'Due this month, plus anything still unpaid from earlier.',
       ));
       if (!thisMonthBills.length) {
-        panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+        panel.appendChild(el('div', { className: 'card empty-card', role: 'status' },
           laterBills.length
-            ? `✅ Nothing left for ${getMonthLabel(month)}. ${laterBills.length} bill${laterBills.length === 1 ? '' : 's'} waiting under Later (they move here on the 1st).`
-            : '✅ All caught up — no bills due this month.',
+            ? `Nothing left for ${getMonthLabel(month)}. ${laterBills.length} bill${laterBills.length === 1 ? '' : 's'} waiting under Later (they move here on the 1st).`
+            : 'All caught up. No bills due this month.',
         ));
       } else {
-        panel.appendChild(billsTable(thisMonthBills, state, 'upcoming'));
+        const groups = [
+          ['Overdue', b => billDisplay(b, state, 'upcoming').status === 'overdue'],
+          ['Due this week', b => billDisplay(b, state, 'upcoming').status === 'due_soon'],
+          ['Later this month', () => true],
+        ];
+        const used = new Set();
+        groups.forEach(([label, test]) => {
+          const list = thisMonthBills.filter(b => !used.has(b.id) && test(b));
+          list.forEach(b => used.add(b.id));
+          if (!list.length) return;
+          panel.appendChild(el('h3', { className: 'list-section-title' }, `${label} (${list.length})`));
+          panel.appendChild(billsTable(list, state, 'upcoming'));
+        });
       }
       return;
     }
 
     if (billsTab === 'later') {
-      panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
-        'Due after this month (e.g. next cycle after you mark paid). On the 1st they automatically show under This month — no extra step.',
+      panel.appendChild(el('p', { className: 'tx-form-hint mb-3' },
+        'Due after this month. They move to This month on the 1st.',
       ));
       if (!laterBills.length) {
-        panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+        panel.appendChild(el('div', { className: 'card empty-card', role: 'status' },
           'No future-dated bills yet. Pay a recurring bill and its next due date will appear here.',
         ));
       } else {
@@ -199,18 +214,18 @@ export function renderBills(container) {
     }
 
     // Paid tab
-    panel.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+    panel.appendChild(el('p', { className: 'tx-form-hint mb-3' },
       `Payments recorded in ${getMonthLabel(month)}. Recurring bills also list their next due date.`,
     ));
     if (paidThisMonth.length) {
       panel.appendChild(billsTable(paidThisMonth, state, 'paidThisMonth'));
     } else {
-      panel.appendChild(el('div', { className: 'card', style: 'padding:1.25rem 1rem;color:var(--text-muted);font-size:0.9rem' },
+      panel.appendChild(el('div', { className: 'card empty-card', role: 'status' },
         'No bills marked paid this month yet.',
       ));
     }
     if (paidOneTime.length) {
-      panel.appendChild(el('div', { className: 'section-title', style: 'margin-top:1.25rem' },
+      panel.appendChild(el('div', { className: 'section-title mt-5' },
         `One-time paid (${paidOneTime.length})`,
       ));
       panel.appendChild(billsTable(paidOneTime, state, 'paid'));
@@ -222,16 +237,6 @@ export function renderBills(container) {
   container.appendChild(tabBar);
   container.appendChild(panel);
 
-  // Sticky secondary Add when list is long enough to scroll (phone CSS)
-  if (allBills.length >= 4) {
-    container.appendChild(el('div', { className: 'bills-sticky-add' },
-      el('button', {
-        type: 'button',
-        className: 'btn btn-primary',
-        onClick: () => openBillForm(),
-      }, '+ Add Bill'),
-    ));
-  }
 }
 
 function billDisplay(bill, state, mode) {
@@ -357,13 +362,13 @@ function billRow(bill, state, { mode = 'upcoming' } = {}) {
         onClick: (e) => { e.stopPropagation(); openBillActivity(bill); },
       }, bill.name),
       lastPaid
-        ? el('div', { style: 'font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem' }, lastPaid)
+        ? el('div', { className: 'fs-caption text-muted mt-1' }, lastPaid)
         : null,
       nextDue
-        ? el('div', { style: 'font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem' }, nextDue)
+        ? el('div', { className: 'fs-caption text-muted mt-1' }, nextDue)
         : null,
       bill.recurring !== false && !paid
-        ? el('div', { style: 'font-size:0.68rem;color:var(--text-muted)' }, 'Recurring')
+        ? el('div', { className: 'fs-caption text-muted' }, 'Recurring')
         : null,
     ),
     el('td', {}, dateVal),
@@ -375,7 +380,7 @@ function billRow(bill, state, { mode = 'upcoming' } = {}) {
         hideMarkPaid || bill.status === 'paid' ? null : el('button', {
           className: 'btn btn-sm btn-primary',
           onClick: (e) => { e.stopPropagation(); markPaid(bill); },
-        }, 'Mark Paid'),
+        }, 'Mark paid'),
         el('button', {
           className: 'btn btn-sm btn-secondary',
           onClick: (e) => { e.stopPropagation(); openBillForm(bill); },
@@ -406,13 +411,20 @@ function billCard(bill, state, { mode = 'upcoming' } = {}) {
 
   return el('article', {
     className: `tx-card bill-card bill-card--${tone}${paid ? ' bill-paid-row' : ''} envelope-card-clickable`,
-    title: 'Tap for related transactions',
+    tabindex: '0',
+    role: 'button',
+    'aria-label': `${bill.name}, ${formatCurrency(amount)}, ${metaBits[0]}. Open related transactions`,
     onClick: (e) => {
       if (e.target.closest('button, a, details, summary')) return;
       openBillActivity(bill);
     },
+    onKeydown: (e) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBillActivity(bill); }
+    },
   },
     el('div', { className: 'tx-card-top' },
+      el('span', { className: `status-dot status-dot--${tone}`, 'aria-hidden': 'true' }),
       el('span', { className: 'tx-card-desc bill-card-name' }, bill.name),
       el('span', { className: 'tx-card-amount' }, formatCurrency(amount))
     ),
@@ -426,7 +438,7 @@ function billCard(bill, state, { mode = 'upcoming' } = {}) {
       hideMarkPaid ? null : el('button', {
         className: 'btn btn-sm btn-primary',
         onClick: (e) => { e.stopPropagation(); markPaid(bill); },
-      }, 'Mark Paid'),
+      }, 'Mark paid'),
       el('button', {
         className: 'btn btn-sm btn-secondary',
         onClick: (e) => { e.stopPropagation(); openBillForm(bill); },
@@ -511,19 +523,19 @@ function statusBadge(status, autoPay) {
   if (status === 'overdue') {
     return el('span', {},
       el('span', { className: 'badge badge-overdue' }, 'Overdue'),
-      autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+      autoPay ? el('span', { className: 'badge badge-autopay ml-1' }, 'Auto-pay') : null,
     );
   }
   if (status === 'due_soon' || status === 'due') {
     return el('span', {},
-      el('span', { className: 'badge badge-due' }, 'Due Soon'),
-      autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+      el('span', { className: 'badge badge-due' }, 'Due soon'),
+      autoPay ? el('span', { className: 'badge badge-autopay ml-1' }, 'Auto-pay') : null,
     );
   }
   // pending / later / scheduled
   return el('span', {},
     el('span', { className: 'badge badge-pending' }, status === 'later' ? 'Later' : 'Scheduled'),
-    autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.25rem' }, 'Auto-pay') : null,
+    autoPay ? el('span', { className: 'badge badge-autopay ml-1' }, 'Auto-pay') : null,
   );
 }
 
@@ -535,9 +547,9 @@ function markPaid(bill) {
   const modal = showModal({
     title: `Mark Paid: ${bill.name}`,
     body: el('div', {},
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount Paid'), amountIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Payment Date'), dateIn),
-      el('div', { className: 'form-option', style: 'margin-top:0.75rem' },
+      el('div', { className: 'form-group' }, labelFor('Amount Paid', amountIn), amountIn),
+      el('div', { className: 'form-group' }, labelFor('Payment Date', dateIn), dateIn),
+      el('div', { className: 'form-option mt-3' },
         el('div', { className: 'form-option-text' },
           el('span', { className: 'form-option-label' }, 'Already left my bank (CSV / import)'),
           el('span', { className: 'form-option-hint' },
@@ -624,8 +636,8 @@ function openBillForm(bill = null) {
   const nameIn = el('input', { type: 'text', value: bill?.name || '' });
   const amountIn = el('input', { type: 'number', step: '0.01', value: bill?.amount || '', placeholder: '0.00' });
   const dueIn = el('input', { type: 'date', value: bill?.dueDate || '' });
-  const recurringIn = el('input', { type: 'checkbox', checked: bill?.recurring ?? true });
-  const autoPayIn = el('input', { type: 'checkbox', checked: bill?.autoPay ?? false });
+  const recurringIn = el('input', { type: 'checkbox', role: 'switch', className: 'switch', checked: bill?.recurring ?? true });
+  const autoPayIn = el('input', { type: 'checkbox', role: 'switch', className: 'switch', checked: bill?.autoPay ?? false });
 
   const catSelect = el('select');
   catSelect.appendChild(el('option', { value: '' }, 'Choose envelope'));
@@ -637,21 +649,30 @@ function openBillForm(bill = null) {
   const modal = showModal({
     title: isEdit ? 'Edit Bill' : 'Add Bill',
     body: el('div', {},
-      el('div', { className: 'form-group' }, el('label', {}, 'Bill Name'), nameIn),
+      el('div', { className: 'form-group' }, labelFor('Bill Name', nameIn), nameIn),
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Due Date'), dueIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
+        el('div', { className: 'form-group' }, labelFor('Due Date', dueIn), dueIn),
+        el('div', { className: 'form-group' }, labelFor('Amount', amountIn), amountIn),
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Budget Envelope'), catSelect),
+      el('div', { className: 'form-group' }, labelFor('Budget Envelope', catSelect), catSelect),
       el('p', { className: 'tx-form-hint', style: 'margin:-0.25rem 0 0.75rem;line-height:1.4' },
         'Mapped envelopes keep leftover for the bill — they are not used to cover overspend on groceries or kids.',
       ),
-      el('div', { style: 'display:flex;gap:1.5rem;margin-top:0.5rem' },
-        el('label', { style: 'display:flex;align-items:center;gap:0.5rem' }, recurringIn, ' Recurring'),
-        el('label', { style: 'display:flex;align-items:center;gap:0.5rem' }, autoPayIn, ' Auto-pay'),
-      ),
-      el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem;margin-bottom:0' },
-        'Recurring: after pay, due date moves +1 month and the bill is unpaid again. Auto-pay: strong CSV/PDF matches (amount + name) complete the cycle automatically.',
+      el('div', { className: 'list-group switch-group' },
+        el('label', { className: 'list-row switch-row' },
+          el('span', { className: 'list-row__body' },
+            el('span', { className: 'list-row__title' }, 'Recurring'),
+            el('span', { className: 'list-row__meta' }, 'Moves to next month after you pay'),
+          ),
+          recurringIn,
+        ),
+        el('label', { className: 'list-row switch-row' },
+          el('span', { className: 'list-row__body' },
+            el('span', { className: 'list-row__title' }, 'Auto-pay'),
+            el('span', { className: 'list-row__meta' }, 'Strong bank matches mark it paid'),
+          ),
+          autoPayIn,
+        ),
       ),
     ),
     footer: [

@@ -1,4 +1,4 @@
-import { el, formatDate, todayISO } from '../utils.js';
+import { el, formatDate, todayISO, labelFor } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
 import {
@@ -111,6 +111,8 @@ export function openPayScheduleEditor(source) {
         type: 'button',
         className: `pay-cal-day${on ? ' selected' : ''}${eft ? ' gsa' : ''}`,
         title: eft ? `${date} · GSA EFT (purple)` : date,
+        'aria-pressed': on ? 'true' : 'false',
+        'aria-label': `${MONTH_NAMES[month - 1]} ${d}${eft ? ', GSA EFT day' : ''}${on ? ', pay day' : ''}`,
         onClick: () => {
           const amt = perCheckIn.value ? Number(perCheckIn.value) : null;
           store.togglePayCheck(source.id, date, amt);
@@ -219,18 +221,18 @@ export function openPayScheduleEditor(source) {
     fillGsaBtn,
     el('span', { className: 'pay-cal-legend' },
       el('span', { className: 'pay-cal-swatch gsa' }), ' GSA EFT',
-      el('span', { className: 'pay-cal-swatch selected', style: 'margin-left:0.75rem' }), ' On your calendar',
+      el('span', { className: 'pay-cal-swatch selected ml-3' }), ' On your calendar',
     ),
   ));
   datesPanel.appendChild(calWrap);
   datesPanel.appendChild(datesList);
   datesPanel.appendChild(el('div', { className: 'pay-add-date' },
-    el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
+    el('p', { className: 'tx-form-hint mb-2' },
       'Odd date (not on the GSA calendar):',
     ),
     el('div', { className: 'input-row' },
-      el('div', { className: 'form-group' }, el('label', {}, 'Pay date'), newDateIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount (optional)'), newAmtIn),
+      el('div', { className: 'form-group' }, labelFor('Pay date', newDateIn), newDateIn),
+      el('div', { className: 'form-group' }, labelFor('Amount (optional)', newAmtIn), newAmtIn),
     ),
     el('button', {
       type: 'button',
@@ -251,9 +253,9 @@ export function openPayScheduleEditor(source) {
     'Good for fixed deposits on the same calendar day every month (e.g. the 1st).'
   ));
   recurringPanel.appendChild(el('div', { className: 'input-row' },
-    el('div', { className: 'form-group' }, el('label', {}, 'Pattern'), freqSelect),
-    el('div', { className: 'form-group' }, el('label', {}, 'Pay day'), day1In),
-    el('div', { className: 'form-group' }, el('label', {}, '2nd day'), day2In),
+    el('div', { className: 'form-group' }, labelFor('Pattern', freqSelect), freqSelect),
+    el('div', { className: 'form-group' }, labelFor('Pay day', day1In), day1In),
+    el('div', { className: 'form-group' }, labelFor('2nd day', day2In), day2In),
   ));
 
   const modal = showModal({
@@ -264,16 +266,16 @@ export function openPayScheduleEditor(source) {
         el('label', { className: 'pay-mode-option' }, modeRecurring, ' Recurring (same day/month)'),
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'Typical check amount'),
+        labelFor('Typical check amount', perCheckIn),
         perCheckIn,
-        el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+        el('p', { className: 'fs-caption text-muted mt-1' },
           'Expected take-home per check. Used for dates that do not have their own amount. CSV deposits overwrite with the real deposit.'
         ),
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'CSV description match (one per line)'),
+        labelFor('CSV description match (one per line)', matchTermsIn),
         matchTermsIn,
-        el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+        el('p', { className: 'fs-caption text-muted mt-1' },
           'Add phrases that appear on bank CSV deposits for this source (one per line). Unmatched deposits go to Bonus Income.'
         ),
       ),

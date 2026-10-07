@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
@@ -184,8 +184,7 @@ export function renderTransactions(container, arg) {
         el('p', {}, 'Showing transactions for this envelope. Clear the filter to see everything.'),
       ),
       el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
+        className: 'btn btn-secondary btn-sm ml-auto self-center',
         onClick: () => {
           categoryFilter = 'all';
           persistListView();
@@ -199,8 +198,13 @@ export function renderTransactions(container, arg) {
     : null;
 
   container.innerHTML = '';
-  container.appendChild(el('div', { className: 'page-header' },
-    el('h2', {}, 'Transaction Log'),
+  container.appendChild(el('div', { className: 'page-header page-header--action' },
+    el('div', { className: 'page-header__titles' }, el('h2', {}, 'Log')),
+    el('button', {
+      type: 'button',
+      className: 'btn btn-tertiary page-header__action',
+      onClick: () => openImportDialog(),
+    }, 'Import'),
   ));
   container.appendChild(makeImportDropZone((file) => {
     importBankFile(file, { includePending: true, showSummary: true }).catch((err) => {
@@ -225,8 +229,7 @@ export function renderTransactions(container, arg) {
         el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} look similar (same amount / merchant nearby). They were still imported if on different days — review only if one is a true double-post.`)
       ),
       el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
+        className: 'btn btn-secondary btn-sm ml-auto self-center',
         onClick: () => {
           typeFilter = 'duplicates';
           persistListView();
@@ -239,7 +242,7 @@ export function renderTransactions(container, arg) {
   }
 
   const txTools = el('details', { className: 'page-tools-menu' });
-  txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More · Import'));
+  txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More actions'));
   const txToolsList = el('div', { className: 'page-tools-dropdown' });
   txToolsList.appendChild(el('button', {
     type: 'button', className: 'page-tools-item',
@@ -286,13 +289,13 @@ export function renderTransactions(container, arg) {
   );
   sortSelect.value = sortOptionValue(sortKey, sortDir);
 
-  const typeSelect = el('select', { id: 'tx-type-filter' },
+  const typeSelect = el('select', { id: 'tx-type-filter', 'aria-label': 'Filter by type' },
     el('option', { value: 'all' }, 'All Types'),
     ...EDITABLE_TYPES.map(type => el('option', { value: type }, TYPE_LABELS[type])),
     el('option', { value: 'pending' }, 'Pending bank'),
     el('option', { value: 'duplicates' }, 'Possible Duplicates'),
   );
-  const catSelect = el('select', { id: 'tx-cat-filter' },
+  const catSelect = el('select', { id: 'tx-cat-filter', 'aria-label': 'Filter by envelope' },
     el('option', { value: 'all' }, 'All Categories'),
     el('option', { value: 'uncategorized' }, 'Uncategorized'),
     ...state.categories.map(c => el('option', { value: c.id }, c.name))
@@ -310,13 +313,52 @@ export function renderTransactions(container, arg) {
   const filtersToggle = el('button', {
     type: 'button',
     className: 'btn btn-secondary btn-sm tx-filters-toggle',
-    onClick: () => toolbar.classList.toggle('filters-open'),
+    'aria-expanded': 'false',
+    'aria-controls': 'tx-filter-fields',
+    onClick: () => {
+      const open = toolbar.classList.toggle('filters-open');
+      filtersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    },
   }, 'Filters & sort');
+  filterFields.id = 'tx-filter-fields';
+  const activeChips = el('div', { className: 'chip-bar tx-active-filters', 'aria-label': 'Active filters' });
+
+  function setControl(sel, value) {
+    const c = toolbar.querySelector(sel);
+    if (!c) return;
+    c.value = value;
+    c.dispatchEvent(new Event(c.tagName === 'INPUT' ? 'input' : 'change', { bubbles: true }));
+  }
+  function clearAllFilters() {
+    setControl('#tx-search', '');
+    setControl('#tx-type-filter', 'all');
+    setControl('#tx-cat-filter', 'all');
+  }
+  function updateFilterUi() {
+    const chips = [];
+    if (typeFilter !== 'all') {
+      chips.push(['type', typeSelect.options[typeSelect.selectedIndex]?.text || typeFilter, () => setControl('#tx-type-filter', 'all')]);
+    }
+    if (categoryFilter !== 'all') {
+      chips.push(['cat', catSelect.options[catSelect.selectedIndex]?.text || 'Category', () => setControl('#tx-cat-filter', 'all')]);
+    }
+    filtersToggle.textContent = chips.length ? `Filters · ${chips.length}` : 'Filters & sort';
+    activeChips.innerHTML = '';
+    activeChips.hidden = !chips.length;
+    chips.forEach(([, label, clear]) => {
+      activeChips.appendChild(el('button', {
+        type: 'button', className: 'chip chip-removable',
+        'aria-label': `Remove filter: ${label}`,
+        onClick: clear,
+      }, label, el('span', { className: 'chip-x', 'aria-hidden': 'true' }, '×')));
+    });
+  }
 
   const toolbar = el('div', { className: 'toolbar tx-toolbar' },
     el('input', {
       type: 'search',
-      placeholder: 'Search by description or amount...',
+      placeholder: 'Search description or amount',
+      'aria-label': 'Search transactions',
       id: 'tx-search',
       value: filter,
     }),
@@ -324,6 +366,7 @@ export function renderTransactions(container, arg) {
     filterFields,
   );
   container.appendChild(toolbar);
+  container.appendChild(activeChips);
 
   const listEl = el('div', { id: 'tx-list' });
   container.appendChild(listEl);
@@ -373,14 +416,18 @@ export function renderTransactions(container, arg) {
     txs = sortTransactions(txs, currentState, sortKey, sortDir);
 
     listEl.innerHTML = '';
+    updateFilterUi();
     if (!txs.length) {
-      listEl.appendChild(emptyState('📝', 'No transactions', 'Log a transaction, import from your bank, or adjust your filters.'));
+      const filtered = !!filter || typeFilter !== 'all' || categoryFilter !== 'all';
+      listEl.appendChild(filtered
+        ? emptyState(icon('log', 32), 'No matches', 'Nothing matches these filters.', { label: 'Clear filters', onClick: clearAllFilters })
+        : emptyState(icon('log', 32), 'No transactions yet', 'Log one with + or import from your bank.', { label: 'Import from bank', onClick: () => openImportDialog() }));
       return;
     }
 
     const visible = txs.slice(0, listLimit);
     const makeMoreNote = () => el('div', { className: 'tx-list-more', style: 'padding:0.75rem;font-size:0.8rem;color:var(--text-muted)' },
-      el('p', { style: 'margin:0 0 0.5rem' },
+      el('p', { className: 'mx-0 mt-0 mb-2' },
         `Showing ${visible.length} of ${txs.length} transactions`),
       el('button', {
         type: 'button',
@@ -494,7 +541,7 @@ function incomeSourceLabel(t, state) {
         : 'Freely allocatable — counts toward To Allocate until you assign an envelope',
     }, assigned ? `${BONUS_INCOME_NAME} · envelope` : BONUS_INCOME_NAME);
   }
-  return el('span', { className: 'tx-income-source', style: 'font-size:0.75rem;color:var(--text-muted)' },
+  return el('span', { className: 'tx-income-source fs-caption text-muted' },
     source.name
   );
 }
@@ -672,14 +719,21 @@ function txCard(t, state, duplicateMeta = new Map(), { hideDate = false } = {}) 
 
   return el('article', {
     className: `tx-card${isDuplicate ? ' tx-duplicate-row' : ''}${isPending ? ' tx-pending-row' : ''}`,
+    tabindex: '0',
+    role: 'button',
+    'aria-label': `${t.description || 'Transaction'}, ${isIncome ? 'plus' : 'minus'} ${formatCurrency(t.amount)}, ${formatDate(t.date)}. Edit`,
     onClick: () => openTransactionForm({ transaction: t }),
+    onKeydown: (e) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTransactionForm({ transaction: t }); }
+    },
   },
     el('div', { className: 'tx-card-main' },
       el('div', { className: 'tx-card-body' },
         hideDate ? null : el('div', { className: 'tx-card-date' }, formatDate(t.date)),
         el('div', { className: 'tx-card-desc' }, t.description || '—'),
         t.memo
-          ? el('div', { className: 'tx-card-meta', style: 'font-style:italic' }, t.memo)
+          ? el('div', { className: 'tx-card-meta italic' }, t.memo)
           : null,
         metaBits.length
           ? el('div', { className: 'tx-card-meta tx-card-meta-row' }, ...metaBits)
@@ -687,8 +741,7 @@ function txCard(t, state, duplicateMeta = new Map(), { hideDate = false } = {}) 
       ),
       el('div', { className: 'tx-card-side' },
         el('span', {
-          className: 'tx-card-amount',
-          style: `color:${isIncome ? 'var(--positive)' : 'var(--text)'}`,
+          className: `tx-card-amount${isIncome ? ' text-positive' : ''}`,
         }, `${isIncome ? '+' : '−'}${formatCurrency(t.amount)}`),
         more,
       ),
@@ -722,7 +775,7 @@ export function openTransactionForm({
       el('label', {}, 'Type'),
       el('p', { style: 'margin:0;padding:0.55rem 0;color:var(--text-muted)' }, TYPE_LABELS.celebration)
     )
-    : el('div', { className: 'form-group' }, el('label', {}, 'Type'), typeSelect);
+    : el('div', { className: 'form-group' }, labelFor('Type', typeSelect), typeSelect);
 
   const dateIn = el('input', {
     type: 'date',
@@ -745,7 +798,7 @@ export function openTransactionForm({
     value: transaction?.memo || '',
   });
   const memoGroup = el('div', { className: 'form-group' },
-    el('label', {}, 'Memo (optional)'),
+    labelFor('Memo (optional)', memoIn),
     memoIn,
   );
 
@@ -760,12 +813,10 @@ export function openTransactionForm({
     allowEmpty: true,
   });
   const incomeEnvelopeHint = el('p', {
-    className: 'tx-form-hint',
-    style: 'margin-top:0.35rem;margin-bottom:0',
+    className: 'tx-form-hint mt-1 mb-0',
   }, 'Pick the envelope this refund or extra cash belongs to. Remaining goes up; it will not count again in To Allocate.');
   const catRemainingHint = el('p', {
-    className: 'tx-form-hint',
-    style: 'margin-top:0.35rem;margin-bottom:0',
+    className: 'tx-form-hint mt-1 mb-0',
   }, '');
   function updateCatRemainingHint() {
     const id = envelopePicker.value;
@@ -833,7 +884,7 @@ export function openTransactionForm({
         isBonusIncomeSource(s) ? BONUS_INCOME_NAME : s.name
       )),
     ),
-    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+    el('p', { className: 'tx-form-hint mt-1 mb-0' },
       'Optional. Use when a deposit landed on the wrong job or should be Bonus.',
     ),
   );
@@ -979,8 +1030,8 @@ export function openTransactionForm({
       importNote,
       linkedDebtNote,
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Description'), descIn),
+        el('div', { className: 'form-group' }, labelFor('Amount', amountIn), amountIn),
+        el('div', { className: 'form-group' }, labelFor('Description', descIn), descIn),
       ),
       splitOption,
       catGroup,
@@ -991,11 +1042,10 @@ export function openTransactionForm({
         el('div', { className: 'input-row' },
           typeField,
           el('div', { className: 'form-group' },
-            el('label', {}, 'Date'),
+            labelFor('Date', dateIn),
             dateIn,
             el('p', {
-              className: 'tx-form-hint',
-              style: 'margin-top:0.35rem;margin-bottom:0;line-height:1.35',
+              className: 'tx-form-hint mt-1 mb-0 lh-snug',
             }, 'Envelope month follows this date — use the purchase day for late bank posts.'),
           ),
         ),
@@ -1374,17 +1424,16 @@ function openImportSummary(stats) {
   sheet = showModal({
     title: stats.count ? 'Import complete' : 'Import finished',
     body: el('div', {},
-      el('p', { style: 'margin-bottom:0.75rem;font-weight:600' }, lines.join(' · ') || 'Done'),
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'mb-3 fw-semi' }, lines.join(' · ') || 'Done'),
+      el('p', { className: 'tx-form-hint mb-4' },
         `${netHint} Assign envelopes next so Budget and snowball stay honest.`,
       ),
       next.length
         ? el('div', { className: 'import-summary-next' },
-          el('div', { className: 'section-title', style: 'margin-bottom:0.5rem' }, 'Next'),
+          el('div', { className: 'section-title mb-2' }, 'Next'),
           ...next.map(n => el('button', {
             type: 'button',
-            className: 'btn btn-secondary',
-            style: 'width:100%;justify-content:flex-start;margin-bottom:0.4rem',
+            className: 'btn btn-secondary w-full justify-start mb-2',
             onClick: () => { sheet.close(); n.run(); },
           }, n.label)),
         )
@@ -1414,13 +1463,13 @@ function paintImportPreview(previewEl, rows, { sourceLabel = 'Preview' } = {}) {
   previewEl.innerHTML = '';
   if (!rows?.length) {
     previewEl.appendChild(el('p', {
-      style: 'margin:0;color:var(--warning)',
+      className: 'm-0 text-warning',
     }, 'No transactions found yet. Paste more of the list, or try a CSV/PDF file.'));
     return;
   }
   const pendingN = rows.filter(r => /pending/i.test(r.Status || r.status || '')).length;
   previewEl.appendChild(el('p', {
-    style: 'margin:0 0 0.35rem;font-weight:600;color:var(--text)',
+    className: 'mx-0 mt-0 mb-1 fw-semi text-default',
   },
     `${sourceLabel}: ${rows.length} transaction${rows.length === 1 ? '' : 's'}`,
     pendingN ? ` (${pendingN} pending)` : '',
@@ -1436,11 +1485,11 @@ function paintImportPreview(previewEl, rows, { sourceLabel = 'Preview' } = {}) {
   previewEl.appendChild(list);
   if (rows.length > 10) {
     previewEl.appendChild(el('p', {
-      style: 'margin:0.35rem 0 0;color:var(--text-muted);font-size:0.8rem',
+      className: 'mx-0 mt-1 mb-0 text-muted fs-footnote',
     }, `…and ${rows.length - 10} more`));
   }
   previewEl.appendChild(el('p', {
-    style: 'margin:0.5rem 0 0;font-size:0.75rem;color:var(--text-muted)',
+    className: 'mx-0 mt-2 mb-0 fs-caption text-muted',
   }, 'Parsed only on this device — nothing is uploaded to a bank or our servers.'));
 }
 
@@ -1458,7 +1507,7 @@ export function openImportDialog() {
   );
   bankSelect.value = 'usaa';
   const tipsEl = el('div', { className: 'import-bank-tips' });
-  const previewEl = el('div', { className: 'import-file-preview', style: 'margin-top:0.75rem;font-size:0.85rem' });
+  const previewEl = el('div', { className: 'import-file-preview mt-3 fs-footnote' });
   const pasteArea = el('textarea', {
     className: 'import-paste-area',
     rows: 8,
@@ -1489,7 +1538,7 @@ export function openImportDialog() {
     } catch (err) {
       console.error(err);
       previewEl.innerHTML = '';
-      previewEl.appendChild(el('p', { style: 'margin:0;color:var(--destructive)' },
+      previewEl.appendChild(el('p', { className: 'm-0 text-negative' },
         'Could not parse that paste. Try copying a longer chunk from USAA.',
       ));
     }
@@ -1515,14 +1564,14 @@ export function openImportDialog() {
         const rows = parseBankCsvText(text);
         paintImportPreview(previewEl, rows, { sourceLabel: `CSV: ${file.name}` });
       } catch {
-        previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' },
+        previewEl.appendChild(el('p', { className: 'text-muted m-0' },
           `CSV ready: ${file.name}`,
         ));
       }
       return;
     }
     includePendingIn.checked = false;
-    previewEl.appendChild(el('p', { style: 'color:var(--text-muted);margin:0' }, 'Reading PDF on this device…'));
+    previewEl.appendChild(el('p', { className: 'text-muted m-0' }, 'Reading PDF on this device…'));
     try {
       const parsed = await parseBankPdfFile(file);
       const objects = rowsToImportObjects(parsed, { includePending: includePendingIn.checked });
@@ -1530,14 +1579,14 @@ export function openImportDialog() {
         sourceLabel: `PDF: ${objects.length ? '' : ''}${file.name}`.replace(/^PDF: /, 'PDF '),
       });
       if (!objects.length) {
-        previewEl.appendChild(el('p', { style: 'margin:0.35rem 0 0;color:var(--warning)' },
+        previewEl.appendChild(el('p', { className: 'mx-0 mt-1 mb-0 text-warning' },
           'No rows from PDF. Use selectable-text history, or paste from the mobile site.',
         ));
       }
     } catch (err) {
       console.error(err);
       previewEl.innerHTML = '';
-      previewEl.appendChild(el('p', { style: 'margin:0;color:var(--destructive)' },
+      previewEl.appendChild(el('p', { className: 'm-0 text-negative' },
         'Could not read that PDF. Try paste or CSV instead.',
       ));
     }
@@ -1553,20 +1602,20 @@ export function openImportDialog() {
   const modal = showModal({
     title: 'Import bank transactions',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+      el('p', { className: 'tx-form-hint mb-3' },
         'Paste from USAA mobile, or choose a CSV/PDF. Phone screenshots go to the CoS Grok Bot via API — they should not need this dialog.',
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'I bank with…'),
+        labelFor('I bank with…', bankSelect),
         bankSelect,
       ),
       tipsEl,
-      el('div', { className: 'form-group', style: 'margin-top:0.85rem' },
-        el('label', {}, 'Paste from bank (recommended for USAA mobile)'),
+      el('div', { className: 'form-group mt-3' },
+        labelFor('Paste from bank (recommended for USAA mobile)', pasteArea),
         pasteArea,
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'Or choose a file (CSV / PDF)'),
+        labelFor('Or choose a file (CSV / PDF)', fileIn),
         fileIn,
       ),
       makeImportDropZone((file) => {

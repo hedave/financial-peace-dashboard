@@ -221,10 +221,17 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-export function emptyState(icon, title, desc) {
-  return el('div', { className: 'empty-state' },
-    el('div', { className: 'empty-icon' }, icon),
+export function emptyState(icon, title, desc, action = null) {
+  return el('div', { className: 'empty-state', role: 'status' },
+    el('div', { className: 'empty-icon', 'aria-hidden': 'true' }, icon),
     el('h3', {}, title),
-    el('p', {}, desc)
+    el('p', {}, desc),
+    action ? el('button', { type: 'button', className: 'btn btn-primary', onClick: action.onClick }, action.label) : null,
   );
+}
+let _fieldSeq = 0;
+/** Label wired to its control in markup (for/id). Gives the control an id if it has none. */
+export function labelFor(text, control, attrs = {}) {
+  if (control && !control.id) control.id = `fp-f-${++_fieldSeq}`;
+  return el('label', { ...attrs, for: control?.id || '' }, text);
 }

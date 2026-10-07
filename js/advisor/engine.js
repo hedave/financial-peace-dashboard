@@ -1141,7 +1141,7 @@ function openLeftoverPlanChooser(action = {}) {
     const target = action.targetName || 'your snowball target';
     const api = { close: () => {} };
     const body = el('div', { className: 'advisor-leftover-chooser' },
-      el('p', { style: 'margin-bottom:1rem;line-height:1.45' },
+      el('p', { className: 'mb-4 lh-snug' },
         'This is unassigned income — the same pool as snowball surplus. Pick one path (you can still adjust later):',
       ),
       el('div', { className: 'btn-group', style: 'flex-direction:column;align-items:stretch;gap:0.5rem' },

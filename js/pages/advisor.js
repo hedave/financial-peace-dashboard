@@ -77,6 +77,26 @@ export function renderAdvisor(container) {
       : null,
   ));
 
+  // Lead recommendation (A1): one card, one why, one primary action
+  const lead = snap.attention[0];
+  const runItem = (item) => runAdvisorAction({ page: item.page, action: item.action, targetName: item.targetName });
+  container.appendChild(el('section', { className: 'section card advisor-lead', 'aria-labelledby': 'advisor-lead-title' },
+    el('div', { className: 'advisor-lead__eyebrow' }, lead ? 'Do this next' : 'You\u2019re on track'),
+    el('h3', { className: 'advisor-lead__title', id: 'advisor-lead-title' },
+      lead ? lead.label : 'Nothing urgent this month'),
+    el('p', { className: 'advisor-lead__why' },
+      lead
+        ? (snap.attention.length > 1
+          ? `Clearing this first keeps the rest simple. ${snap.attention.length - 1} more below.`
+          : 'This is the only open item right now.')
+        : 'Budgets and the inbox look steady. Ask a question below anytime.'),
+    lead ? el('button', {
+      type: 'button',
+      className: 'btn btn-primary btn-block',
+      onClick: () => runItem(lead),
+    }, lead.buttonLabel || 'Go') : null,
+  ));
+
   // Snapshot strip
   container.appendChild(el('div', { className: 'grid grid-4 section advisor-metrics' },
     metricCard('Baby Step', String(snap.mode.babyStep), snap.mode.babyStepTitle, 'accent'),
@@ -91,20 +111,18 @@ export function renderAdvisor(container) {
       snap.attention.length ? 'warning' : 'positive'),
   ));
 
-  // Priority list (single source of truth for "what to do next")
-  container.appendChild(el('div', { className: 'section', id: 'advisor-priority' },
-    el('div', { className: 'section-title' }, 'Do these next'),
+  // Remaining priorities (lead item shown above)
+  if (snap.attention.length > 1) container.appendChild(el('div', { className: 'section', id: 'advisor-priority' },
+    el('div', { className: 'section-title' }, 'Then'),
     snap.attention.length
       ? el('div', { className: 'card advisor-priority-list' },
-          ...snap.attention.slice(0, 6).map((item, idx) =>
+          ...snap.attention.slice(1, 6).map((item, idx) =>
             el('div', { className: 'advisor-priority-row' },
-              el('span', { className: 'advisor-priority-num' }, String(idx + 1)),
+              el('span', { className: 'advisor-priority-num' }, String(idx + 2)),
               el('span', { className: 'advisor-priority-label' }, item.label),
               el('button', {
                 type: 'button',
-                className: item.id === 'leftover' || item.action === 'allocate-surplus'
-                  ? 'btn btn-sm btn-primary'
-                  : 'btn btn-sm btn-secondary',
+                className: 'btn btn-sm btn-secondary',
                 onClick: () => runAdvisorAction({
                   page: item.page,
                   action: item.action,
@@ -136,7 +154,7 @@ export function renderAdvisor(container) {
   }
 
   const chipSection = el('div', { className: 'section' },
-    el('div', { className: 'section-title' }, 'Ask the household coach'),
+    el('div', { className: 'section-title' }, 'Ask the coach'),
   );
   ADVISOR_CHIP_GROUPS.forEach(group => {
     chipSection.appendChild(el('div', { className: 'advisor-chip-group' },
@@ -159,7 +177,7 @@ export function renderAdvisor(container) {
     className: 'form-input advisor-cut-select',
     onChange: (e) => { cutEnvelopeId = e.target.value; },
   },
-    el('option', { value: '' }, '— Choose envelope —'),
+    el('option', { value: '' }, 'Choose envelope'),
     ...(snap.envelopes || [])
       .filter(e => !e.isSinkingFund)
       .map(e => el('option', { value: e.id }, `${e.icon || '✉️'} ${e.name}`)),
@@ -170,11 +188,11 @@ export function renderAdvisor(container) {
   if (cutEnvelopeId) cutSelect.value = cutEnvelopeId;
 
   const toolsInner = el('div', { className: 'advisor-tools-inner' },
-    el('div', { className: 'card advisor-cut-bar', style: 'margin-bottom:0.75rem' },
-      el('label', { className: 'advisor-afford-label' }, 'Cut envelope by %'),
+    el('div', { className: 'card advisor-cut-bar mb-3' },
+      el('label', { className: 'advisor-afford-label', for: 'advisor-cut-env' }, 'Cut an envelope'),
       el('div', { className: 'advisor-cut-row' },
         cutSelect,
-        el('div', { className: 'advisor-cut-pct-wrap' },
+        el('div', { className: 'advisor-cut-pct-wrap input-affix input-affix--suffix' },
           el('input', {
             id: 'advisor-cut-pct',
             type: 'number',
@@ -183,13 +201,15 @@ export function renderAdvisor(container) {
             step: '1',
             value: cutPct,
             className: 'form-input advisor-cut-pct',
+            inputMode: 'numeric',
+            'aria-label': 'Cut percentage',
             onInput: (e) => { cutPct = e.target.value; },
           }),
-          el('span', { className: 'advisor-cut-pct-suffix' }, '%'),
+          el('span', { className: 'advisor-cut-pct-suffix input-affix__sym', 'aria-hidden': 'true' }, '%'),
         ),
         el('button', {
           type: 'button',
-          className: 'btn btn-primary',
+          className: 'btn btn-secondary',
           onClick: () => {
             cutEnvelopeId = cutSelect.value || cutEnvelopeId;
             selectChip('cut_envelope');
@@ -201,9 +221,10 @@ export function renderAdvisor(container) {
       ),
     ),
     el('div', { className: 'card advisor-afford-bar' },
-      el('label', { className: 'advisor-afford-label', for: 'advisor-afford-amt' }, 'Affordability ($)'),
+      el('label', { className: 'advisor-afford-label', for: 'advisor-afford-amt' }, 'Can we afford it?'),
       el('div', { className: 'advisor-afford-row' },
-        el('span', { className: 'advisor-afford-prefix' }, '$'),
+        el('div', { className: 'input-affix input-affix--prefix advisor-afford-wrap' },
+        el('span', { className: 'input-affix__sym', 'aria-hidden': 'true' }, '$'),
         el('input', {
           id: 'advisor-afford-amt',
           type: 'number',
@@ -215,11 +236,12 @@ export function renderAdvisor(container) {
           className: 'form-input advisor-afford-input',
           onInput: (e) => { affordAmount = e.target.value; },
         }),
+        ),
         el('button', {
           type: 'button',
-          className: 'btn btn-primary',
+          className: 'btn btn-secondary',
           onClick: () => selectChip('afford'),
-        }, 'Can we afford this?'),
+        }, 'Check'),
       ),
       el('p', { className: 'tx-form-hint' },
         'Trips, sports, multi-kid costs — checks surplus and sinking funds.',
@@ -231,7 +253,10 @@ export function renderAdvisor(container) {
     className: 'section advisor-tools-details',
     open: toolsOpen || undefined,
   },
-    el('summary', { className: 'advisor-tools-summary' }, 'Tools: cut % · afford $'),
+    el('summary', { className: 'advisor-tools-summary' },
+      el('span', {}, 'More options'),
+      el('span', { className: 'advisor-tools-summary__meta' }, 'Cut an envelope · afford a purchase'),
+    ),
     toolsInner,
   ));
 

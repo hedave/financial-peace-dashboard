@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import { el, formatCurrency, getMonthLabel } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
@@ -48,8 +49,9 @@ export function openMonthCloseWizard() {
 
       return el('div', { className: `month-close-step${step.done ? ' done' : ''}` },
         el('div', { className: 'month-close-step-main' },
-          el('span', { className: 'month-close-check' }, step.done ? '✓' : String(idx + 1)),
+          el('span', { className: 'month-close-check', 'aria-hidden': 'true' }, step.done ? icon('check', 16) : String(idx + 1)),
           el('div', { className: 'month-close-step-text' },
+            el('span', { className: 'sr-only' }, step.done ? 'Done: ' : 'Not done: '),
             el('strong', {}, step.label),
             !step.done && step.count != null && typeof step.count === 'number' && step.id !== 'allocate'
               ? el('span', { className: 'month-close-count' }, `(${step.count})`)
@@ -68,8 +70,9 @@ export function openMonthCloseWizard() {
   if (pendingN > 0) {
     stepsEl.appendChild(el('div', { className: 'month-close-step' },
       el('div', { className: 'month-close-step-main' },
-        el('span', { className: 'month-close-check' }, '⏳'),
+        el('span', { className: 'month-close-check', 'aria-hidden': 'true' }, icon('clock', 16)),
         el('div', { className: 'month-close-step-text' },
+          el('span', { className: 'sr-only' }, 'Waiting: '),
           el('strong', {}, 'Pending bank logs'),
           el('span', { className: 'month-close-count' }, `(${pendingN})`),
         ),
@@ -87,13 +90,13 @@ export function openMonthCloseWizard() {
     body: el('div', {},
       status.alreadyClosed
         ? el('p', { className: 'tx-form-hint' }, 'You already closed this month. You can run through the checklist again anytime.')
-        : el('p', { style: 'margin-bottom:1rem;color:var(--text-muted)' },
+        : el('p', { className: 'mb-4 text-muted' },
           'Walk through these steps before rolling into the next month.'
         ),
       stepsEl,
       el('div', { className: 'card', style: 'margin-top:1rem;padding:0.75rem 1rem' },
         el('strong', {}, 'Snapshot'),
-        el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-top:0.35rem;line-height:1.5' },
+        el('p', { className: 'fs-footnote text-muted mt-1 lh-relaxed' },
           'Closing saves your envelope budgets for reports and lets you copy them next month.'
         ),
       ),

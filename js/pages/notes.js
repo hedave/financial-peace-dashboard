@@ -1,4 +1,4 @@
-import { el } from '../utils.js';
+import { el, labelFor } from '../utils.js';
 
 export function formatStickyStamp(iso) {
   if (!iso) return '';
@@ -123,6 +123,7 @@ export function renderNotes(container) {
         type: 'search',
         className: 'notes-search',
         placeholder: 'Search this page…',
+        'aria-label': 'Search notes on this page',
         value: notesSearch,
         onInput: (e) => {
           notesSearch = e.target.value;
@@ -279,7 +280,8 @@ function renderSticky(boardId, note) {
       type: 'button',
       className: `sticky-note-swatch sticky-${c.id}${note.color === c.id ? ' is-on' : ''}`,
       title: c.label,
-      'aria-label': c.label,
+      'aria-label': `${c.label} note`,
+      'aria-pressed': note.color === c.id ? 'true' : 'false',
       onClick: (e) => {
         e.stopPropagation();
         store.patchStickyNote(boardId, note.id, { color: c.id });
@@ -308,7 +310,7 @@ function openPageNameModal({ title, value, confirmLabel, onSave }) {
   const modal = showModal({
     title,
     body: el('div', { className: 'form-group' },
-      el('label', {}, 'Page name'),
+      labelFor('Page name', input),
       input,
     ),
     footer: [

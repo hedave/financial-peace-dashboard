@@ -133,7 +133,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
         el('div', {},
           el('strong', {}, formatDate(t.date)),
           el('div', {}, t.description || '—'),
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' },
+          el('div', { className: 'fs-footnote text-muted' },
             `${TX_TYPE_LABELS[t.type] || t.type} · ${formatCurrency(t.amount)}`,
           ),
         ),
@@ -169,7 +169,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
   modal = showModal({
     title: 'Awaiting bank (pending)',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'These were logged manually and do not change checking until they match a CSV import — or you mark them cleared.',
       ),
       list,
@@ -332,7 +332,7 @@ export function openDuplicateReview() {
   modal = showModal({
     title: `Possible duplicates · ${groupsAtOpen.length} left`,
     body: el('div', { className: 'duplicate-review-body' },
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
+      el('p', { className: 'tx-form-hint mb-2' },
         'Same amount and similar merchant. Delete true double-posts, or mark unique when both are real. This window stays open until you click Done.',
       ),
       progressEl,
@@ -419,14 +419,13 @@ export function openReviewInbox(_inbox) {
   hub = showModal({
     title: `Review inbox (${inbox.totalCount})`,
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Choose what to work through. The Review count includes all of these queues.',
       ),
       el('div', { className: 'review-hub-list' },
         ...queues.map(q => el('button', {
           type: 'button',
-          className: 'btn btn-secondary review-hub-item',
-          style: 'width:100%;justify-content:space-between;display:flex;margin-bottom:0.5rem',
+          className: 'btn btn-secondary review-hub-item w-full justify-between d-flex mb-2',
           onClick: () => {
             // Open next first so modal stack never hits 0 (avoids page thrash / flash)
             q.open();
@@ -462,8 +461,7 @@ export function openUncategorizedReview() {
     allowEmpty: true,
   });
   const remainingHint = el('p', {
-    className: 'tx-form-hint review-envelope-remaining',
-    style: 'margin-top:0.4rem;margin-bottom:0',
+    className: 'tx-form-hint review-envelope-remaining mt-2 mb-0',
   }, 'Pick an envelope to see what’s left this month.');
   const alwaysUse = el('input', { type: 'checkbox' });
   alwaysUse.checked = true;
@@ -583,8 +581,7 @@ export function openUncategorizedReview() {
       ),
       el('button', {
         type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        style: 'margin-bottom:0.65rem',
+        className: 'btn btn-sm btn-secondary mb-3',
         onClick: () => {
           const n = store.applyRulesToUncategorized();
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
@@ -594,12 +591,12 @@ export function openUncategorizedReview() {
       }, 'Apply saved rules'),
       list,
       el('div', { className: 'review-assign-dock' },
-        el('div', { className: 'form-group', style: 'margin-bottom:0.5rem' },
+        el('div', { className: 'form-group mb-2' },
           el('label', { for: 'bulk-cat' }, 'Assign selected to envelope'),
           envelopePicker.element,
           remainingHint,
         ),
-        el('div', { className: 'form-option remember-rule', style: 'margin:0.35rem 0 0.65rem' },
+        el('div', { className: 'form-option remember-rule mx-0 mt-1 mb-3' },
           el('div', { className: 'form-option-text' },
             el('span', { className: 'form-option-label' }, 'Always use this envelope'),
             el('span', { className: 'form-option-hint' },
@@ -706,17 +703,16 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
       list.appendChild(el('div', { className: 'review-item bill-match-item' },
         el('div', {},
           el('strong', {}, bill.name),
-          bill.autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.35rem' }, 'Auto-pay') : null,
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.2rem' },
+          bill.autoPay ? el('span', { className: 'badge badge-autopay ml-1' }, 'Auto-pay') : null,
+          el('div', { className: 'fs-footnote text-muted mt-1' },
             `${formatDate(t.date)} · ${t.description || '—'} · ${amtNote}`
           ),
           Math.abs(amtDiff) > 0.02
             ? el('div', {
-              className: 'tx-form-hint',
-              style: 'margin-top:0.35rem;margin-bottom:0',
+              className: 'tx-form-hint mt-1 mb-0',
             }, 'Amount differs from the bill plan — linking still marks it paid using the bank amount.')
             : null,
-          bill.autoPay ? el('div', { className: 'tx-form-hint', style: 'margin-top:0.5rem;margin-bottom:0' },
+          bill.autoPay ? el('div', { className: 'tx-form-hint mt-2 mb-0' },
             'Linking marks the bill paid without deducting checking again (CSV already did).'
           ) : null,
         ),
@@ -763,7 +759,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
   modal = showModal({
     title: 'Possible bill matches',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Link if this payment is that bill. Dismiss if it is not (e.g. work travel Citi vs household Citi) — keeps the payment and checking, and stops reminding you. Delete only if the row should not exist.',
       ),
       list,

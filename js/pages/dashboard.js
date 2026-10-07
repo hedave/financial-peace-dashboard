@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO, formatLocalISODate } from '../utils.js';
+import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO, formatLocalISODate, labelFor } from '../utils.js';
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
@@ -11,9 +11,9 @@ import {
   inboxMerchantPreview,
   inboxTransactionCount,
 } from '../bank-inbox.js';
-import { finishImport } from './transactions.js';
+import { finishImport, openImportDialog } from './transactions.js';
 import { openMonthCloseWizard } from '../components/month-close.js';
-import { openEnvelopeActivity, openUpcomingHolds } from './budget.js';
+import { openEnvelopeActivity, openUpcomingHolds, openMoveBetweenEnvelopes } from './budget.js';
 import { getSyncStatus, isCloudConfigured } from '../cloud-sync.js';
 import { refreshSyncChip } from '../components/layout.js';
 
@@ -72,15 +72,15 @@ export function renderDashboard(container) {
     el('h2', {}, 'Home'),
     el('p', { className: 'page-kicker' }, getMonthLabel(month)),
     el('div', { className: 'dash-header-meta' },
-      el('button', {
-        type: 'button',
-        className: 'month-close-link',
-        onClick: openMonthCloseWizard,
-      }, 'Month-close checklist'),
-      isCloudConfigured() ? el('button', {
+      // Sync status is always shown; previews/local-only builds say so instead of vanishing
+      !isCloudConfigured() ? el('span', {
+        className: 'dash-sync-pill is-off',
+        title: 'Cloud sync is not set up for this build. Data stays on this device.',
+      }, icon('cloud', 14), el('span', {}, dashSyncLabel())) : el('button', {
         type: 'button',
         className: 'dash-sync-pill',
         title: 'Tap to sync now',
+        'aria-label': `${dashSyncLabel()}. Tap to sync now`,
         onClick: async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
@@ -103,7 +103,7 @@ export function renderDashboard(container) {
             btn.disabled = false;
           }
         },
-      }, dashSyncLabel()) : null,
+      }, dashSyncLabel()),
     ),
   ));
 
@@ -122,7 +122,7 @@ export function renderDashboard(container) {
         el('h3', {}, 'New bank transactions'),
         el('p', {}, `${dropCount} transaction${dropCount === 1 ? '' : 's'} ready to import.${previewLine}`),
       ),
-      el('div', { className: 'btn-group', style: 'margin-left:auto' },
+      el('div', { className: 'btn-group ml-auto' },
         el('button', {
           className: 'btn btn-primary btn-sm',
           onClick: async (e) => {
@@ -263,7 +263,10 @@ export function renderDashboard(container) {
     : 'Nothing free to send today';
   const forecastAlloc = '';
   container.appendChild(el('details', { className: 'dash-forecast-details section' },
-    el('summary', {}, forecastSummary + forecastAlloc),
+    el('summary', {},
+      el('span', {}, forecastSummary + forecastAlloc),
+      el('span', { className: 'dash-forecast-chev' }, icon('chevron', 16)),
+    ),
     el('p', { className: 'tx-form-hint dash-forecast-line' },
       forecastLine + '.' + (bankToday > 0.005
         ? ` Safe to send today: ${formatCurrency(bankToday)}.`
@@ -289,13 +292,12 @@ export function renderDashboard(container) {
         ),
         el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          style: 'margin-left:auto',
+          className: 'btn btn-sm btn-secondary ml-auto',
           onClick: () => openUpcomingHolds(),
         }, 'Edit holds'),
       ));
     } else {
-      container.appendChild(el('p', { className: 'tx-form-hint section', style: 'margin-top:0' },
+      container.appendChild(el('p', { className: 'tx-form-hint section mt-0' },
         el('button', {
           type: 'button',
           className: 'linkish',
@@ -308,14 +310,14 @@ export function renderDashboard(container) {
 
   container.appendChild(cashRunwayCard(runway, target, () => allocateSurplus()));
 
-  container.appendChild(el('div', { className: 'quick-actions section' },
-    quickAction('📝', 'Log', () => window.appNavigate('transactions', 'expense')),
-    quickAction('📥', 'Review', () => openReviewInbox()),
-    quickAction('💸', 'Snowball', () => allocateSurplus()),
-    quickAction('✉️', 'Budget', () => window.appNavigate('budget')),
-    quickAction('🧭', 'Advisor', () => window.appNavigate('advisor')),
-    quickAction('📋', 'Bills', () => window.appNavigate('bills')),
-  ));
+  // H3: only actions that aren't already a tab, the FAB or the review row
+  if (store.canWriteBudget()) {
+    container.appendChild(el('div', { className: 'quick-actions section', role: 'group', 'aria-label': 'Quick actions' },
+      quickAction('inbox', 'Import', () => openImportDialog()),
+      quickAction('check', 'Month close', () => openMonthCloseWizard()),
+      quickAction('sync', 'Move money', () => openMoveBetweenEnvelopes()),
+    ));
+  }
 
   container.appendChild(weekAtAGlance(upcoming, paychecks));
 
@@ -329,7 +331,7 @@ export function renderDashboard(container) {
         el('h3', {}, 'New month checklist'),
         el('p', {}, 'Review kids’ envelopes, To Allocate, and cash runway. Optional: copy last month from Budget tools.'),
       ),
-      el('div', { className: 'btn-group', style: 'margin-left:auto;align-self:center' },
+      el('div', { className: 'btn-group ml-auto self-center' },
         el('button', {
           type: 'button', className: 'btn btn-secondary btn-sm',
           onClick: () => {
@@ -348,19 +350,19 @@ export function renderDashboard(container) {
   // Collapsible secondary (less daily noise)
   const detailsBody = el('div', { className: 'dash-details-body' });
   if (target && !(celebration && celebration.date === todayISO())) {
-    detailsBody.appendChild(el('div', { className: 'banner banner-action', style: 'margin-bottom:0.75rem' },
+    detailsBody.appendChild(el('div', { className: 'banner banner-action mb-3' },
       el('div', { className: 'banner-icon' }, icon('target', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `Snowball target: ${target.name}`),
         el('p', {}, `Balance ${formatCurrency(target.balance)} · Min ${formatCurrency(target.minPayment)} · Safe extra ${formatCurrency(surplus)}`),
       ),
       el('button', {
-        type: 'button', className: 'btn btn-sm btn-primary', style: 'margin-left:auto',
+        type: 'button', className: 'btn btn-sm btn-primary ml-auto',
         onClick: () => allocateSurplus(),
       }, 'Add to snowball'),
     ));
   }
-  detailsBody.appendChild(el('div', { className: 'grid grid-2 section', style: 'margin-bottom:0' },
+  detailsBody.appendChild(el('div', { className: 'grid grid-2 section mb-0' },
     paycheckCard(paychecks),
     reconciliationCard(reconciliation),
   ));
@@ -375,7 +377,7 @@ export function renderDashboard(container) {
     ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000)
     : null;
   if (backupDays == null || backupDays >= 30) {
-    detailsBody.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem' },
+    detailsBody.appendChild(el('p', { className: 'tx-form-hint mt-3' },
       backupDays == null
         ? 'No JSON backup yet — Settings → Export Backup when you can.'
         : `Last backup ${backupDays} days ago — consider exporting a fresh copy.`,
@@ -426,8 +428,7 @@ export function renderDashboard(container) {
         }),
         el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          style: 'margin-top:0.75rem;width:100%',
+          className: 'btn btn-sm btn-secondary mt-3 w-full',
           onClick: () => window.appNavigate('budget', { filter: 'attention' }),
         }, 'Envelopes needing attention'),
       ),
@@ -438,17 +439,17 @@ export function renderDashboard(container) {
   container.appendChild(el('div', { className: 'grid grid-3 section' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Budget vs Actual'),
-      el('div', { style: 'display:flex;justify-content:space-between;margin-top:0.5rem' },
+      el('div', { className: 'd-flex justify-between mt-2' },
         el('div', {},
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Budgeted'),
-          el('div', { style: 'font-weight:700', className: 'money' }, formatCurrency(budgeted))
+          el('div', { className: 'fs-footnote text-muted' }, 'Budgeted'),
+          el('div', { className: 'money fw-bold' }, formatCurrency(budgeted))
         ),
         el('div', {},
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Spent'),
-          el('div', { style: 'font-weight:700;color:var(--text)', className: 'money' }, formatCurrency(spent))
+          el('div', { className: 'fs-footnote text-muted' }, 'Spent'),
+          el('div', { className: 'money fw-bold text-default' }, formatCurrency(spent))
         ),
         el('div', {},
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Remaining'),
+          el('div', { className: 'fs-footnote text-muted' }, 'Remaining'),
           el('div', {
             style: `font-weight:700;color:${budgeted - spent >= 0 ? 'var(--positive)' : 'var(--negative)'}`,
             className: 'money',
@@ -463,7 +464,7 @@ export function renderDashboard(container) {
 }
 
 function dashSyncLabel() {
-  if (!isCloudConfigured()) return 'Cloud: off';
+  if (!isCloudConfigured()) return 'Cloud off · this device';
   const { status, lastSyncedAt } = getSyncStatus();
   if (status === 'syncing') return 'Syncing…';
   if (status === 'error') return 'Sync error · Tap';
@@ -510,7 +511,7 @@ function weekAtAGlance(upcomingBills, paychecks) {
     return el('div', { className: 'section' },
       el('div', { className: 'section-title' }, 'This week'),
       el('div', { className: 'card' },
-        el('p', { style: 'color:var(--text-muted);font-size:0.9rem;margin:0' },
+        el('p', { className: 'text-muted fs-footnote m-0' },
           'No bills due or paychecks scheduled in the next 7 days.',
         ),
       ),
@@ -679,15 +680,15 @@ function babyStepCard(step) {
 
   return el('div', { className: 'card' },
     el('div', { className: 'card-title' }, 'Baby Step Progress'),
-    el('div', { style: 'font-weight:700;margin-bottom:0.25rem' }, `Step ${step}: ${info.title}`),
-    el('p', { style: 'font-size:0.8rem;color:var(--text-muted)' }, info.description),
+    el('div', { className: 'fw-bold mb-1' }, `Step ${step}: ${info.title}`),
+    el('p', { className: 'fs-footnote text-muted' }, info.description),
     el('div', { className: 'baby-steps' },
       ...BABY_STEPS.map(bs => el('div', {
         className: `baby-step${bs.step < step ? ' done' : ''}${bs.step === step ? ' current' : ''}`
       }, String(bs.step)))
     ),
-    step <= 3 ? el('div', { style: 'margin-top:0.75rem' },
-      el('div', { style: 'font-size:0.8rem' }, `Emergency Fund: ${formatCurrency(ef)} / ${formatCurrency(target)}`),
+    step <= 3 ? el('div', { className: 'mt-3' },
+      el('div', { className: 'fs-footnote' }, `Emergency Fund: ${formatCurrency(ef)} / ${formatCurrency(target)}`),
       progressBar(ef, target)
     ) : null
   );
@@ -710,7 +711,7 @@ function debtSummaryCard() {
   return el('div', { className: 'card' },
     el('div', { className: 'card-title' }, 'Debt Snowball'),
     el('div', { className: 'card-value', style: 'font-size:1.4rem' }, formatCurrency(total)),
-    el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem' }, line)
+    el('p', { className: 'fs-footnote text-muted mt-1' }, line)
   );
 }
 
@@ -721,9 +722,9 @@ function billBadge(b) {
   return el('span', { className: 'badge badge-due' }, 'Due Soon');
 }
 
-function quickAction(icon, label, onClick) {
-  return el('button', { className: 'quick-action-btn', onClick },
-    el('span', { className: 'qa-icon' }, icon),
+function quickAction(iconName, label, onClick) {
+  return el('button', { type: 'button', className: 'quick-action-btn', onClick },
+    el('span', { className: 'qa-icon' }, icon(iconName, 22)),
     el('span', { className: 'qa-label' }, label)
   );
 }
@@ -736,7 +737,7 @@ function editBalance(type) {
   const input = el('input', { type: 'number', step: '0.01', value: current });
   const modal = showModal({
     title: isChecking ? 'Update Checking Balance' : 'Update Emergency Fund',
-    body: el('div', { className: 'form-group' }, el('label', {}, 'Current Balance'), input),
+    body: el('div', { className: 'form-group' }, labelFor('Current Balance', input), input),
     footer: el('button', {
       type: 'button',
       className: 'btn btn-primary',
@@ -772,15 +773,14 @@ function paycheckCard(paychecks) {
                 title: `${c.date}: ${c.status}`,
               }, c.status === 'received' ? '✓' : c.status === 'overdue' ? '!' : '○')),
             )
-            : el('div', { style: 'font-size:0.75rem;color:var(--text-muted)' },
+            : el('div', { className: 'fs-caption text-muted' },
               `${p.checksReceived}/${p.checksExpected} checks`
             ),
         );
       }),
     ),
     el('button', {
-      className: 'btn btn-sm btn-secondary',
-      style: 'margin-top:0.75rem',
+      className: 'btn btn-sm btn-secondary mt-3',
       onClick: () => window.appNavigate('income'),
     }, 'Edit pay dates'),
   );
@@ -796,13 +796,13 @@ function reconciliationCard(recon) {
 
   const card = el('div', { className: 'card' },
     el('div', { className: 'card-title' }, 'Checking Reconciliation'),
-    el('div', { style: 'font-size:0.85rem;line-height:1.6;margin-bottom:0.75rem' },
+    el('div', { className: 'fs-footnote lh-relaxed mb-3' },
       el('div', {}, `Logged: ${formatCurrency(recon.logged)}`),
       recon.bankBalance != null ? el('div', {}, `Bank: ${formatCurrency(recon.bankBalance)}`) : null,
       el('div', { style: `color:${recon.matched ? 'var(--positive)' : recon.bankBalance != null ? 'var(--negative)' : 'var(--text-muted)'}` },
         gapText
       ),
-      recon.asOfDate ? el('div', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+      recon.asOfDate ? el('div', { className: 'fs-caption text-muted mt-1' },
         `As of ${recon.asOfDate}`
       ) : null,
     ),
@@ -895,7 +895,7 @@ function openReconciliationDialog(recon) {
         ? renderReconciliationMatches(candidates, { limit: 5 })
         : el('div', { className: 'reconcile-matches-empty' },
           el('p', {}, 'No matching transactions in the last 90 days that affect checking.'),
-          el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem' },
+          el('p', { className: 'tx-form-hint mt-1' },
             gap > 0
               ? 'Bank is higher — often a deposit not imported yet, or a fee/refund only on the bank side.'
               : 'Bank is lower — often a purchase not imported yet, or a duplicate income entry in the app.',
@@ -915,18 +915,18 @@ function openReconciliationDialog(recon) {
 const reconModal = showModal({
     title: 'Reconcile Checking',
     body: el('div', {},
-      el('p', { style: 'margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem' },
+      el('p', { className: 'mb-4 text-muted fs-footnote' },
         'Enter the balance shown in your bank app. As-of date defaults to today when you update the amount. We scan recent transactions for combinations that explain any gap.'
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Bank balance'), input),
+      el('div', { className: 'form-group' }, labelFor('Bank balance', input), input),
       el('div', { className: 'form-group' },
-        el('label', {}, 'As of date'),
+        labelFor('As of date', dateIn),
         dateIn,
-        el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+        el('p', { className: 'tx-form-hint mt-1 mb-0' },
           'Resets to today whenever you change the bank balance.',
         ),
       ),
-      el('p', { style: 'font-size:0.85rem;margin-bottom:0.5rem' }, `Logged checking: ${formatCurrency(recon.logged)}`),
+      el('p', { className: 'fs-footnote mb-2' }, `Logged checking: ${formatCurrency(recon.logged)}`),
       gapPreview,
       matchesHost,
     ),
@@ -988,11 +988,11 @@ export function allocateSurplus() {
         : ''),
     ));
     if (amt > todayMax + 0.02) {
-      preview.appendChild(el('div', { style: 'color:var(--negative);margin-top:0.35rem' },
+      preview.appendChild(el('div', { className: 'text-negative mt-1' },
         `Only ${formatCurrency(todayMax)} is free in checking today (month-end forecast is ${formatCurrency(surplus)}). Wait for paychecks or send less now.`,
       ));
     } else if (r.negative) {
-      preview.appendChild(el('div', { style: 'color:var(--negative);margin-top:0.35rem' },
+      preview.appendChild(el('div', { className: 'text-negative mt-1' },
         'That amount would leave checking short of bills before next pay.',
       ));
     } else if (r.tight) {
@@ -1007,12 +1007,12 @@ export function allocateSurplus() {
   const modal = showModal({
     title: 'Snowball extra to debt',
     body: el('div', {},
-      el('p', { style: 'margin-bottom:1rem' }, `Send extra money to ${target.name}`),
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'mb-4' }, `Send extra money to ${target.name}`),
+      el('p', { className: 'tx-form-hint mb-4' },
         'Month-end forecast assumes remaining income lands and you still cover unpaid bills + the envelope plan. '
         + 'Sending money *today* is limited by cash free after bills before next pay.',
       ),
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         `Month-end forecast: ${formatCurrency(surplus)}`
         + ` · Safe to send today: ${formatCurrency(todayMax)}`
         + ` · Income left: ${formatCurrency(forecast.incomeLeft || 0)}`
@@ -1022,7 +1022,7 @@ export function allocateSurplus() {
         + ((forecast.upcomingHold || 0) > 0.005 ? ` · Upcoming hold: ${formatCurrency(forecast.upcomingHold)}` : '')
         + ` · Cushion: ${formatCurrency(forecast.buffer || 0)}`,
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount to send now'), input),
+      el('div', { className: 'form-group' }, labelFor('Amount to send now', input), input),
       preview,
     ),
     footer: el('button', {

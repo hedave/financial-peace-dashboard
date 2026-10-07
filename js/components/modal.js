@@ -180,6 +180,32 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
     }, '×')
   );
 
+  // M3: drag the header down to dismiss (phone sheets only)
+  {
+    let startY = null; let dy = 0; let pid = null;
+    header.addEventListener('pointerdown', e => {
+      if (!isPhoneUi() || e.target.closest('button, a, input, select, textarea')) return;
+      startY = e.clientY; dy = 0; pid = e.pointerId;
+      try { header.setPointerCapture(pid); } catch { /* ignore */ }
+      modal.style.transition = 'none';
+    });
+    header.addEventListener('pointermove', e => {
+      if (startY == null || e.pointerId !== pid) return;
+      dy = Math.max(0, e.clientY - startY);
+      modal.style.transform = dy ? `translateY(${dy}px)` : '';
+    });
+    const end = () => {
+      if (startY == null) return;
+      startY = null;
+      modal.style.transition = '';
+      if (dy > 80) { close(); return; }
+      modal.style.transform = '';
+    };
+    header.addEventListener('pointerup', end);
+    header.addEventListener('pointercancel', end);
+    header.style.touchAction = 'none';
+  }
+
   const bodyEl = el('div', { className: 'modal-body' });
   if (typeof body === 'string') bodyEl.innerHTML = body;
   else if (body) bodyEl.appendChild(body);
@@ -272,7 +298,7 @@ export function showUndoToast(message, onUndo, duration = 8000) {
 export function confirmDialog(title, message, onConfirm) {
   const modal = showModal({
     title,
-    body: el('p', { style: 'white-space:pre-line;line-height:1.5;margin:0' }, message),
+    body: el('p', { className: 'pre-line lh-relaxed m-0' }, message),
     footer: [
       el('button', {
         type: 'button',

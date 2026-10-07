@@ -443,12 +443,29 @@ async function startApp() {
   await continueAfterUnlock();
 }
 
+/** X2: a real, pinned offline status (announced politely, not a CSS pseudo-element). */
+function installOfflineBanner() {
+  const banner = document.createElement('div');
+  banner.className = 'offline-banner';
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+  banner.hidden = true;
+  document.body.appendChild(banner);
+  const apply = () => {
+    const offline = !navigator.onLine;
+    document.body.classList.toggle('is-offline', offline);
+    banner.hidden = !offline;
+    banner.textContent = offline ? 'Offline · changes save on this device and sync later' : '';
+  };
+  window.addEventListener('online', apply);
+  window.addEventListener('offline', apply);
+  apply();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   installFormEnhancer();
   setTimeout(() => document.body.classList.add('fp-rendered'), 900);
-  document.body.classList.toggle('is-offline', !navigator.onLine);
-  window.addEventListener('online', () => document.body.classList.remove('is-offline'));
-  window.addEventListener('offline', () => document.body.classList.add('is-offline'));
+  installOfflineBanner();
   startApp().catch(err => {
     console.error('Startup failed', err);
     init();
@@ -456,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261007d';
+const APP_BUILD = '20261007e';
 
 installFigPigApi();
 

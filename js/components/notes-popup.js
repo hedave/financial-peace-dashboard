@@ -46,7 +46,7 @@ export function showNotesPopup() {
   const modal = showModal({
     title: 'Quick notes',
     body: el('div', { className: 'notes-popup-body' },
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+      el('p', { className: 'tx-form-hint mb-3' },
         `Board: ${board.title} · tap a sticky to open the full board`,
       ),
       list,
