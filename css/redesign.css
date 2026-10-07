@@ -723,6 +723,9 @@ body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.mod
   top: calc(var(--safe-t) + var(--sp-2)); bottom: auto; z-index: 450; pointer-events: none;
 }
 .toast { pointer-events: auto; }
+/* R8-2: plain toasts never block taps; only the Undo toast is interactive. One toast at a time over a sheet. */
+.toast:not(.undo-toast) { pointer-events: none; }
+body.has-sheet .toast-container > .toast:not(:last-child) { display: none; }
 
 /* P15-9: dark primaries are bright; label them dark for >= 4.5:1 */
 [data-theme="dark"] .btn-primary, [data-theme="dark"] .chip.active, [data-theme="dark"] .count-badge,
@@ -790,8 +793,8 @@ body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.mod
 
 /* ---- PR15 round 3 (20261007f) ------------------------------------------ */
 /* R7-1: Bonus available spans the row instead of sitting half-width alone */
-.budget-summary > .stat-bonus { grid-column: 1 / -1; }
 @media (max-width: 768px) {
+  .budget-summary > .stat-bonus { grid-column: 1 / -1; }
   .budget-summary > .stat-bonus {
     display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: var(--sp-3);
   }
@@ -816,12 +819,20 @@ body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.mod
 }
 .dash-alert-chips::after { content: none !important; }
 /* P15-7: inline field errors read as errors, not focus */
-.form-group input[aria-invalid="true"], .form-group select[aria-invalid="true"], .form-group textarea[aria-invalid="true"],
-.input-affix.is-invalid, .input-affix:has(> [aria-invalid="true"]) { border-color: var(--negative) !important; box-shadow: 0 0 0 1px var(--negative); }
-.input-affix > [aria-invalid="true"] { border-color: transparent !important; box-shadow: none; }
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] {
+  border-color: var(--negative) !important; box-shadow: 0 0 0 1px var(--negative);
+}
+/* R8-3: focus ring on an errored field is red, not green */
+input[aria-invalid="true"]:focus, select[aria-invalid="true"]:focus, textarea[aria-invalid="true"]:focus,
+input[aria-invalid="true"]:focus-visible, select[aria-invalid="true"]:focus-visible, textarea[aria-invalid="true"]:focus-visible {
+  border-color: var(--negative) !important; box-shadow: 0 0 0 3px var(--negative-line) !important; outline-color: var(--negative) !important;
+}
+.input-affix.is-invalid:focus-within { outline-color: var(--negative); }
 p.field-error { margin: var(--sp-1) 0 0; }
 /* I2: pay calendar cells are 44px targets */
 .pay-cal-day { min-width: 44px; min-height: 44px; }
+/* R8-5: one month per row up to tablet width so 7×44px cells never overflow */
+@media (max-width: 768px) { .pay-cal-year { grid-template-columns: 1fr; } }
 /* AU3: password show/hide */
 .pw-field { position: relative; display: flex; align-items: center; }
 .pw-field > input { flex: 1 1 auto; padding-right: 72px !important; }
@@ -836,7 +847,11 @@ p.field-error { margin: var(--sp-1) 0 0; }
 /* T5: sticky day headers on Log (list clips instead of scrolling so sticky works) */
 @media (max-width: 768px) {
   html[data-large-text="true"] { --log-sticky-top: 65px; }
-  .tx-mobile-list { overflow: clip; }
+  /* R8-1: overflow must stay visible or the row ⋯ menus get clipped */
+  .tx-mobile-list { overflow: visible; }
+  .tx-mobile-list > .tx-date-label:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .tx-mobile-list > .tx-card:nth-last-child(-n+2) .tx-more-dropdown,
+  .tx-mobile-list > .tx-card:nth-last-child(-n+3):has(~ .tx-list-more) .tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
   .tx-mobile-list > .tx-date-label {
     position: sticky; top: calc(var(--safe-t) + var(--log-sticky-top, 60px)); z-index: 2;
     background: var(--bg-card); border-bottom: 1px solid var(--border);

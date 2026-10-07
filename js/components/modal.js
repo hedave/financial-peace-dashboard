@@ -110,6 +110,8 @@ function afterModalStackChange() {
 
 export function showModal({ title, body, footer, onClose, closeOnBackdrop = true }) {
   bindEscapeOnce();
+  // R8-2: a toast from the previous sheet (e.g. "Bill added!") must not carry over onto this one
+  toastContainer?.querySelectorAll('.toast:not(.undo-toast)').forEach(t => t.remove());
   const backdrop = el('div', { className: 'modal-backdrop' });
   const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
   const modal = el('div', {
