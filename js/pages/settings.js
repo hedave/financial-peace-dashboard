@@ -537,7 +537,8 @@ export function renderSettings(container) {
     ),
     el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
       'Household of ' + (state.settings.familySize || 7)
-      + ' · Build 20260923'
+      + ' · Build ' + ((window.FigPig && window.FigPig.APP_BUILD) || document.querySelector('meta[name="app-build"]')?.content || '?')
+      + (getComputedStyle(document.documentElement).getPropertyValue('--sp-4').trim() ? ' · Design 2026-10' : ' · Design legacy')
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));

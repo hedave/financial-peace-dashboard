@@ -34,3 +34,19 @@
   for = "/update.html"
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
+# Every deploy must reach the browser: ES module imports inside js/ are not
+# ?v= versioned, so force revalidation of all JS/CSS (and the manifest).
+[[headers]]
+  for = "/js/*"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
