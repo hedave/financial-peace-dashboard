@@ -1,4 +1,5 @@
 import { el, formatCurrency, formatDate } from '../utils.js';
+import { icon } from '../icons.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from './modal.js';
 import { guessMerchantPattern } from '../category-rules.js';
@@ -70,30 +71,43 @@ export function renderReviewBanner(inbox) {
     parts.push(`${inbox.pending.length} awaiting bank`);
   }
 
-  return el('div', { className: 'banner banner-action review-banner' },
-    el('div', { className: 'banner-icon' }, '📥'),
-    el('div', { className: 'banner-text' },
-      el('h3', {}, 'Review inbox'),
-      el('p', {}, parts.join(' · '))
+  const extra = [];
+  if (inbox.billMatches.length) {
+    const n = inbox.billMatches.length;
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openBillMatches(inbox),
+    }, `Match ${n} bill${n === 1 ? '' : 's'}`));
+  }
+  if (inbox.pending?.length) {
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openPendingReview(inbox),
+    }, 'Pending'));
+  }
+  if (inbox.duplicates?.length) {
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openDuplicateReview(inbox),
+    }, 'Duplicates'));
+  }
+
+  return el('div', { className: 'review-row section' },
+    el('button', {
+      type: 'button',
+      className: 'list-row list-row-button review-row-main',
+      onClick: () => openReviewInbox(),
+      'aria-label': `Review inbox, ${inbox.totalCount} item${inbox.totalCount === 1 ? '' : 's'}: ${parts.join(', ')}`,
+    },
+      el('span', { className: 'list-row__icon' }, icon('inbox', 22)),
+      el('span', { className: 'list-row__body' },
+        el('span', { className: 'list-row__title' }, 'Review inbox'),
+        el('span', { className: 'list-row__meta' }, parts.join(' · ')),
+      ),
+      el('span', { className: 'count-badge' }, String(inbox.totalCount)),
+      el('span', { className: 'list-row__chev' }, icon('chevron', 18)),
     ),
-    el('div', { className: 'btn-group', style: 'margin-left:auto' },
-      inbox.totalCount ? el('button', {
-        className: 'btn btn-primary btn-sm',
-        onClick: () => openReviewInbox(),
-      }, 'Review') : null,
-      inbox.pending?.length ? el('button', {
-        className: 'btn btn-secondary btn-sm',
-        onClick: () => openPendingReview(inbox),
-      }, 'Pending') : null,
-      inbox.billMatches.length ? el('button', {
-        className: 'btn btn-accent btn-sm',
-        onClick: () => openBillMatches(inbox),
-      }, 'Match Bills') : null,
-      inbox.duplicates?.length ? el('button', {
-        className: 'btn btn-secondary btn-sm',
-        onClick: () => openDuplicateReview(inbox),
-      }, 'Duplicates') : null,
-    ),
+    extra.length ? el('div', { className: 'review-row-actions' }, ...extra) : null,
   );
 }
 

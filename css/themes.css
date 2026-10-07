@@ -1,3 +1,4 @@
+@layer themes {
 /* Color palettes — combined with data-theme="light|dark" on <html> */
 
 /* Forest (original) */
@@ -313,3 +314,4 @@
   --highlight-end: rgba(245, 158, 11, 0.1);
   --glow: rgba(190, 18, 60, 0.35);
 }
+} /* end layer */

@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
@@ -218,7 +219,7 @@ export function renderTransactions(container, arg) {
 
   if (duplicateCount > 0) {
     container.appendChild(el('div', { className: 'banner banner-warning tx-duplicate-banner section' },
-      el('div', { className: 'banner-icon' }, '⚠️'),
+      el('div', { className: 'banner-icon' }, icon('alert', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'Possible duplicate transactions'),
         el('p', {}, `${duplicateCount} transaction${duplicateCount === 1 ? '' : 's'} look similar (same amount / merchant nearby). They were still imported if on different days — review only if one is a true double-post.`)

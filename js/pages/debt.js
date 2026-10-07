@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
@@ -71,7 +72,7 @@ export function renderDebt(container) {
   if (target) {
     const payment = store.getSnowballPayment(target);
     container.appendChild(el('div', { className: 'banner banner-celebration section' },
-      el('div', { className: 'banner-icon' }, '❄️'),
+      el('div', { className: 'banner-icon' }, icon('debt', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `Snowball Target: ${target.name}`),
         el('p', {}, `Throw ${formatCurrency(payment)} at this debt this month (${formatCurrency(target.minPayment)} min + ${formatCurrency(surplus)} extra)`)
@@ -83,7 +84,7 @@ export function renderDebt(container) {
     ));
     if (!target.categoryId) {
       container.appendChild(el('div', { className: 'banner banner-action section' },
-        el('div', { className: 'banner-icon' }, '✉️'),
+        el('div', { className: 'banner-icon' }, icon('budget', 22)),
         el('div', { className: 'banner-text' },
           el('h3', {}, `Map ${target.name} to a Budget envelope`),
           el('p', {}, 'Extra snowball on that envelope is not treated as overspend. When this one is paid off, map the next debt the same way and Move leftover there.'),
@@ -97,7 +98,7 @@ export function renderDebt(container) {
     }
   } else if (paused.length && !snowball.length) {
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '⏸️'),
+      el('div', { className: 'banner-icon' }, icon('clock', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'All remaining debts are on hold'),
         el('p', {}, 'No snowball target until you resume a debt — or you’re only carrying deferred balances.'),
@@ -598,9 +599,9 @@ function openDebtForm(debt = null) {
   const state = store.getState();
   const isEdit = !!debt;
   const nameIn = el('input', { type: 'text', value: debt?.name || '' });
-  const balIn = el('input', { type: 'number', step: '0.01', value: debt?.balance || 0 });
-  const rateIn = el('input', { type: 'number', step: '0.01', value: debt?.interestRate || 0 });
-  const minIn = el('input', { type: 'number', step: '0.01', value: debt?.minPayment || 0 });
+  const balIn = el('input', { type: 'number', step: '0.01', value: debt?.balance || '', placeholder: '0.00' });
+  const rateIn = el('input', { type: 'number', step: '0.01', value: debt?.interestRate || '', placeholder: '0.00' });
+  const minIn = el('input', { type: 'number', step: '0.01', value: debt?.minPayment || '', placeholder: '0.00' });
   const dueIn = el('input', { type: 'text', value: debt?.dueDate || '', placeholder: 'Due date or notes' });
   const notesIn = el('textarea', { rows: 2 }, debt?.notes || '');
   const pausedIn = el('input', { type: 'checkbox' });

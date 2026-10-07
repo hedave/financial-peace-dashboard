@@ -228,10 +228,10 @@ export function showModal({ title, body, footer, onClose, closeOnBackdrop = true
 
 export function showToast(message, type = 'info', duration = 3500) {
   if (!toastContainer) {
-    toastContainer = el('div', { className: 'toast-container' });
+    toastContainer = el('div', { className: 'toast-container', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'false' });
     document.body.appendChild(toastContainer);
   }
-  const toast = el('div', { className: `toast ${type}` }, message);
+  const toast = el('div', { className: `toast ${type}`, role: type === 'error' ? 'alert' : null }, message);
   toastContainer.appendChild(toast);
   setTimeout(() => toast.remove(), duration);
   return toast;
@@ -245,7 +245,7 @@ export function showToast(message, type = 'info', duration = 3500) {
  */
 export function showUndoToast(message, onUndo, duration = 8000) {
   if (!toastContainer) {
-    toastContainer = el('div', { className: 'toast-container' });
+    toastContainer = el('div', { className: 'toast-container', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'false' });
     document.body.appendChild(toastContainer);
   }
   let done = false;

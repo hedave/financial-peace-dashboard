@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import {
   el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth,
   emptyState, getRecentMonths, addMonths, todayISO,
@@ -119,12 +120,13 @@ export function renderBudget(container, arg) {
     el('button', {
       type: 'button',
       className: 'btn btn-sm btn-secondary',
+      'aria-label': 'Previous month',
       disabled: monthOptions[0] === month ? true : undefined,
       onClick: () => {
         budgetViewMonth = addMonths(month, -1);
         window.appRefresh();
       },
-    }, '← Prev'),
+    }, '‹'),
     el('label', { style: 'font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:0.5rem' },
       'Month',
       monthSelect,
@@ -132,13 +134,14 @@ export function renderBudget(container, arg) {
     el('button', {
       type: 'button',
       className: 'btn btn-sm btn-secondary',
+      'aria-label': 'Next month',
       disabled: month >= liveMonth ? true : undefined,
       onClick: () => {
         budgetViewMonth = addMonths(month, 1);
         if (budgetViewMonth > liveMonth) budgetViewMonth = liveMonth;
         window.appRefresh();
       },
-    }, 'Next →'),
+    }, '›'),
     !isCurrentMonth
       ? el('button', {
         type: 'button',
@@ -178,7 +181,7 @@ export function renderBudget(container, arg) {
         isCurrentMonth ? 'Sum of envelope monthly budgets' : 'From snapshot or current plan',
       ),
     ),
-    el('div', { className: 'card' },
+    el('div', { className: 'card stat-allocate' },
       el('div', { className: 'card-title' }, 'To Allocate'),
       el('div', { className: `card-value ${unallocated === 0 ? 'positive' : unallocated > 0 ? 'accent' : 'negative'}` },
         formatCurrency(unallocated)
@@ -243,7 +246,7 @@ export function renderBudget(container, arg) {
   if (isCurrentMonth && unallocated < -0.005) {
     const rightSize = store.planRightSizeToAllocate(month, { includeSinkingFunds: false });
     container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '📐'),
+      el('div', { className: 'banner-icon' }, icon('budget', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `To Allocate over by ${formatCurrency(Math.abs(unallocated))}`),
         el('p', {},
@@ -285,7 +288,7 @@ export function renderBudget(container, arg) {
       ? ` Mapped bills/debts (${overspendShare.protectedNames.slice(0, 3).join(', ')}${overspendShare.protectedCount > 3 ? '…' : ''}) stay out of the share.`
       : '';
     container.appendChild(el('div', { className: 'banner banner-warning section overspend-share-banner' },
-      el('div', { className: 'banner-icon' }, '📉'),
+      el('div', { className: 'banner-icon' }, icon('alert', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(overspendShare.overspendTotal)} overspent — same cash as leftover`),
         el('p', {},
@@ -321,7 +324,7 @@ export function renderBudget(container, arg) {
     }).join(', ');
     const extra = activeHolds.length > 2 ? ` +${activeHolds.length - 2}` : '';
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '📌'),
+      el('div', { className: 'banner-icon' }, icon('target', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(holdReserve)} held out of snowball`),
         el('p', {},
@@ -346,7 +349,7 @@ export function renderBudget(container, arg) {
       ? ` ${formatCurrency(coverIouSummary.sinkingTotal)} of that is sinking funds.`
       : '';
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '↩️'),
+      el('div', { className: 'banner-icon' }, icon('undo', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(coverIouSummary.total)} to restore from bonus`),
         el('p', {},

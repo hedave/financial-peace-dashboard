@@ -622,13 +622,13 @@ function openBillForm(bill = null) {
   const isEdit = !!bill;
 
   const nameIn = el('input', { type: 'text', value: bill?.name || '' });
-  const amountIn = el('input', { type: 'number', step: '0.01', value: bill?.amount || 0 });
+  const amountIn = el('input', { type: 'number', step: '0.01', value: bill?.amount || '', placeholder: '0.00' });
   const dueIn = el('input', { type: 'date', value: bill?.dueDate || '' });
   const recurringIn = el('input', { type: 'checkbox', checked: bill?.recurring ?? true });
   const autoPayIn = el('input', { type: 'checkbox', checked: bill?.autoPay ?? false });
 
   const catSelect = el('select');
-  catSelect.appendChild(el('option', { value: '' }, '— Select Category —'));
+  catSelect.appendChild(el('option', { value: '' }, 'Choose envelope'));
   (state.categories || []).forEach(c => {
     catSelect.appendChild(el('option', { value: c.id }, c.name));
   });

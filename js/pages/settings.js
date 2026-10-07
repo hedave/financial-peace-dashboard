@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import { el, formatCurrency } from '../utils.js';
 import { store } from '../store.js';
 import { showToast, confirmDialog } from '../components/modal.js';
@@ -118,7 +119,7 @@ export function renderSettings(container) {
   const daysSinceBackup = daysSince(state.settings.lastBackupAt);
   if (daysSinceBackup == null || daysSinceBackup >= 30) {
     container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '💾'),
+      el('div', { className: 'banner-icon' }, icon('sync', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'Backup recommended'),
         el('p', {},

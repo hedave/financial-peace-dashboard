@@ -1,3 +1,7 @@
+/* Cascade order is explicit: base (this file) < themes < refresh (redesign.css). */
+@layer base, themes, refresh;
+
+@layer base {
 :root {
   /* Muted indicators — soft sage & dusty rose, not bright Christmas red/green */
   --positive: #5e7d72;
@@ -539,8 +543,8 @@ body.household-notes .fab-expense { display: none !important; }
 }
 
 .banner-warning {
-  background: color-mix(in srgb, var(--negative) 12%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--negative) 35%, transparent);
+  background: var(--negative-tint);
+  border: 1px solid var(--negative-line);
 }
 
 .tx-duplicate-banner {
@@ -550,7 +554,7 @@ body.household-notes .fab-expense { display: none !important; }
 }
 
 .tx-duplicate-row {
-  background: color-mix(in srgb, var(--negative) 6%, transparent);
+  background: var(--negative-tint);
 }
 
 .tx-duplicate-badge {
@@ -560,7 +564,7 @@ body.household-notes .fab-expense { display: none !important; }
   font-size: 0.65rem;
   font-weight: 700;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--negative) 18%, transparent);
+  background: var(--negative-tint);
   color: var(--negative);
 }
 
@@ -572,7 +576,7 @@ body.household-notes .fab-expense { display: none !important; }
   font-size: 0.65rem;
   font-weight: 700;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  background: var(--warning-tint);
   color: var(--warning);
   vertical-align: middle;
 }
@@ -582,7 +586,7 @@ body.household-notes .fab-expense { display: none !important; }
 }
 
 .tx-pending-row {
-  background: color-mix(in srgb, var(--warning) 5%, transparent);
+  background: var(--warning-tint);
 }
 
 .duplicate-review-body {
@@ -630,7 +634,7 @@ body.household-notes .fab-expense { display: none !important; }
 
 .duplicate-review-group-header {
   padding: 0.75rem 0.85rem;
-  background: color-mix(in srgb, var(--warning) 12%, var(--bg));
+  background: var(--warning-tint);
   font-size: 0.9rem;
   display: flex;
   align-items: flex-start;
@@ -659,7 +663,7 @@ body.household-notes .fab-expense { display: none !important; }
   min-width: 2.1rem;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 28%, var(--bg-card));
+  background: var(--warning-tint);
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--text);
@@ -801,7 +805,7 @@ body.household-notes .fab-expense { display: none !important; }
 .btn-danger:hover {
   color: var(--destructive);
   border-color: var(--destructive);
-  background: color-mix(in srgb, var(--destructive) 10%, var(--bg-card));
+  background: var(--destructive-tint);
 }
 .btn-sm.btn-danger {
   padding: 0.2rem 0.55rem;
@@ -1235,7 +1239,7 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 }
 
 .envelope-card-fav {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--primary)) 35%, transparent);
+  box-shadow: 0 0 0 2px var(--accent-line);
 }
 
 .envelope-move-delta {
@@ -1423,9 +1427,9 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 }
 
 .envelope-progress {
-  margin-top: 0.65rem !important;
-  height: 10px !important;
-  min-height: 10px !important;
+  margin-top: 0.65rem;
+  height: 8px;
+  min-height: 8px;
 }
 
 .envelope-progress-meta {
@@ -1482,8 +1486,8 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 }
 
 .envelope-activity-row-in {
-  border-color: color-mix(in srgb, var(--positive) 35%, var(--border));
-  background: color-mix(in srgb, var(--positive) 8%, var(--bg));
+  border-color: var(--positive-line);
+  background: var(--positive-tint);
 }
 
 .envelope-activity-main {
@@ -1610,8 +1614,8 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 }
 
 .chip-warn {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
-  background: color-mix(in srgb, var(--warning) 12%, var(--bg-card));
+  border-color: var(--warning-line);
+  background: var(--warning-tint);
   color: var(--text);
 }
 
@@ -1690,7 +1694,7 @@ tr.bill-paid-row:hover td { background: rgba(30,107,92,0.02); }
 }
 
 .bill-row-clickable { cursor: pointer; }
-.bill-row-clickable:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.bill-row-clickable:hover td { background: var(--primary-tint); }
 
 /* Accessibility */
 html[data-large-text="true"] { font-size: 18px; }
@@ -1809,7 +1813,7 @@ html[data-reduce-motion="true"] *::after {
   padding: 0.85rem 1rem;
   border: 1.5px dashed var(--border);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--primary) 5%, var(--bg-card));
+  background: var(--primary-tint);
   color: var(--text);
   text-align: center;
   cursor: copy;
@@ -1824,7 +1828,7 @@ html[data-reduce-motion="true"] *::after {
 
 .import-drop-zone.is-over {
   border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
+  background: var(--primary-tint);
 }
 
 .import-preview-list {
@@ -2076,7 +2080,7 @@ body.modal-open .modal-backdrop {
 
 .sticky-board-tab-danger {
   color: var(--destructive);
-  border-color: color-mix(in srgb, var(--destructive) 35%, var(--border));
+  border-color: var(--destructive-line);
 }
 
 .household-notes-banner {
@@ -2089,13 +2093,13 @@ body.modal-open .modal-backdrop {
   justify-content: center;
   gap: 0.4rem;
   padding: 0.32rem 1rem;
-  background: color-mix(in srgb, var(--primary) 14%, var(--bg));
+  background: var(--primary-tint);
   color: var(--primary-dark);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  border-bottom: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-bottom: 1px solid var(--primary-line);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -2110,7 +2114,7 @@ body.modal-open .modal-backdrop {
   height: 0.42rem;
   border-radius: 50%;
   background: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 28%, transparent);
+  box-shadow: 0 0 0 3px var(--primary-ring);
 }
 
 .notes-board-tools {
@@ -3004,7 +3008,7 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .review-item.is-selected {
   outline: 2px solid var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, var(--bg));
+  background: var(--primary-tint);
 }
 
 .review-item-desc {
@@ -3127,14 +3131,14 @@ html[data-reduce-motion="true"] .sticky-note {
 .health-warning { background: rgba(245, 158, 11, 0.2); color: #b45309; }
 .health-depleted { background: rgba(245, 158, 11, 0.35); color: #92400e; }
 .health-over { background: rgba(220, 38, 38, 0.15); color: var(--negative); }
-.health-snowball { background: color-mix(in srgb, var(--primary) 16%, var(--bg)); color: var(--primary); }
-.health-bill-extra { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); color: var(--accent); }
+.health-snowball { background: var(--primary-tint); color: var(--primary); }
+.health-bill-extra { background: var(--accent-tint); color: var(--accent); }
 
 .envelope-warning { border-color: rgba(245, 158, 11, 0.4); }
 .envelope-depleted { border-color: rgba(245, 158, 11, 0.55); }
 .envelope-over { border-color: rgba(220, 38, 38, 0.35); }
-.envelope-snowball { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
-.envelope-bill-extra { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.envelope-snowball { border-color: var(--primary-line); }
+.envelope-bill-extra { border-color: var(--accent-line); }
 
 .envelope-linked-hint {
   margin-top: 0.35rem;
@@ -3173,8 +3177,8 @@ html[data-reduce-motion="true"] .sticky-note {
 
 .envelope-goal-bar {
   margin-bottom: 0.35rem;
-  height: 10px !important;
-  min-height: 10px !important;
+  height: 8px;
+  min-height: 8px;
 }
 
 .envelope-goal-pct {
@@ -3186,7 +3190,7 @@ html[data-reduce-motion="true"] .sticky-note {
 .envelope-note {
   margin-top: 0.65rem;
   padding: 0.5rem 0.65rem;
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  background: var(--accent-tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--accent);
@@ -3342,7 +3346,7 @@ html[data-reduce-motion="true"] .sticky-note {
   font-size: 0.65rem;
   font-weight: 600;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: var(--accent-tint);
   color: var(--accent);
 }
 
@@ -3728,26 +3732,12 @@ html[data-reduce-motion="true"] .sticky-note {
     max-width: 100%;
     padding-top: 0;
   }
-  .main-wrap::before {
-    content: '';
-    display: block;
-    height: env(safe-area-inset-top, 0px);
-    position: sticky;
-    top: 0;
-    z-index: 45;
-    background: var(--bg);
-    flex-shrink: 0;
-  }
   body.household-notes .main-wrap::before { display: none; }
   .main-content {
     margin-left: 0;
     padding: 0.85rem 1rem 1.25rem;
     width: 100%;
     max-width: 100%;
-    padding-bottom: calc(8.75rem + env(safe-area-inset-bottom, 0px));
-  }
-  html {
-    scroll-padding-bottom: calc(8.75rem + env(safe-area-inset-bottom, 0px));
   }
   .page-header {
     margin-bottom: 0.75rem;
@@ -3831,35 +3821,8 @@ html[data-reduce-motion="true"] .sticky-note {
     grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
   }
-  .dash-stats .card:first-child {
-    grid-column: 1 / -1;
-    padding: 1.1rem 1.15rem 1.05rem;
-    background:
-      linear-gradient(165deg, color-mix(in srgb, var(--primary) 10%, var(--bg-card)) 0%, var(--bg-card) 62%);
-    border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
-  }
-  .dash-stats .card:first-child .card-title {
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    margin-bottom: 0.2rem;
-  }
-  .dash-stats .card:first-child .card-value {
-    font-size: 2.15rem;
-    font-weight: 700;
-    letter-spacing: -0.045em;
-    line-height: 1.1;
-  }
   .dash-stats .card {
     padding: 0.7rem 0.65rem 0.75rem;
-  }
-  .dash-stats .card-title {
-    font-size: 0.62rem;
-    letter-spacing: 0.04em;
-    line-height: 1.25;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-bottom: 0.2rem;
   }
   .dash-stats .card-value {
     font-size: 1.02rem;
@@ -3887,7 +3850,7 @@ html[data-reduce-motion="true"] .sticky-note {
     line-height: 1.45;
     padding: 0.55rem 0.7rem;
     border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--primary) 6%, var(--bg));
+    background: var(--primary-tint);
   }
   .cash-runway-blurb { display: none; }
   .cash-runway-header { margin-bottom: 0.5rem; }
@@ -3930,16 +3893,6 @@ html[data-reduce-motion="true"] .sticky-note {
   .review-item { flex-wrap: wrap; }
 
   /* FAB above floating bottom nav */
-  .fab-expense:not([hidden]) {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
-    right: 1rem;
-    width: 50px;
-    height: 50px;
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 42%, transparent);
-  }
 
   /* Bottom nav review badge */
   .bottom-nav-icon-wrap {
@@ -4068,75 +4021,13 @@ html[data-reduce-motion="true"] .sticky-note {
   }
 
   /* Bottom navigation — floating pill (opaque so progress bars don't show through) */
-  .bottom-nav {
-    display: flex;
-    position: fixed;
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
-    z-index: 95;
-    background: var(--primary-dark);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 1.2rem;
-    padding: 0.32rem 0.22rem;
-    justify-content: stretch;
-    align-items: stretch;
-    gap: 0.12rem;
-    overflow: hidden;
-    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.28);
-  }
 
   /* Keep right-edge $ off the FAB (Home Clothing $826 was sitting under +) */
-  body:has(.fab-expense:not([hidden])) .top-envelope-row,
-  body:has(.fab-expense:not([hidden])) .dash-bill-row,
-  body:has(.fab-expense:not([hidden])) .tx-card {
-    padding-right: 2.85rem;
-  }
 
-  .bottom-nav-item {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.16rem;
-    min-height: 48px;
-    min-width: 0;
-    padding: 0.32rem 0.08rem;
-    border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.68);
-    font-family: inherit;
-    font-size: 0.65rem;
-    font-weight: 600;
-    cursor: pointer;
-    border-radius: 0.9rem;
-    transition: background 0.15s, color 0.15s;
-    -webkit-tap-highlight-color: transparent;
-  }
 
-  .bottom-nav-item:active {
-    background: rgba(255, 255, 255, 0.1);
-  }
 
-  .bottom-nav-item.active {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.16);
-  }
 
-  .bottom-nav-icon {
-    font-size: 1.22rem;
-    line-height: 1;
-  }
 
-  .bottom-nav-label {
-    line-height: 1.1;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
   /* Touch targets */
   .btn {
@@ -4239,7 +4130,7 @@ html[data-reduce-motion="true"] .sticky-note {
 
   .quick-action-btn:hover,
   .quick-action-btn:active {
-    background: color-mix(in srgb, var(--primary) 8%, var(--bg));
+    background: var(--primary-tint);
     border: none;
     box-shadow: none;
   }
@@ -4303,7 +4194,7 @@ html[data-reduce-motion="true"] .sticky-note {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-muted);
-    background: color-mix(in srgb, var(--bg) 65%, var(--bg-card));
+    background: var(--bg);
   }
 
   .tx-card {
@@ -4535,7 +4426,7 @@ html[data-reduce-motion="true"] .sticky-note {
     pointer-events: auto;
     width: 100%;
     justify-content: center;
-    box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 28%, transparent);
+    box-shadow: 0 4px 14px var(--primary-ring);
   }
 
   /* Don't clip ⋯ dropdowns on mobile lists */
@@ -4608,7 +4499,7 @@ html[data-reduce-motion="true"] .sticky-note {
   /* Debt snowball target — readable above fold */
   .debt-card.debt-target {
     border-left: 4px solid var(--primary);
-    background: color-mix(in srgb, var(--primary) 6%, var(--bg-card));
+    background: var(--primary-tint);
   }
 
   .debt-card.debt-target .tx-card-desc {
@@ -4963,13 +4854,6 @@ html[data-reduce-motion="true"] .sticky-note {
   }
 
   /* Toasts above floating bottom nav */
-  .toast-container {
-    bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
-    right: 0.85rem;
-    left: 0.85rem;
-    align-items: stretch;
-    z-index: 400;
-  }
 
   .toast {
     max-width: none;
@@ -4996,13 +4880,13 @@ html[data-reduce-motion="true"] .sticky-note {
 .envelope-card-focus {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent), var(--shadow-lg);
+  box-shadow: 0 0 0 4px var(--primary-ring), var(--shadow-lg);
   animation: advisor-focus-pulse 1.2s ease-out 1;
 }
 
 @keyframes advisor-focus-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent); }
-  100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent), var(--shadow-lg); }
+  0% { box-shadow: 0 0 0 0 var(--primary-ring); }
+  100% { box-shadow: 0 0 0 4px var(--primary-ring), var(--shadow-lg); }
 }
 
 .advisor-metrics .card-value {
@@ -5033,7 +4917,7 @@ html[data-reduce-motion="true"] .sticky-note {
   height: 1.6rem;
   margin-top: 0.1rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 15%, var(--bg));
+  background: var(--primary-tint);
   color: var(--primary);
   font-weight: 700;
   font-size: 0.8rem;
@@ -5174,3 +5058,4 @@ html[data-reduce-motion="true"] .sticky-note {
   .fab-expense,
   .bottom-nav { display: none !important; }
 }
+} /* end layer */

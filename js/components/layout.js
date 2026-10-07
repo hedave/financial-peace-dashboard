@@ -1,30 +1,31 @@
 import { el } from '../utils.js';
+import { icon } from '../icons.js';
 import { store } from '../store.js';
 import { applyTheme } from '../themes.js';
 import { showNotesPopup } from './notes-popup.js';
 import { showToast } from './modal.js';
 import { getSyncStatus, isCloudConfigured, isNotesOnlyRole } from '../cloud-sync.js';
 
-const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Home', icon: '🏠' },
-  { id: 'income', label: 'Income', icon: '💰' },
-  { id: 'budget', label: 'Budget', icon: '✉️' },
-  { id: 'bills', label: 'Bills', icon: '📋' },
-  { id: 'debt', label: 'Debt', icon: '❄️' },
-  { id: 'transactions', label: 'Transactions', icon: '📝' },
-  { id: 'notes', label: 'Notes', icon: '🗒️' },
-  { id: 'reports', label: 'Reports', icon: '📊' },
-  { id: 'advisor', label: 'Advisor', icon: '🧭' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
+export const NAV_ITEMS = [
+  { id: 'dashboard', label: 'Home', icon: 'home' },
+  { id: 'income', label: 'Income', icon: 'income' },
+  { id: 'budget', label: 'Budget', icon: 'budget' },
+  { id: 'bills', label: 'Bills', icon: 'bills' },
+  { id: 'debt', label: 'Debt', icon: 'debt' },
+  { id: 'transactions', label: 'Transactions', icon: 'log' },
+  { id: 'notes', label: 'Notes', icon: 'notes' },
+  { id: 'reports', label: 'Reports', icon: 'reports' },
+  { id: 'advisor', label: 'Advisor', icon: 'advisor' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 /** Primary tabs for mobile bottom nav. "more" opens the sidebar. */
 const BOTTOM_NAV_ITEMS = [
-  { id: 'dashboard', label: 'Home', icon: '🏠' },
-  { id: 'transactions', label: 'Log', icon: '📝' },
-  { id: 'budget', label: 'Budget', icon: '✉️' },
-  { id: 'bills', label: 'Bills', icon: '📋' },
-  { id: 'more', label: 'More', icon: '☰' },
+  { id: 'dashboard', label: 'Home', icon: 'home' },
+  { id: 'transactions', label: 'Log', icon: 'log' },
+  { id: 'budget', label: 'Budget', icon: 'budget' },
+  { id: 'bills', label: 'Bills', icon: 'bills' },
+  { id: 'more', label: 'More', icon: 'more' },
 ];
 
 const BOTTOM_NAV_PAGE_IDS = new Set(
@@ -51,7 +52,7 @@ export function renderLayout(container, currentPage, onNavigate) {
           'aria-current': currentPage === item.id ? 'page' : null,
           onClick: () => { closeMobile(); onNavigate(item.id); },
         },
-          el('span', { className: 'icon' }, item.icon),
+          el('span', { className: 'icon' }, icon(item.icon, 20)),
           el('span', { className: 'nav-link-label' }, item.label),
           el('span', { className: 'nav-badge', hidden: true }, '0')
         )
@@ -62,7 +63,7 @@ export function renderLayout(container, currentPage, onNavigate) {
         className: 'quick-notes-btn',
         onClick: () => { closeMobile(); showNotesPopup(); },
       },
-        el('span', { className: 'icon' }, '🗒️'),
+        el('span', { className: 'icon' }, icon('notes', 18)),
         'Quick Notes'
       ),
       buildSyncChip(),
@@ -74,11 +75,11 @@ export function renderLayout(container, currentPage, onNavigate) {
 
   const bottomItems = notesOnly
     ? [
-      { id: 'dashboard', label: 'Home', icon: '🏠' },
-      { id: 'notes', label: 'Notes', icon: '🗒️' },
-      { id: 'budget', label: 'Budget', icon: '✉️' },
-      { id: 'bills', label: 'Bills', icon: '📋' },
-      { id: 'more', label: 'More', icon: '☰' },
+      { id: 'dashboard', label: 'Home', icon: 'home' },
+      { id: 'notes', label: 'Notes', icon: 'notes' },
+      { id: 'budget', label: 'Budget', icon: 'budget' },
+      { id: 'bills', label: 'Bills', icon: 'bills' },
+      { id: 'more', label: 'More', icon: 'more' },
     ]
     : BOTTOM_NAV_ITEMS;
 
@@ -92,8 +93,10 @@ export function renderLayout(container, currentPage, onNavigate) {
         type: 'button',
         className: `bottom-nav-item${isBottomNavActive(item.id, currentPage) ? ' active' : ''}`,
         'data-nav': item.id,
+        'aria-label': item.label,
+        'aria-current': isBottomNavActive(item.id, currentPage) ? 'page' : null,
         onClick: () => {
-          if (item.id === 'more') {
+          if (item.id === 'more' && !window.matchMedia('(max-width: 768px)').matches) {
             openMobile();
             return;
           }
@@ -102,7 +105,7 @@ export function renderLayout(container, currentPage, onNavigate) {
         },
       },
         el('span', { className: 'bottom-nav-icon-wrap' },
-          el('span', { className: 'bottom-nav-icon' }, item.icon),
+          el('span', { className: 'bottom-nav-icon' }, icon(item.icon, 24)),
           item.id === 'transactions'
             ? el('span', { className: 'nav-badge bottom-nav-badge', hidden: true }, '0')
             : null,
@@ -122,7 +125,7 @@ export function renderLayout(container, currentPage, onNavigate) {
     onClick: () => {
       window.appNavigate('transactions', 'expense');
     },
-  }, '+');
+  }, icon('plus', 26));
 
   const main = el('main', { className: 'main-content', id: 'page-content' });
   const mainWrap = el('div', { className: 'main-wrap' });
@@ -260,7 +263,9 @@ export function updateActiveNav(page) {
 
   document.querySelectorAll('.bottom-nav-item').forEach(btn => {
     const navId = btn.getAttribute('data-nav');
-    btn.classList.toggle('active', isBottomNavActive(navId, page));
+    const on = isBottomNavActive(navId, page);
+    btn.classList.toggle('active', on);
+    if (on) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current');
   });
 
   const fab = document.getElementById('fab-expense');
@@ -269,3 +274,12 @@ export function updateActiveNav(page) {
   updateNavBadges();
   refreshSyncChip();
 }
+
+/** Ids shown as bottom tabs for the current role (More lists the rest). */
+export function bottomTabIds() {
+  return isNotesOnlyRole()
+    ? new Set(['dashboard', 'notes', 'budget', 'bills'])
+    : BOTTOM_NAV_PAGE_IDS;
+}
+
+export { buildSyncChip, showNotesPopup };

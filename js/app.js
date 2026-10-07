@@ -14,6 +14,8 @@ import { renderReports } from './pages/reports.js';
 import { renderSettings } from './pages/settings.js';
 import { renderNotes } from './pages/notes.js';
 import { renderAdvisor, prepareAdvisorVisit } from './pages/advisor.js';
+import { renderMore } from './pages/more.js';
+import { installFormEnhancer } from './a11y-forms.js';
 import { isNotesOnlyRole } from './cloud-sync.js';
 import { refreshBankInboxCache, applyPendingBankInbox, inboxTransactionCount } from './bank-inbox.js';
 import { showCloudAuthScreen } from './components/cloud-auth.js';
@@ -30,6 +32,7 @@ const PAGES = {
   reports: renderReports,
   advisor: renderAdvisor,
   settings: renderSettings,
+  more: renderMore,
 };
 
 let currentPage = 'dashboard';
@@ -184,7 +187,7 @@ function pollBankInbox() {
       const n = inboxTransactionCount(rows);
       if (n > 0 && currentPage === 'dashboard') window.appRefresh?.();
       else if (n > lastInboxCount) {
-        showToast(`${n} USAA row${n === 1 ? '' : 's'} waiting — API apply missed; tap Import on Home`, 'info', 5000);
+        showToast(`${n} new bank transaction${n === 1 ? '' : 's'} to review on Home`, 'info', 5000);
       }
       lastInboxCount = n;
     })
@@ -332,18 +335,21 @@ function showLockScreen() {
   lock.className = 'lock-screen';
   lock.innerHTML = `
     <div class="lock-card">
-      <h2>🔒 FigPig Financial</h2>
+      <img src="icons/icon-192.png" alt="" width="64" height="64" class="auth-app-icon" />
+      <h2>FigPig Financial</h2>
       <p>Enter your password to continue</p>
       <div class="form-group">
-        <input type="password" id="lock-pw" placeholder="Password" />
+        <label for="lock-pw" class="sr-only">Password</label>
+        <input type="password" id="lock-pw" placeholder="Password" autocomplete="current-password" />
       </div>
-      <button class="btn btn-primary" style="width:100%" id="lock-btn">Unlock</button>
+      <button class="btn btn-primary btn-lg btn-block" id="lock-btn">Unlock</button>
     </div>
   `;
   document.body.appendChild(lock);
 
   const errEl = document.createElement('p');
   errEl.id = 'lock-err';
+  errEl.setAttribute('role', 'alert');
   errEl.style.cssText = 'color:var(--danger);font-size:0.85rem;margin:0.5rem 0 0;min-height:1.2em';
   lock.querySelector('.lock-card')?.appendChild(errEl);
 
@@ -438,6 +444,11 @@ async function startApp() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  installFormEnhancer();
+  setTimeout(() => document.body.classList.add('fp-rendered'), 900);
+  document.body.classList.toggle('is-offline', !navigator.onLine);
+  window.addEventListener('online', () => document.body.classList.remove('is-offline'));
+  window.addEventListener('offline', () => document.body.classList.add('is-offline'));
   startApp().catch(err => {
     console.error('Startup failed', err);
     init();
@@ -445,7 +456,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261007c';
+const APP_BUILD = '20261007d';
 
 installFigPigApi();
 

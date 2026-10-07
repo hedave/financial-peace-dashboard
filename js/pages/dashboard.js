@@ -1,3 +1,4 @@
+import { icon } from '../icons.js';
 import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, todayISO, formatLocalISODate } from '../utils.js';
 import { formatCandidateSummary } from '../reconcile-match.js';
 import { store } from '../store.js';
@@ -75,7 +76,7 @@ export function renderDashboard(container) {
         type: 'button',
         className: 'month-close-link',
         onClick: openMonthCloseWizard,
-      }, 'Month-close checklist →'),
+      }, 'Month-close checklist'),
       isCloudConfigured() ? el('button', {
         type: 'button',
         className: 'dash-sync-pill',
@@ -116,10 +117,10 @@ export function renderDashboard(container) {
     const preview = inboxMerchantPreview(bankDrops);
     const previewLine = preview.length ? ` Includes ${preview.join(', ')}.` : '';
     container.appendChild(el('div', { className: 'banner banner-action review-banner' },
-      el('div', { className: 'banner-icon' }, '🏦'),
+      el('div', { className: 'banner-icon' }, icon('bank', 22)),
       el('div', { className: 'banner-text' },
-        el('h3', {}, 'Bank drop from CoS'),
-        el('p', {}, `${dropCount} USAA row${dropCount === 1 ? '' : 's'} the API could not auto-apply.${previewLine} Tap Import — same rules as paste.`),
+        el('h3', {}, 'New bank transactions'),
+        el('p', {}, `${dropCount} transaction${dropCount === 1 ? '' : 's'} ready to import.${previewLine}`),
       ),
       el('div', { className: 'btn-group', style: 'margin-left:auto' },
         el('button', {
@@ -157,31 +158,31 @@ export function renderDashboard(container) {
       type: 'button',
       className: 'chip chip-warn',
       onClick: () => window.appNavigate('budget'),
-    }, toAllocate > 0
-      ? `📊 ${formatCurrency(toAllocate)} needs a job`
-      : `📊 Over by ${formatCurrency(Math.abs(toAllocate))}`));
+    }, icon('budget', 16), toAllocate > 0
+      ? `${formatCurrency(toAllocate)} needs a job`
+      : `Over by ${formatCurrency(Math.abs(toAllocate))}`));
   }
   if (pendingCount > 0) {
     actionChips.push(el('button', {
       type: 'button', className: 'chip chip-warn', onClick: () => openPendingReview(),
-    }, `⏳ ${pendingCount} awaiting bank`));
+    }, icon('clock', 16), `${pendingCount} awaiting bank`));
   }
   if (inbox.uncategorized.length > 0) {
     actionChips.push(el('button', {
       type: 'button', className: 'chip chip-warn', onClick: () => openReviewInbox(),
-    }, `🏷️ ${inbox.uncategorized.length} need categories`));
+    }, icon('tag', 16), `${inbox.uncategorized.length} need categories`));
   }
   if (overCapEnvelopes.length > 0) {
     actionChips.push(el('button', {
       type: 'button', className: 'chip chip-warn',
       onClick: () => window.appNavigate('budget', { filter: 'attention' }),
-    }, `🎯 ${overCapEnvelopes.length} over cap`));
+    }, icon('target', 16), `${overCapEnvelopes.length} over cap`));
   }
   if (notedEnvelopes.length > 0) {
     actionChips.push(el('button', {
       type: 'button', className: 'chip',
       onClick: () => window.appNavigate('budget'),
-    }, `📝 ${notedEnvelopes.length} notes`));
+    }, icon('note', 16), `${notedEnvelopes.length} note${notedEnvelopes.length === 1 ? '' : 's'}`));
   }
   const overspendShare = store.getOverspendShare(month);
   if (overspendShare.overspendTotal > 0.005) {
@@ -192,7 +193,7 @@ export function renderDashboard(container) {
         store.update(s => { s.settings.showOverspendShare = true; });
         window.appNavigate('budget');
       },
-    }, `📉 ${formatCurrency(overspendShare.overspendTotal)} overspend sharing leftover`));
+    }, icon('alert', 16), `${formatCurrency(overspendShare.overspendTotal)} overspent`));
   }
   const coverIous = store.getCoverIouSummary();
   if (coverIous.total > 0.005) {
@@ -200,7 +201,7 @@ export function renderDashboard(container) {
       type: 'button',
       className: 'chip',
       onClick: () => window.appNavigate('budget'),
-    }, `↩️ ${formatCurrency(coverIous.total)} to restore from bonus`));
+    }, icon('undo', 16), `${formatCurrency(coverIous.total)} to restore from bonus`));
   }
   billWarnings.forEach(w => {
     actionChips.push(el('button', {
@@ -216,7 +217,7 @@ export function renderDashboard(container) {
   // Celebration only (snowball target moves into compact strip)
   if (celebration && celebration.date === todayISO()) {
     container.appendChild(el('div', { className: 'banner banner-celebration confetti-burst section' },
-      el('div', { className: 'banner-icon' }, '🎉'),
+      el('div', { className: 'banner-icon' }, icon('check', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, celebration.message),
         el('p', {}, 'Keep rolling that snowball!'),
@@ -225,7 +226,7 @@ export function renderDashboard(container) {
   }
 
   // Primary stats: cash truth first
-  container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
+  const dashStats = container.appendChild(el('div', { className: 'grid grid-4 dash-stats section' },
     statCard('Checking', formatCurrency(state.balances.checking), 'accent', () => editBalance('checking')),
     statCard(
       'Snowball',
@@ -252,12 +253,15 @@ export function renderDashboard(container) {
     ),
   ));
 
+  // Lead with cash: stats sit right under the header (DOM order only).
+  container.insertBefore(dashStats, container.children[1] || null);
+  dashStats.children[0]?.classList.add('stat-hero');
+  dashStats.children[3]?.classList.add('stat-allocate');
+
   const forecastSummary = bankToday > 0.005
     ? `Safe to send today ${formatCurrency(bankToday)}`
     : 'Nothing free to send today';
-  const forecastAlloc = Math.abs(toAllocate) >= 0.01
-    ? ` · To Allocate ${formatCurrency(toAllocate)}`
-    : '';
+  const forecastAlloc = '';
   container.appendChild(el('details', { className: 'dash-forecast-details section' },
     el('summary', {}, forecastSummary + forecastAlloc),
     el('p', { className: 'tx-form-hint dash-forecast-line' },
@@ -276,7 +280,7 @@ export function renderDashboard(container) {
         return h.description || cat?.name || formatDate(h.date);
       }).join(', ');
       container.appendChild(el('div', { className: 'banner banner-action section' },
-        el('div', { className: 'banner-icon' }, '📌'),
+        el('div', { className: 'banner-icon' }, icon('target', 22)),
         el('div', { className: 'banner-text' },
           el('h3', {}, `${formatCurrency(holdToday)} held for upcoming`),
           el('p', {},
@@ -297,7 +301,7 @@ export function renderDashboard(container) {
           className: 'linkish',
           onClick: () => openUpcomingHolds(),
         }, 'Upcoming hold'),
-        ' — park a known future spend (e.g. $1,500 medical) out of snowball. Does not change To Allocate.',
+        ': park a known future spend so it skips the snowball.',
       ));
     }
   }
@@ -320,7 +324,7 @@ export function renderDashboard(container) {
   const checklistDismissed = state.settings?.dismissMonthChecklist === month;
   if (dayOfMonth <= 7 && !checklistDismissed) {
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '📅'),
+      el('div', { className: 'banner-icon' }, icon('clock', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'New month checklist'),
         el('p', {}, 'Review kids’ envelopes, To Allocate, and cash runway. Optional: copy last month from Budget tools.'),
@@ -345,7 +349,7 @@ export function renderDashboard(container) {
   const detailsBody = el('div', { className: 'dash-details-body' });
   if (target && !(celebration && celebration.date === todayISO())) {
     detailsBody.appendChild(el('div', { className: 'banner banner-action', style: 'margin-bottom:0.75rem' },
-      el('div', { className: 'banner-icon' }, '🎯'),
+      el('div', { className: 'banner-icon' }, icon('target', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `Snowball target: ${target.name}`),
         el('p', {}, `Balance ${formatCurrency(target.balance)} · Min ${formatCurrency(target.minPayment)} · Safe extra ${formatCurrency(surplus)}`),
@@ -353,7 +357,7 @@ export function renderDashboard(container) {
       el('button', {
         type: 'button', className: 'btn btn-sm btn-primary', style: 'margin-left:auto',
         onClick: () => allocateSurplus(),
-      }, 'Snowball $'),
+      }, 'Add to snowball'),
     ));
   }
   detailsBody.appendChild(el('div', { className: 'grid grid-2 section', style: 'margin-bottom:0' },
@@ -609,7 +613,7 @@ function cashRunwayCard(runway, target, onSnowball) {
 
   const foot = [];
   if (runway.buffer > 0) {
-    foot.push(`${formatCurrency(runway.buffer)} cushion kept after bills (Settings)`);
+    foot.push(`Keeps a ${formatCurrency(runway.buffer)} cushion after bills (Settings)`);
   }
   if (runway.surplus > 0) {
     foot.push(`Safe to send today ${formatCurrency(runway.surplus)}`);
@@ -631,7 +635,7 @@ function cashRunwayCard(runway, target, onSnowball) {
           type: 'button',
           className: 'btn btn-sm btn-primary',
           onClick: onSnowball,
-        }, 'Snowball $')
+        }, 'Add to snowball')
         : null,
     ),
     el('div', { className: 'cash-runway-steps' },
