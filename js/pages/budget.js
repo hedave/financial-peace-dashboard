@@ -766,7 +766,7 @@ function overspendShareLine(cat, remaining, opts = {}) {
       className: `envelope-share-hit${hit.isSinking ? ' sinking' : ''}`,
       title: 'Pro-rata share of household overspend — leftover is on paper until you cover it',
     },
-      `Share of overspend −${formatCurrency(hit.take)} → ${formatCurrency(hit.after)} real`,
+      `Share of overspend −\u2060${formatCurrency(hit.take)} → ${formatCurrency(hit.after)} real`,
     );
   }
   return null;
@@ -1712,7 +1712,7 @@ function openRightSizeToAllocate(month = getCurrentMonth()) {
     plan.cuts.forEach(row => {
       list.appendChild(el('div', { className: 'envelope-move-row' },
         el('div', { className: 'envelope-move-row-main' },
-          el('strong', {}, `−${formatCurrency(row.take)}`),
+          el('strong', {}, `−\u2060${formatCurrency(row.take)}`),
           el('span', {},
             ` ${row.name}${row.isSinking ? ' · sinking' : ''}`
             + ` · plan ${formatCurrency(row.budget)} → ${formatCurrency(row.afterBudget)}`,
@@ -1823,7 +1823,7 @@ function openCoverOverspend(month = getCurrentMonth()) {
       .forEach(row => {
         list.appendChild(el('div', { className: 'envelope-move-row' },
           el('div', { className: 'envelope-move-row-main' },
-            el('strong', {}, `−${formatCurrency(row.amount)}`),
+            el('strong', {}, `−\u2060${formatCurrency(row.amount)}`),
             el('span', {}, ` ${row.name}${row.isSinking ? ' · sinking' : ''}`),
           ),
         ));

@@ -725,7 +725,8 @@ body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.mod
 .toast { pointer-events: auto; }
 /* R8-2: plain toasts never block taps; only the Undo toast is interactive. One toast at a time over a sheet. */
 .toast:not(.undo-toast) { pointer-events: none; }
-body.has-sheet .toast-container > .toast:not(:last-child) { display: none; }
+/* R9-2: never hide an older error behind a newer toast */
+body.has-sheet .toast-container > .toast:not(:last-child):not(.error) { display: none; }
 
 /* P15-9: dark primaries are bright; label them dark for >= 4.5:1 */
 [data-theme="dark"] .btn-primary, [data-theme="dark"] .chip.active, [data-theme="dark"] .count-badge,
@@ -850,12 +851,42 @@ p.field-error { margin: var(--sp-1) 0 0; }
   /* R8-1: overflow must stay visible or the row ⋯ menus get clipped */
   .tx-mobile-list { overflow: visible; }
   .tx-mobile-list > .tx-date-label:first-child { border-radius: var(--radius) var(--radius) 0 0; }
-  .tx-mobile-list > .tx-card:nth-last-child(-n+2) .tx-more-dropdown,
+  /* No-JS fallback: last rows open upward. R9-3: kept as two rules so browsers
+     without :has() still apply the first one. */
+  .tx-mobile-list > .tx-card:nth-last-child(-n+2) .tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
   .tx-mobile-list > .tx-card:nth-last-child(-n+3):has(~ .tx-list-more) .tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
   .tx-mobile-list > .tx-date-label {
     position: sticky; top: calc(var(--safe-t) + var(--log-sticky-top, 60px)); z-index: 2;
     background: var(--bg-card); border-bottom: 1px solid var(--border);
   }
+}
+
+/* R9-1: direction chosen from available space when the row menu opens (transactions.js) */
+.tx-more-menu.opens-up > .tx-more-dropdown.tx-more-dropdown.tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
+.tx-more-menu.opens-down > .tx-more-dropdown.tx-more-dropdown.tx-more-dropdown { top: calc(100% + .35rem); bottom: auto; }
+
+/* ---- Money display (20261007i): one line, tabular, tiles fit ------------ */
+.money, .amount, .tx-card-amount, .list-row__amount, .income-total-value, .envelope-stat span,
+.card-value, .debt-balance, .bill-amount {
+  white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "lnum" 1;
+}
+/* Tiles may shrink below their content width so values can be fitted (js/fit-values.js) */
+.grid > .card, .dash-stats > .card, .budget-summary > .card, .debt-summary > .card, .report-summary > .card { min-width: 0; }
+.dash-stats .card-value, .budget-summary .card-value, .debt-summary .card-value, .report-summary .card-value,
+.bills-summary .card-value, .grid .card > .card-value {
+  display: block; max-width: 100%; overflow: hidden; text-overflow: clip; letter-spacing: -.01em;
+}
+.fit-compact { white-space: nowrap; }
+@media (max-width: 768px) {
+  .dash-stats.grid-4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dash-stats > .stat-hero { grid-column: 1 / -1; }
+}
+@media (max-width: 430px) {
+  /* Narrow phones: a little more room for the three small tiles' values */
+  .dash-stats.grid-4 { column-gap: 6px; }
+  .dash-stats > .card:not(.stat-hero) { padding-inline: var(--sp-2); }
+  .report-summary { column-gap: 6px; }
+  .report-summary .card { padding-inline: var(--sp-2); }
 }
 
 @media (prefers-reduced-motion: reduce) {

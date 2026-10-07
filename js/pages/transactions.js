@@ -567,13 +567,52 @@ function txActionButtons(t) {
   ];
 }
 
+/**
+ * R9-1: open the row menu up or down from the room available, so it never
+ * lands under the tab bar / FAB (bottom) or the sticky header (top).
+ * Visual only — sets .opens-up / .opens-down on the <details>.
+ */
+function placeTxMoreMenu(menu, dropdown, { measured = false } = {}) {
+  const trigger = menu.querySelector('summary') || menu;
+  const r = trigger.getBoundingClientRect();
+  const gap = 6;
+  const menuH = measured && dropdown.offsetHeight
+    ? dropdown.offsetHeight
+    : dropdown.children.length * 44 + 4;
+  // Fixed chrome has no offsetParent, so test visibility by its box instead
+  const shown = node => {
+    if (!node) return null;
+    const b = node.getBoundingClientRect();
+    return b.width > 0 && b.height > 0 && getComputedStyle(node).visibility !== 'hidden' ? b : null;
+  };
+  let bottomLimit = window.innerHeight;
+  const nav = shown(document.querySelector('.bottom-nav'));
+  if (nav && nav.top < bottomLimit) bottomLimit = nav.top;
+  const fab = shown(document.getElementById('fab-expense'));
+  // The menu is right-aligned to the trigger, so only a FAB in that column matters
+  if (fab && fab.left < r.right && fab.top < bottomLimit) bottomLimit = fab.top;
+  const header = document.querySelector('.page-header');
+  const topLimit = header && getComputedStyle(header).position === 'sticky'
+    ? Math.max(0, header.getBoundingClientRect().bottom)
+    : 0;
+  const below = bottomLimit - r.bottom - gap;
+  const above = r.top - topLimit - gap;
+  const up = below < menuH && above > below;
+  menu.classList.toggle('opens-up', up);
+  menu.classList.toggle('opens-down', !up);
+}
+
 function txMoreMenu(t) {
   const menu = el('details', { className: 'tx-more-menu' });
   const summary = el('summary', {
     className: 'btn btn-sm btn-secondary tx-more-trigger',
     title: 'More actions',
   }, '⋯');
-  summary.addEventListener('click', e => e.stopPropagation());
+  summary.addEventListener('click', e => {
+    e.stopPropagation();
+    // R9-1: pick a direction before the menu paints (estimate), then confirm on toggle
+    if (!menu.open) placeTxMoreMenu(menu, items);
+  });
 
   const items = el('div', { className: 'tx-more-dropdown' });
   if (t.type === 'expense') {
@@ -611,6 +650,7 @@ function txMoreMenu(t) {
   // Close when clicking outside
   menu.addEventListener('toggle', () => {
     if (!menu.open) return;
+    placeTxMoreMenu(menu, items, { measured: true });
     const close = e => {
       if (!menu.contains(e.target)) {
         menu.removeAttribute('open');
@@ -742,7 +782,7 @@ function txCard(t, state, duplicateMeta = new Map(), { hideDate = false } = {}) 
       el('div', { className: 'tx-card-side' },
         el('span', {
           className: `tx-card-amount${isIncome ? ' text-positive' : ''}`,
-        }, `${isIncome ? '+' : '−'}${formatCurrency(t.amount)}`),
+        }, `${isIncome ? '+' : '−\u2060'}${formatCurrency(t.amount)}`),
         more,
       ),
     ),
@@ -841,7 +881,7 @@ export function openTransactionForm({
       const afterTxt = after < -0.005
         ? `${formatCurrency(Math.abs(after))} over`
         : `${formatCurrency(after)} left`;
-      line += ` · after this $${amt.toFixed(2)}: ${afterTxt}`;
+      line += ` · after this ${formatCurrency(amt)}: ${afterTxt}`;
       catRemainingHint.style.color = after < -0.005 ? 'var(--negative)' : '';
     } else {
       catRemainingHint.style.color = rem < -0.005 ? 'var(--negative)' : '';

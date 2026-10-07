@@ -8,9 +8,29 @@ export function generateId() {
   });
 }
 
+const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+/** U+2212 minus + U+2060 word joiner: the sign can never wrap away from the "$". */
+export const MONEY_MINUS = '\u2212\u2060';
+
+/**
+ * Display-only money string. Negatives use a true minus glued to the amount
+ * (−$1,113.68). Values that round to $0.00 never show a sign.
+ */
 export function formatCurrency(amount) {
   const n = Number(amount) || 0;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+  const text = USD.format(Math.abs(n));
+  return n < 0 && text !== '$0.00' ? MONEY_MINUS + text : text;
+}
+
+const USD_COMPACT = new Intl.NumberFormat('en-US', {
+  style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1,
+});
+/** Compact display ($11.9K) for tiles that can't fit the full value; same sign rule. */
+export function formatCurrencyCompact(amount) {
+  const n = Number(amount) || 0;
+  if (Math.abs(n) < 1000) return formatCurrency(n);
+  const text = USD_COMPACT.format(Math.abs(n));
+  return n < 0 ? MONEY_MINUS + text : text;
 }
 
 export function formatDate(dateStr) {
