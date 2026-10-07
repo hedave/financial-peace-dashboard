@@ -20,7 +20,7 @@ export function renderDebt(container) {
   const basis = store.getSurplusBasis();
   const fc = surplusCap.forecast || store.getMonthEndSnowballForecast();
   const surplusNote = basis === 'month_end' || surplus > 0
-    ? `Month-end forecast (+${formatCurrency(fc.incomeLeft || 0)} income left · −${formatCurrency(fc.billsLeft || 0)} bills · −${formatCurrency(fc.envelopeLeft || 0)} envelopes)`
+    ? `Month-end forecast (+${formatCurrency(fc.incomeLeft || 0)} income left · −\u2060${formatCurrency(fc.billsLeft || 0)} bills · −\u2060${formatCurrency(fc.envelopeLeft || 0)} envelopes)`
     : basis === 'pay_bridge'
       ? `Safe after bills before next pay${surplusCap.nextPayDate ? ` (${surplusCap.nextPayDate})` : ''}: held ${formatCurrency(surplusCap.billsTotal)}`
       : basis === 'bank'

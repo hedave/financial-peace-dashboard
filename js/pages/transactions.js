@@ -782,7 +782,7 @@ function txCard(t, state, duplicateMeta = new Map(), { hideDate = false } = {}) 
       el('div', { className: 'tx-card-side' },
         el('span', {
           className: `tx-card-amount${isIncome ? ' text-positive' : ''}`,
-        }, `${isIncome ? '+' : '−'}${formatCurrency(t.amount)}`),
+        }, `${isIncome ? '+' : '−\u2060'}${formatCurrency(t.amount)}`),
         more,
       ),
     ),
@@ -881,7 +881,7 @@ export function openTransactionForm({
       const afterTxt = after < -0.005
         ? `${formatCurrency(Math.abs(after))} over`
         : `${formatCurrency(after)} left`;
-      line += ` · after this $${amt.toFixed(2)}: ${afterTxt}`;
+      line += ` · after this ${formatCurrency(amt)}: ${afterTxt}`;
       catRemainingHint.style.color = after < -0.005 ? 'var(--negative)' : '';
     } else {
       catRemainingHint.style.color = rem < -0.005 ? 'var(--negative)' : '';

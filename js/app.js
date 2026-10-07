@@ -16,6 +16,7 @@ import { renderNotes } from './pages/notes.js';
 import { renderAdvisor, prepareAdvisorVisit } from './pages/advisor.js';
 import { renderMore } from './pages/more.js';
 import { installFormEnhancer } from './a11y-forms.js';
+import { installValueFit } from './fit-values.js';
 import { isNotesOnlyRole } from './cloud-sync.js';
 import { refreshBankInboxCache, applyPendingBankInbox, inboxTransactionCount } from './bank-inbox.js';
 import { showCloudAuthScreen } from './components/cloud-auth.js';
@@ -465,6 +466,7 @@ function installOfflineBanner() {
 
 document.addEventListener('DOMContentLoaded', () => {
   installFormEnhancer();
+  installValueFit();
   setTimeout(() => document.body.classList.add('fp-rendered'), 900);
   installOfflineBanner();
   startApp().catch(err => {
@@ -474,7 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261007h';
+const APP_BUILD = '20261007i';
 
 installFigPigApi();
 
