@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor, showFieldError } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
@@ -616,7 +616,7 @@ function openDebtForm(debt = null) {
   if (debt?.paused) pausedIn.checked = true;
 
   const catSelect = el('select');
-  catSelect.appendChild(el('option', { value: '' }, '— Select Envelope —'));
+  catSelect.appendChild(el('option', { value: '' }, 'Choose envelope'));
   (state.categories || []).forEach(c => {
     catSelect.appendChild(el('option', { value: c.id }, c.name));
   });
@@ -660,6 +660,7 @@ function openDebtForm(debt = null) {
       type: 'button',
       className: 'btn btn-primary',
       onClick: () => {
+        if (!nameIn.value.trim()) { showFieldError(nameIn, 'Enter a debt name'); return; }
         const data = {
           name: nameIn.value,
           balance: Number(balIn.value),

@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState, getCurrentMonth, getMonthLabel, labelFor } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, daysUntil, generateId, emptyState, getCurrentMonth, getMonthLabel, labelFor, showFieldError } from '../utils.js';
 // Recurring bills: after pay, store advances due date +1 month and sets unpaid again.
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
@@ -590,8 +590,7 @@ function markPaid(bill) {
 function saveBill({ bill, isEdit, nameIn, amountIn, dueIn, catSelect, recurringIn, autoPayIn, closeModal }) {
   const name = nameIn.value.trim();
   if (!name) {
-    showToast('Please enter a bill name', 'info');
-    nameIn.focus();
+    showFieldError(nameIn, 'Enter a bill name');
     return;
   }
 

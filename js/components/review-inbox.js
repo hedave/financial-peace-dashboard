@@ -456,13 +456,13 @@ export function openUncategorizedReview() {
   const envelopePicker = createEnvelopePicker({
     id: 'bulk-cat',
     placeholder: 'Type to find envelope (e.g. P for Pets)…',
-    emptyLabel: '— Choose envelope —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
   const remainingHint = el('p', {
     className: 'tx-form-hint review-envelope-remaining mt-2 mb-0',
-  }, 'Pick an envelope to see what’s left this month.');
+  }, 'Choose an envelope to see what’s left this month.');
   const alwaysUse = el('input', { type: 'checkbox' });
   alwaysUse.checked = true;
   const list = el('div', { className: 'review-list' });
@@ -481,7 +481,7 @@ export function openUncategorizedReview() {
   function updateRemainingHint() {
     const catId = envelopePicker.value;
     if (!catId) {
-      remainingHint.textContent = 'Pick an envelope to see what’s left this month.';
+      remainingHint.textContent = 'Choose an envelope to see what’s left this month.';
       remainingHint.style.color = '';
       return;
     }

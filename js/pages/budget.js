@@ -1,7 +1,7 @@
 import { icon } from '../icons.js';
 import {
   el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth,
-  emptyState, getRecentMonths, addMonths, todayISO, labelFor } from '../utils.js';
+  emptyState, getRecentMonths, addMonths, todayISO, labelFor, showFieldError } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createEnvelopePicker } from '../components/envelope-picker.js';
@@ -207,7 +207,7 @@ export function renderBudget(container, arg) {
         : null,
     ),
     isCurrentMonth
-      ? el('div', { className: 'card' },
+      ? el('div', { className: 'card stat-bonus' },
         el('div', { className: 'card-title' }, 'Bonus available'),
         el('div', {
           className: `card-value ${bonusAvailable > 0.005 ? 'accent' : ''}`,
@@ -1389,7 +1389,7 @@ export function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     id: 'move-from-env',
     value: fromId || '',
     placeholder: 'From envelope…',
-    emptyLabel: '— From —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -1397,7 +1397,7 @@ export function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     id: 'move-to-env',
     value: toId || '',
     placeholder: 'To envelope…',
-    emptyLabel: '— To —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -1583,7 +1583,7 @@ export function openUpcomingHolds() {
   const picker = createEnvelopePicker({
     value: medical?.id || '',
     placeholder: 'Envelope (optional)',
-    emptyLabel: '— Cash hold, no envelope —',
+    emptyLabel: 'No envelope (cash hold)',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -2242,7 +2242,7 @@ function addCategory(isSinking) {
       type: 'button',
       className: 'btn btn-primary',
       onClick: () => {
-        if (!nameIn.value.trim()) { nameIn.focus(); return; }
+        if (!nameIn.value.trim()) { showFieldError(nameIn, 'Enter an envelope name'); return; }
         store.update(s => {
           s.categories.push({
             id: crypto.randomUUID(),

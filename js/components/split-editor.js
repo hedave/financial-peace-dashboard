@@ -60,7 +60,7 @@ export function createSplitEditor(categories, {
       const picker = createEnvelopePicker({
         value: row.categoryId || '',
         placeholder: 'Type envelope…',
-        emptyLabel: '— Envelope —',
+        emptyLabel: 'Choose envelope',
         showRemaining: true,
         allowEmpty: true,
       });

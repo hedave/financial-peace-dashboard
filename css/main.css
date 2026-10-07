@@ -4553,8 +4553,8 @@ html[data-reduce-motion="true"] .sticky-note {
   body.vv-keyboard .modal.modal-wide,
   body.vv-keyboard .modal.modal-scrollable,
   body.vv-keyboard .modal.modal-duplicate-review {
-    max-height: var(--vvh, 100dvh);
-    height: var(--vvh, 100dvh);
+    max-height: calc(var(--vvh, 100dvh) - env(safe-area-inset-top, 0px));
+    height: calc(var(--vvh, 100dvh) - env(safe-area-inset-top, 0px));
   }
 
   .modal-header {

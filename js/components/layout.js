@@ -192,7 +192,7 @@ function buildSyncChip() {
 }
 
 function syncChipLabel() {
-  if (!isCloudConfigured()) return 'Cloud: off';
+  if (!isCloudConfigured()) return 'Cloud off · this device';
   const { status, lastSyncedAt } = getSyncStatus();
   if (status === 'syncing') return 'Syncing…';
   if (status === 'error') return 'Sync error · Tap to retry';

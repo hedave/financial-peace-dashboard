@@ -74,6 +74,8 @@ function unlockBodyScroll() {
 
 function syncModalCountFromDom() {
   openModalCount = getOpenModalCount();
+  // Plain class for browsers without :has() (toast layering, etc.)
+  document.body.classList.toggle('has-sheet', openModalCount > 0);
   if (openModalCount > 0) lockBodyScroll();
   else unlockBodyScroll();
   return openModalCount;

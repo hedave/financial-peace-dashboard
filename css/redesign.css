@@ -716,9 +716,13 @@ html[data-large-text="true"] .bottom-nav-label, html[data-large-text="true"] .bo
 .banner-celebration .banner-icon .ico-wrap, .debt-target .banner-icon .ico-wrap { color: #fff; }
 
 /* P15-7: toasts never cover an open sheet */
-body.modal-open .toast-container, body:has(.modal-backdrop) .toast-container {
-  top: calc(var(--safe-t) + var(--sp-2)); bottom: auto; z-index: 190; /* under the sheet layer (200+) */
+/* P15-7: while a sheet is open, toasts move to the top and stay ABOVE the sheet
+   (validation/errors must be readable). body.has-sheet is set by modal.js for
+   Safari without :has(). The container ignores taps; toasts themselves don't. */
+body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.modal-backdrop) .toast-container {
+  top: calc(var(--safe-t) + var(--sp-2)); bottom: auto; z-index: 450; pointer-events: none;
 }
+.toast { pointer-events: auto; }
 
 /* P15-9: dark primaries are bright; label them dark for >= 4.5:1 */
 [data-theme="dark"] .btn-primary, [data-theme="dark"] .chip.active, [data-theme="dark"] .count-badge,
@@ -781,6 +785,62 @@ body.modal-open .toast-container, body:has(.modal-backdrop) .toast-container {
   .envelope-progress { margin-top: var(--sp-2); }
   .envelope-card-footer { padding-top: var(--sp-2); }
   .envelope-icon { width: 32px; height: 32px; }
+}
+
+
+/* ---- PR15 round 3 (20261007f) ------------------------------------------ */
+/* R7-1: Bonus available spans the row instead of sitting half-width alone */
+.budget-summary > .stat-bonus { grid-column: 1 / -1; }
+@media (max-width: 768px) {
+  .budget-summary > .stat-bonus {
+    display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: var(--sp-3);
+  }
+  .budget-summary > .stat-bonus > :not(.card-title):not(.card-value) { grid-column: 1 / -1; }
+}
+/* R7-4: Income total — label and month stacked, value separated */
+.income-total-row { align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.income-total-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.income-total-month { font-size: var(--fs-footnote); color: var(--text-muted); font-weight: var(--fw-reg); }
+.income-total-value { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* R7-5: Home disclosure rows get a 44px tap target */
+.dash-details-summary,
+.dash-forecast-details > summary,
+.cash-runway-bills > summary {
+  min-height: 44px; display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;
+}
+/* H2: Home alert chips wrap instead of clipping mid-word ("1 no…") */
+.dash-alert-chips {
+  flex-wrap: wrap; overflow: visible;
+  margin-inline: 0 !important; padding-inline: 0 !important;
+  -webkit-mask-image: none !important; mask-image: none !important;
+}
+.dash-alert-chips::after { content: none !important; }
+/* P15-7: inline field errors read as errors, not focus */
+.form-group input[aria-invalid="true"], .form-group select[aria-invalid="true"], .form-group textarea[aria-invalid="true"],
+.input-affix.is-invalid, .input-affix:has(> [aria-invalid="true"]) { border-color: var(--negative) !important; box-shadow: 0 0 0 1px var(--negative); }
+.input-affix > [aria-invalid="true"] { border-color: transparent !important; box-shadow: none; }
+p.field-error { margin: var(--sp-1) 0 0; }
+/* I2: pay calendar cells are 44px targets */
+.pay-cal-day { min-width: 44px; min-height: 44px; }
+/* AU3: password show/hide */
+.pw-field { position: relative; display: flex; align-items: center; }
+.pw-field > input { flex: 1 1 auto; padding-right: 72px !important; }
+.pw-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  min-width: 60px; min-height: 44px; padding: 0 var(--sp-3);
+  border: 0; background: transparent; color: var(--primary);
+  font: inherit; font-size: var(--fs-footnote); font-weight: var(--fw-semi); cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.pw-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+/* T5: sticky day headers on Log (list clips instead of scrolling so sticky works) */
+@media (max-width: 768px) {
+  html[data-large-text="true"] { --log-sticky-top: 65px; }
+  .tx-mobile-list { overflow: clip; }
+  .tx-mobile-list > .tx-date-label {
+    position: sticky; top: calc(var(--safe-t) + var(--log-sticky-top, 60px)); z-index: 2;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -712,7 +712,7 @@ function answerCutEnvelope(snap, { cutPct = 20, envelopeId = null } = {}) {
   if (!env) {
     return {
       id: 'cut_envelope',
-      title: 'Pick an envelope',
+      title: 'Choose an envelope',
       paragraphs: ['Choose an envelope and percent below, then run the question again.'],
       actions: [{ label: 'Open Budget', page: 'budget' }],
     };

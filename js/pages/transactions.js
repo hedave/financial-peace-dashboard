@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor } from '../utils.js';
+import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor, showFieldError } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from '../components/modal.js';
 import { createSplitEditor } from '../components/split-editor.js';
@@ -808,7 +808,7 @@ export function openTransactionForm({
     id: 'tx-envelope',
     value: initialCatId,
     placeholder: 'Type to find envelope (e.g. P for Pets)…',
-    emptyLabel: '— No category —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -865,7 +865,7 @@ export function openTransactionForm({
   const debtGroup = el('div', { className: 'form-group', style: 'display:none' },
     el('label', {}, 'Debt'),
     el('select', {},
-      el('option', { value: '' }, '— Select debt —'),
+      el('option', { value: '' }, 'Choose debt'),
       ...state.debts.filter(d => !d.archived && Number(d.balance) > 0).map(d =>
         el('option', { value: d.id }, `${d.name} (${formatCurrency(d.balance)})`)
       ),
@@ -879,7 +879,7 @@ export function openTransactionForm({
   const incomeSourceGroup = el('div', { className: 'form-group', style: 'display:none' },
     el('label', {}, 'Pay source'),
     el('select', {},
-      el('option', { value: '' }, '— Auto-detect —'),
+      el('option', { value: '' }, 'Auto-detect'),
       ...incomeSources.map(s => el('option', { value: s.id },
         isBonusIncomeSource(s) ? BONUS_INCOME_NAME : s.name
       )),
@@ -893,7 +893,7 @@ export function openTransactionForm({
 
   const importNote = transaction?.importCategory && !transaction?.categoryId
     ? el('p', { className: 'tx-form-hint' },
-      `Bank category: ${transaction.importCategory}. Pick an envelope below to map it.`
+      `Bank category: ${transaction.importCategory}. Choose an envelope below to map it.`
     )
     : null;
 
@@ -1063,7 +1063,7 @@ export function openTransactionForm({
         onClick: () => {
           const amt = Number(amountIn.value);
           if (!amt) {
-            showToast('Enter an amount', 'info');
+            showFieldError(amountIn, 'Enter an amount');
             return;
           }
           const txType = isCelebration ? transaction.type : typeSelect.value;
@@ -1072,7 +1072,7 @@ export function openTransactionForm({
           const incomeSourceId = txType === 'income' ? (incomeSourceSelect.value || null) : null;
 
           if (txType === 'debt_payment' && !isEdit && !debtId) {
-            showToast('Select a debt for debt payments', 'info');
+            showFieldError(debtSelect, 'Choose which debt this payment goes to');
             return;
           }
 
@@ -1081,7 +1081,8 @@ export function openTransactionForm({
 
           if (useSplit) {
             if (!splitEditor.isValid()) {
-              showToast('Assign each split to an envelope and match the transaction total', 'info');
+              const firstPick = splitEditor.element.querySelector('input, select');
+              showFieldError(firstPick || amountIn, 'Give each split an envelope, and make the splits add up to the total', { anchor: splitEditor.element });
               return;
             }
           }

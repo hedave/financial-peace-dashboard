@@ -235,3 +235,62 @@ export function labelFor(text, control, attrs = {}) {
   if (control && !control.id) control.id = `fp-f-${++_fieldSeq}`;
   return el('label', { ...attrs, for: control?.id || '' }, text);
 }
+
+/**
+ * Inline field validation (sheets): message under the field, aria-invalid,
+ * aria-describedby, focus. Clears itself on the next input/change.
+ */
+export function showFieldError(control, message, { anchor = null } = {}) {
+  if (!control) return;
+  clearFieldError(control);
+  const host = anchor || control.closest('.input-affix') || control;
+  const id = `${control.id || `fp-err-${++_fieldSeq}`}-error`;
+  const msg = el('p', { className: 'form-error field-error', id, role: 'alert' }, message);
+  host.insertAdjacentElement('afterend', msg);
+  control._fpError = msg;
+  control.setAttribute('aria-invalid', 'true');
+  control.closest('.input-affix')?.classList.add('is-invalid');
+  const prev = (control.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+  control.setAttribute('aria-describedby', [...prev.filter(x => x !== id), id].join(' '));
+  const clear = () => clearFieldError(control);
+  control.addEventListener('input', clear, { once: true });
+  control.addEventListener('change', clear, { once: true });
+  try { control.focus({ preventScroll: false }); } catch { control.focus?.(); }
+  msg.scrollIntoView?.({ block: 'nearest' });
+}
+
+export function clearFieldError(control) {
+  const msg = control?._fpError;
+  if (!msg) return;
+  msg.remove();
+  control._fpError = null;
+  control.removeAttribute('aria-invalid');
+  control.closest('.input-affix')?.classList.remove('is-invalid');
+  const rest = (control.getAttribute('aria-describedby') || '').split(' ').filter(x => x && x !== msg.id);
+  if (rest.length) control.setAttribute('aria-describedby', rest.join(' '));
+  else control.removeAttribute('aria-describedby');
+}
+
+/** AU3: Show/Hide toggle for a password input (wraps it; type swap only). */
+export function addPasswordToggle(input) {
+  if (!input || input.closest('.pw-field')) return;
+  const wrap = el('div', { className: 'pw-field' });
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  const btn = el('button', {
+    type: 'button',
+    className: 'pw-toggle',
+    'aria-controls': input.id || '',
+    'aria-pressed': 'false',
+    'aria-label': 'Show password',
+  }, 'Show');
+  btn.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? 'Hide' : 'Show';
+    btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    input.focus();
+  });
+  wrap.appendChild(btn);
+}

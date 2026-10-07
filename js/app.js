@@ -1,7 +1,7 @@
 import { store } from './store.js';
 import { renderLayout, updateActiveNav, updateNavBadges, refreshSyncChip } from './components/layout.js';
 import { renderWizard } from './components/wizard.js';
-import { hashPassword, passwordMatches } from './utils.js';
+import { hashPassword, passwordMatches, addPasswordToggle } from './utils.js';
 import { applyTheme } from './themes.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderIncome } from './pages/income.js';
@@ -352,6 +352,7 @@ function showLockScreen() {
   errEl.setAttribute('role', 'alert');
   errEl.style.cssText = 'color:var(--danger);font-size:0.85rem;margin:0.5rem 0 0;min-height:1.2em';
   lock.querySelector('.lock-card')?.appendChild(errEl);
+  addPasswordToggle(lock.querySelector('#lock-pw'));
 
   const tryUnlock = async () => {
     const pw = document.getElementById('lock-pw').value;
@@ -473,7 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261007e';
+const APP_BUILD = '20261007f';
 
 installFigPigApi();
 

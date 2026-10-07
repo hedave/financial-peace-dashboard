@@ -1,3 +1,4 @@
+import { addPasswordToggle } from '../utils.js';
 import { signIn, signUp, joinHousehold } from '../cloud-sync.js';
 import { store } from '../store.js';
 
@@ -42,6 +43,7 @@ export function showCloudAuthScreen(onComplete) {
   const pwIn = card.querySelector('#cloud-pw');
   const joinIn = card.querySelector('#cloud-join');
   const errEl = card.querySelector('#cloud-auth-error');
+  addPasswordToggle(pwIn);
 
   function showError(msg) {
     errEl.textContent = msg;

@@ -36,7 +36,7 @@ function parentCategories() {
 export function createEnvelopePicker(opts = {}) {
   const showRemaining = opts.showRemaining !== false;
   const allowEmpty = opts.allowEmpty !== false;
-  const emptyLabel = opts.emptyLabel || '— Choose envelope —';
+  const emptyLabel = opts.emptyLabel || 'Choose envelope';
   const placeholder = opts.placeholder || 'Type to find envelope…';
 
   let value = opts.value || '';
