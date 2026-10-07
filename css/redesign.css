@@ -725,7 +725,8 @@ body.has-sheet .toast-container, body.modal-open .toast-container, body:has(.mod
 .toast { pointer-events: auto; }
 /* R8-2: plain toasts never block taps; only the Undo toast is interactive. One toast at a time over a sheet. */
 .toast:not(.undo-toast) { pointer-events: none; }
-body.has-sheet .toast-container > .toast:not(:last-child) { display: none; }
+/* R9-2: never hide an older error behind a newer toast */
+body.has-sheet .toast-container > .toast:not(:last-child):not(.error) { display: none; }
 
 /* P15-9: dark primaries are bright; label them dark for >= 4.5:1 */
 [data-theme="dark"] .btn-primary, [data-theme="dark"] .chip.active, [data-theme="dark"] .count-badge,
@@ -850,13 +851,19 @@ p.field-error { margin: var(--sp-1) 0 0; }
   /* R8-1: overflow must stay visible or the row ⋯ menus get clipped */
   .tx-mobile-list { overflow: visible; }
   .tx-mobile-list > .tx-date-label:first-child { border-radius: var(--radius) var(--radius) 0 0; }
-  .tx-mobile-list > .tx-card:nth-last-child(-n+2) .tx-more-dropdown,
+  /* No-JS fallback: last rows open upward. R9-3: kept as two rules so browsers
+     without :has() still apply the first one. */
+  .tx-mobile-list > .tx-card:nth-last-child(-n+2) .tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
   .tx-mobile-list > .tx-card:nth-last-child(-n+3):has(~ .tx-list-more) .tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
   .tx-mobile-list > .tx-date-label {
     position: sticky; top: calc(var(--safe-t) + var(--log-sticky-top, 60px)); z-index: 2;
     background: var(--bg-card); border-bottom: 1px solid var(--border);
   }
 }
+
+/* R9-1: direction chosen from available space when the row menu opens (transactions.js) */
+.tx-more-menu.opens-up > .tx-more-dropdown.tx-more-dropdown.tx-more-dropdown { top: auto; bottom: calc(100% + .35rem); }
+.tx-more-menu.opens-down > .tx-more-dropdown.tx-more-dropdown.tx-more-dropdown { top: calc(100% + .35rem); bottom: auto; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
