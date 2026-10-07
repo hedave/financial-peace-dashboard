@@ -165,6 +165,12 @@ export function createDefaultState() {
     categoryRules: [],
     monthBudgetSnapshots: {},
     /**
+     * Opening carry per envelope for a given month (what rollover used at month start).
+     * { 'YYYY-MM': { [categoryId]: number } }
+     * Past-month Remaining uses this so history matches economic truth.
+     */
+    monthOpeningCarrySnapshots: {},
+    /**
      * Rob-Peter-to-pay-Paul moves for a given month only.
      * { 'YYYY-MM': [{ id, fromId, toId, amount, note, at }] }
      * Does not change monthlyBudget; remaining = budget + carry + netMoves − spent.
