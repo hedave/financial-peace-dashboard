@@ -1,4 +1,4 @@
-import { el, formatCurrency } from '../utils.js';
+import { el, formatCurrency, labelFor } from '../utils.js';
 import { store } from '../store.js';
 import { BABY_STEPS } from '../defaults.js';
 import { showToast } from './modal.js';
@@ -16,17 +16,21 @@ export function renderWizard(onComplete) {
   };
 
   const overlay = el('div', { className: 'wizard-overlay', id: 'wizard' });
+  // AU5: persistent live region so step changes are announced
+  const stepLive = el('div', { className: 'sr-only', 'aria-live': 'polite', 'aria-atomic': 'true' });
 
   function render() {
-    overlay.innerHTML = '';
+    overlay.replaceChildren(stepLive);
     const container = el('div', { className: 'wizard-container' });
 
-    const progress = el('div', { className: 'wizard-progress' },
+    const progress = el('div', { className: 'wizard-progress', 'aria-hidden': 'true' },
       ...STEPS.map((_, i) => el('div', {
         className: `wizard-step-dot${i < step ? ' done' : ''}${i === step ? ' active' : ''}`
       }))
     );
     container.appendChild(progress);
+    container.appendChild(el('p', { className: 'wizard-step-count' }, `Step ${step + 1} of ${STEPS.length}`));
+    stepLive.textContent = `Step ${step + 1} of ${STEPS.length}`;
 
     const card = el('div', { className: 'wizard-card' });
     const pages = [welcomeStep, incomeStep, balancesStep, debtsStep, budgetStep, doneStep];
@@ -59,7 +63,7 @@ export function renderWizard(onComplete) {
 function welcomeStep(card, data, nav) {
   card.appendChild(el('h2', {}, 'Welcome to FigPig Financial'));
   card.appendChild(el('p', { className: 'subtitle' }, 'Let\'s set up your Total Money Makeover in just a few minutes. We\'ll walk through your income, balances, debts, and budget envelopes.'));
-  card.appendChild(el('div', { className: 'banner banner-motivation', style: 'margin-bottom:1.5rem' },
+  card.appendChild(el('div', { className: 'banner banner-motivation mb-6' },
     el('div', { className: 'banner-text' },
       el('p', {}, '"A budget is telling your money where to go instead of wondering where it went." — Dave Ramsey')
     )
@@ -75,7 +79,7 @@ function welcomeStep(card, data, nav) {
   bsGroup.appendChild(select);
   card.appendChild(bsGroup);
 
-  card.appendChild(el('div', { className: 'btn-group', style: 'margin-top:1.5rem;justify-content:flex-end' },
+  card.appendChild(el('div', { className: 'btn-group mt-6 justify-end' },
     el('button', { className: 'btn btn-primary', onClick: nav.next }, 'Get Started →')
   ));
 }
@@ -105,7 +109,7 @@ function incomeStep(card, data, nav) {
       ));
       if (data.incomeSources.length > 1) {
         entry.appendChild(el('button', {
-          className: 'btn btn-sm btn-danger', style: 'margin-top:0.5rem',
+          className: 'btn btn-sm btn-danger mt-2',
           onClick: () => { data.incomeSources.splice(i, 1); renderIncome(); }
         }, 'Remove'));
       }
@@ -116,7 +120,7 @@ function incomeStep(card, data, nav) {
   renderIncome();
   card.appendChild(list);
   card.appendChild(el('button', {
-    className: 'btn btn-secondary', style: 'margin:0.75rem 0',
+    className: 'btn btn-secondary mx-0 mt-3 mb-3',
     onClick: () => {
       data.incomeSources.push({ id: crypto.randomUUID(), name: '', amount: 0, type: 'other' });
       renderIncome();
@@ -155,7 +159,7 @@ function debtsStep(card, data, nav) {
   function renderDebts() {
     list.innerHTML = '';
     if (!data.debts.length) {
-      list.appendChild(el('p', { style: 'color:var(--text-muted);margin-bottom:1rem' }, 'No debts? That\'s amazing! Skip ahead if you\'re debt-free.'));
+      list.appendChild(el('p', { className: 'text-muted mb-4' }, 'No debts? That\'s amazing! Skip ahead if you\'re debt-free.'));
     }
     data.debts.forEach((d, i) => {
       const entry = el('div', { className: 'debt-entry' });
@@ -168,7 +172,7 @@ function debtsStep(card, data, nav) {
         formField('Interest Rate %', 'number', d.interestRate, v => { d.interestRate = Number(v); }, { step: '0.01' }),
       ));
       entry.appendChild(el('button', {
-        className: 'btn btn-sm btn-danger', style: 'margin-top:0.5rem',
+        className: 'btn btn-sm btn-danger mt-2',
         onClick: () => { data.debts.splice(i, 1); renderDebts(); }
       }, 'Remove'));
       list.appendChild(entry);
@@ -178,7 +182,7 @@ function debtsStep(card, data, nav) {
   renderDebts();
   card.appendChild(list);
   card.appendChild(el('button', {
-    className: 'btn btn-secondary', style: 'margin:0.75rem 0',
+    className: 'btn btn-secondary mx-0 mt-3 mb-3',
     onClick: () => {
       data.debts.push({
         id: crypto.randomUUID(), name: '', balance: 0,
@@ -202,7 +206,7 @@ function budgetStep(card, data, nav) {
   function updateSummary() {
     const remaining = totalIncome - totalBudget();
     summary.innerHTML = '';
-    summary.appendChild(el('div', { style: 'display:flex;justify-content:space-between' },
+    summary.appendChild(el('div', { className: 'd-flex justify-between' },
       el('span', {}, `Income: ${formatCurrency(totalIncome)}`),
       el('span', {}, `Budgeted: ${formatCurrency(totalBudget())}`),
       el('strong', { style: remaining === 0 ? 'color:var(--positive)' : 'color:var(--negative)' },
@@ -223,7 +227,7 @@ function budgetStep(card, data, nav) {
       updateSummary();
     });
     const fg = el('div', { className: 'form-group', style: 'flex:1' },
-      el('label', {}, 'Monthly Budget'),
+      labelFor('Monthly Budget', input),
       input
     );
     row.appendChild(label);
@@ -244,7 +248,7 @@ function doneStep(card, data, nav) {
   const totalIncome = data.incomeSources.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const totalDebt = data.debts.reduce((s, d) => s + (Number(d.balance) || 0), 0);
 
-  card.appendChild(el('div', { className: 'grid grid-2', style: 'margin:1.5rem 0' },
+  card.appendChild(el('div', { className: 'grid grid-2 mx-0 mt-6 mb-6' },
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Monthly Income'),
       el('div', { className: 'card-value accent' }, formatCurrency(totalIncome))
@@ -279,7 +283,7 @@ function formField(label, type, value, onChange, opts = {}) {
 }
 
 function navButtons(nav, isLast = false) {
-  return el('div', { className: 'btn-group', style: 'margin-top:1.5rem;justify-content:space-between' },
+  return el('div', { className: 'btn-group mt-6 justify-between' },
     el('button', { className: 'btn btn-secondary', onClick: nav.back }, '← Back'),
     el('button', { className: 'btn btn-primary', onClick: nav.next }, isLast ? 'Review & Finish →' : 'Continue →')
   );

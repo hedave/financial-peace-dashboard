@@ -1,4 +1,5 @@
-import { el, formatCurrency, formatDate, todayISO, emptyState } from '../utils.js';
+import { icon } from '../icons.js';
+import { el, formatCurrency, formatDate, todayISO, emptyState, labelFor, showFieldError } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { openTransactionForm } from './transactions.js';
@@ -41,7 +42,7 @@ export function renderDebt(container) {
       el('div', { className: 'card-title' }, 'Total Debt'),
       el('div', { className: 'card-value negative' }, formatCurrency(total)),
       paused.length
-        ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+        ? el('p', { className: 'fs-caption text-muted mt-1' },
           `${formatCurrency(snowballTotal)} in snowball · ${formatCurrency(total - snowballTotal)} on hold`)
         : null,
     ),
@@ -49,14 +50,14 @@ export function renderDebt(container) {
       el('div', { className: 'card-title' }, 'In Snowball'),
       el('div', { className: 'card-value' }, String(snowball.length)),
       paused.length
-        ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+        ? el('p', { className: 'fs-caption text-muted mt-1' },
           `${paused.length} on hold`)
         : null,
     ),
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Est. Months (snowball)'),
       el('div', { className: 'card-value accent' }, snowball.length ? `~${months}` : '0'),
-      el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem' },
+      el('p', { className: 'fs-caption text-muted mt-1' },
         paused.length
           ? 'On-hold debts not in ETA. Interest is not included.'
           : 'At today’s surplus + minimums. Interest is not included.'),
@@ -64,40 +65,39 @@ export function renderDebt(container) {
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Month-end snowball'),
       el('div', { className: 'card-value positive' }, formatCurrency(surplus)),
-      surplusNote ? el('p', { style: 'font-size:0.7rem;color:var(--text-muted);margin-top:0.35rem;line-height:1.4' }, surplusNote) : null,
+      surplusNote ? el('p', { className: 'fs-caption text-muted mt-1 lh-snug' }, surplusNote) : null,
     )
   ));
 
   if (target) {
     const payment = store.getSnowballPayment(target);
     container.appendChild(el('div', { className: 'banner banner-celebration section' },
-      el('div', { className: 'banner-icon' }, '❄️'),
+      el('div', { className: 'banner-icon' }, icon('debt', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `Snowball Target: ${target.name}`),
         el('p', {}, `Throw ${formatCurrency(payment)} at this debt this month (${formatCurrency(target.minPayment)} min + ${formatCurrency(surplus)} extra)`)
       ),
       el('button', {
-        className: 'btn btn-primary', style: 'margin-left:auto;white-space:nowrap',
+        className: 'btn btn-primary ml-auto nowrap',
         onClick: () => makePayment(target)
       }, 'Make Payment')
     ));
     if (!target.categoryId) {
       container.appendChild(el('div', { className: 'banner banner-action section' },
-        el('div', { className: 'banner-icon' }, '✉️'),
+        el('div', { className: 'banner-icon' }, icon('budget', 22)),
         el('div', { className: 'banner-text' },
           el('h3', {}, `Map ${target.name} to a Budget envelope`),
           el('p', {}, 'Extra snowball on that envelope is not treated as overspend. When this one is paid off, map the next debt the same way and Move leftover there.'),
         ),
         el('button', {
-          className: 'btn btn-secondary',
-          style: 'margin-left:auto;white-space:nowrap',
+          className: 'btn btn-secondary ml-auto nowrap',
           onClick: () => openDebtForm(target),
         }, 'Edit debt'),
       ));
     }
   } else if (paused.length && !snowball.length) {
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '⏸️'),
+      el('div', { className: 'banner-icon' }, icon('clock', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'All remaining debts are on hold'),
         el('p', {}, 'No snowball target until you resume a debt — or you’re only carrying deferred balances.'),
@@ -106,14 +106,16 @@ export function renderDebt(container) {
   }
 
   container.appendChild(el('div', { className: 'btn-group section' },
-    el('button', { className: 'btn btn-primary', onClick: () => openDebtForm() }, '+ Add Debt'),
+    el('button', { className: 'btn btn-primary', onClick: () => openDebtForm() }, '+ Add debt'),
     snowball.length
-      ? el('button', { className: 'btn btn-accent', onClick: () => allocateAllSurplus() }, 'Allocate All Surplus')
+      ? el('button', { className: 'btn btn-accent', onClick: () => allocateAllSurplus() }, 'Send all surplus')
       : null,
   ));
 
   if (!allActive.length) {
-    container.appendChild(emptyState('🎉', 'Debt Free!', 'You\'ve crushed the snowball. Time to build wealth!'));
+    container.appendChild(archived.length
+      ? emptyState(icon('check', 32), 'Debt free', 'Every debt is paid off. Time to build wealth.')
+      : emptyState(icon('debt', 32), 'No debts yet', 'Add a debt to start your snowball, smallest balance first.', { label: 'Add your first debt', onClick: () => openDebtForm() }));
   } else {
     if (snowball.length) {
       const list = el('div', { className: 'section debt-list' });
@@ -146,7 +148,7 @@ export function renderDebt(container) {
     if (paused.length) {
       const hold = el('div', { className: 'section debt-list debt-on-hold-section' });
       hold.appendChild(el('div', { className: 'section-title' }, '⏸️ On hold (outside snowball)'));
-      hold.appendChild(el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.75rem' },
+      hold.appendChild(el('p', { className: 'tx-form-hint mb-3' },
         'Still counted in total debt and Baby Step progress, but they don’t take snowball surplus or minimums in the plan. Resume when you’re ready to attack them (e.g. after school).',
       ));
       hold.appendChild(el('div', { className: 'card debt-desktop-list' },
@@ -180,7 +182,7 @@ export function renderDebt(container) {
           style: 'padding:0.5rem 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between'
         },
           el('span', {}, `✅ ${d.name}`),
-          el('span', { style: 'color:var(--text-muted);font-size:0.8rem' }, `Paid off ${formatDate(d.paidOffDate)}`)
+          el('span', { className: 'text-muted fs-footnote' }, `Paid off ${formatDate(d.paidOffDate)}`)
         ))
       )
     ));
@@ -267,9 +269,9 @@ function pausedDebtRow(debt) {
         className: 'linkish',
         onClick: () => openDebtActivity(debt),
       }, debt.name),
-      el('span', { className: 'badge badge-pending', style: 'margin-left:0.4rem' }, 'On hold'),
+      el('span', { className: 'badge badge-pending ml-2' }, 'On hold'),
     ),
-    el('td', { style: 'font-weight:700' }, formatCurrency(debt.balance)),
+    el('td', { className: 'fw-bold' }, formatCurrency(debt.balance)),
     el('td', {}, debt.interestRate ? `${debt.interestRate}%` : '—'),
     el('td', {}, formatCurrency(debt.minPayment)),
     el('td', {},
@@ -313,7 +315,7 @@ function debtRow(debt, isTarget, orderNum = '') {
         onClick: (e) => { e.stopPropagation(); openDebtActivity(debt); },
       }, debt.name),
     ),
-    el('td', { style: 'font-weight:700' }, formatCurrency(debt.balance)),
+    el('td', { className: 'fw-bold' }, formatCurrency(debt.balance)),
     el('td', {}, debt.interestRate ? `${debt.interestRate}%` : '—'),
     el('td', {}, formatCurrency(debt.minPayment)),
     el('td', {}, cat?.name || '—'),
@@ -362,14 +364,22 @@ function debtCard(debt, isTarget, opts = {}) {
   return el('article', {
     className: `tx-card debt-card${isTarget ? ' debt-target' : ''}${paused ? ' debt-paused' : ''} envelope-card-clickable`,
     title: 'Tap to see payment history',
+    tabindex: '0',
+    role: 'button',
+    'aria-label': `${debt.name}, balance ${formatCurrency(debt.balance)}${isTarget ? ', next snowball target' : ''}. Open payment history`,
     onClick: (e) => {
       if (e.target.closest('button, a, details, summary')) return;
       openDebtActivity(debt);
     },
+    onKeydown: (e) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDebtActivity(debt); }
+    },
   },
+    isTarget ? el('div', { className: 'debt-target-badge' }, icon('target', 16), 'Next target') : null,
     el('div', { className: 'tx-card-top' },
       el('span', { className: 'tx-card-desc' },
-        isTarget ? '🎯 ' : paused ? '⏸️ ' : '',
+        paused ? icon('clock', 16, 'inline-ico') : null,
         debt.name
       ),
       el('span', { className: 'tx-card-amount' }, formatCurrency(debt.balance))
@@ -386,9 +396,8 @@ function debtCard(debt, isTarget, opts = {}) {
       (debt.dueDate || debt.notes)
         ? el('div', { className: 'tx-card-meta' }, debt.dueDate || debt.notes)
         : null,
-      isTarget || paused
+      paused
         ? el('div', { className: 'tx-card-badges' },
-          isTarget ? el('span', { className: 'tx-type-badge' }, 'Snowball target') : null,
           paused ? el('span', { className: 'badge badge-pending' }, 'On hold') : null,
         )
         : null,
@@ -504,9 +513,9 @@ function makePayment(debt) {
   const modal = showModal({
     title: `Payment: ${debt.name}`,
     body: el('div', {},
-      el('p', { style: 'margin-bottom:1rem' }, `Balance: ${formatCurrency(debt.balance)}`),
-      el('div', { className: 'form-group' }, el('label', {}, 'Payment Amount'), input),
-      el('div', { className: 'form-option', style: 'margin-top:0.75rem' },
+      el('p', { className: 'mb-4' }, `Balance: ${formatCurrency(debt.balance)}`),
+      el('div', { className: 'form-group' }, labelFor('Payment Amount', input), input),
+      el('div', { className: 'form-option mt-3' },
         el('div', { className: 'form-option-text' },
           el('span', { className: 'form-option-label' }, 'Already left my bank (CSV / import)'),
           el('span', { className: 'form-option-hint' },
@@ -598,16 +607,16 @@ function openDebtForm(debt = null) {
   const state = store.getState();
   const isEdit = !!debt;
   const nameIn = el('input', { type: 'text', value: debt?.name || '' });
-  const balIn = el('input', { type: 'number', step: '0.01', value: debt?.balance || 0 });
-  const rateIn = el('input', { type: 'number', step: '0.01', value: debt?.interestRate || 0 });
-  const minIn = el('input', { type: 'number', step: '0.01', value: debt?.minPayment || 0 });
+  const balIn = el('input', { type: 'number', step: '0.01', value: debt?.balance || '', placeholder: '0.00' });
+  const rateIn = el('input', { type: 'number', step: '0.01', value: debt?.interestRate || '', placeholder: '0.00' });
+  const minIn = el('input', { type: 'number', step: '0.01', value: debt?.minPayment || '', placeholder: '0.00' });
   const dueIn = el('input', { type: 'text', value: debt?.dueDate || '', placeholder: 'Due date or notes' });
   const notesIn = el('textarea', { rows: 2 }, debt?.notes || '');
   const pausedIn = el('input', { type: 'checkbox' });
   if (debt?.paused) pausedIn.checked = true;
 
   const catSelect = el('select');
-  catSelect.appendChild(el('option', { value: '' }, '— Select Envelope —'));
+  catSelect.appendChild(el('option', { value: '' }, 'Choose envelope'));
   (state.categories || []).forEach(c => {
     catSelect.appendChild(el('option', { value: c.id }, c.name));
   });
@@ -616,20 +625,20 @@ function openDebtForm(debt = null) {
   const modal = showModal({
     title: isEdit ? 'Edit Debt' : 'Add Debt',
     body: el('div', {},
-      el('div', { className: 'form-group' }, el('label', {}, 'Debt Name'), nameIn),
+      el('div', { className: 'form-group' }, labelFor('Debt Name', nameIn), nameIn),
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Current Balance'), balIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Interest Rate %'), rateIn),
+        el('div', { className: 'form-group' }, labelFor('Current Balance', balIn), balIn),
+        el('div', { className: 'form-group' }, labelFor('Interest Rate %', rateIn), rateIn),
       ),
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Minimum Payment'), minIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Due note'), dueIn),
+        el('div', { className: 'form-group' }, labelFor('Minimum Payment', minIn), minIn),
+        el('div', { className: 'form-group' }, labelFor('Due note', dueIn), dueIn),
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Budget Envelope'), catSelect),
-      el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:-0.25rem 0 0.75rem;line-height:1.45' },
+      el('div', { className: 'form-group' }, labelFor('Budget Envelope', catSelect), catSelect),
+      el('p', { className: 'tx-form-hint mb-3' },
         'Link this debt to an envelope so the min counts in Budget. Extra snowball on that envelope is not treated as overspend. When this one is paid off, map the next debt the same way and Move leftover there.',
       ),
-      el('div', { className: 'form-option', style: 'margin-bottom:0.75rem' },
+      el('div', { className: 'form-option mb-3' },
         el('div', { className: 'form-option-text' },
           el('span', { className: 'form-option-label' }, 'On hold (outside snowball)'),
           el('span', { className: 'form-option-hint' },
@@ -641,12 +650,17 @@ function openDebtForm(debt = null) {
           el('span', { className: 'toggle-slider' }),
         ),
       ),
-      el('div', { className: 'form-group' }, el('label', {}, 'Notes'), notesIn),
+      el('div', { className: 'form-group' }, labelFor('Notes', notesIn), notesIn),
     ),
-    footer: el('button', {
+    footer: [el('button', {
+      type: 'button',
+      className: 'btn btn-secondary',
+      onClick: () => modal.close(),
+    }, 'Cancel'), el('button', {
       type: 'button',
       className: 'btn btn-primary',
       onClick: () => {
+        if (!nameIn.value.trim()) { showFieldError(nameIn, 'Enter a debt name'); return; }
         const data = {
           name: nameIn.value,
           balance: Number(balIn.value),
@@ -673,7 +687,7 @@ function openDebtForm(debt = null) {
         });
         modal.close();
       },
-    }, 'Save'),
+    }, isEdit ? 'Save' : 'Add debt')],
   });
 }
 

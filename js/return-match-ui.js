@@ -37,8 +37,7 @@ function openReturnPicker(incomeTxId, candidates) {
       const catLabel = cat ? `${cat.icon || '✉️'} ${cat.name}` : 'Envelope';
       return el('button', {
         type: 'button',
-        className: 'review-item return-pick-row',
-        style: 'width:100%;text-align:left;cursor:pointer;font-family:inherit',
+        className: 'review-item return-pick-row w-full text-left cursor-pointer font-inherit',
         onClick: () => {
           const applied = store.applyReturnToEnvelope(
             incomeTxId,
@@ -59,7 +58,7 @@ function openReturnPicker(incomeTxId, candidates) {
       },
         el('div', {},
           el('strong', {}, catLabel),
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.2rem' },
+          el('div', { className: 'fs-footnote text-muted mt-1' },
             `${formatDate(c.expense.date)} · ${c.expense.description || '—'} · ${formatCurrency(c.amount)}`,
           ),
         ),
@@ -70,7 +69,7 @@ function openReturnPicker(incomeTxId, candidates) {
   modal = showModal({
     title: 'Match return to envelope?',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         `${formatCurrency(income.amount)} bonus income matches more than one recent purchase. Pick which return this is — that envelope gets the money back. Or skip.`,
       ),
       list,

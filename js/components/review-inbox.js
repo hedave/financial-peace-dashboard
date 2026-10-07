@@ -1,4 +1,5 @@
 import { el, formatCurrency, formatDate } from '../utils.js';
+import { icon } from '../icons.js';
 import { store } from '../store.js';
 import { showModal, showToast, showUndoToast, confirmDialog } from './modal.js';
 import { guessMerchantPattern } from '../category-rules.js';
@@ -70,30 +71,43 @@ export function renderReviewBanner(inbox) {
     parts.push(`${inbox.pending.length} awaiting bank`);
   }
 
-  return el('div', { className: 'banner banner-action review-banner' },
-    el('div', { className: 'banner-icon' }, '📥'),
-    el('div', { className: 'banner-text' },
-      el('h3', {}, 'Review inbox'),
-      el('p', {}, parts.join(' · '))
+  const extra = [];
+  if (inbox.billMatches.length) {
+    const n = inbox.billMatches.length;
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openBillMatches(inbox),
+    }, `Match ${n} bill${n === 1 ? '' : 's'}`));
+  }
+  if (inbox.pending?.length) {
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openPendingReview(inbox),
+    }, 'Pending'));
+  }
+  if (inbox.duplicates?.length) {
+    extra.push(el('button', {
+      type: 'button', className: 'btn btn-tertiary btn-sm',
+      onClick: () => openDuplicateReview(inbox),
+    }, 'Duplicates'));
+  }
+
+  return el('div', { className: 'review-row section' },
+    el('button', {
+      type: 'button',
+      className: 'list-row list-row-button review-row-main',
+      onClick: () => openReviewInbox(),
+      'aria-label': `Review inbox, ${inbox.totalCount} item${inbox.totalCount === 1 ? '' : 's'}: ${parts.join(', ')}`,
+    },
+      el('span', { className: 'list-row__icon' }, icon('inbox', 22)),
+      el('span', { className: 'list-row__body' },
+        el('span', { className: 'list-row__title' }, 'Review inbox'),
+        el('span', { className: 'list-row__meta' }, parts.join(' · ')),
+      ),
+      el('span', { className: 'count-badge' }, String(inbox.totalCount)),
+      el('span', { className: 'list-row__chev' }, icon('chevron', 18)),
     ),
-    el('div', { className: 'btn-group', style: 'margin-left:auto' },
-      inbox.totalCount ? el('button', {
-        className: 'btn btn-primary btn-sm',
-        onClick: () => openReviewInbox(),
-      }, 'Review') : null,
-      inbox.pending?.length ? el('button', {
-        className: 'btn btn-secondary btn-sm',
-        onClick: () => openPendingReview(inbox),
-      }, 'Pending') : null,
-      inbox.billMatches.length ? el('button', {
-        className: 'btn btn-accent btn-sm',
-        onClick: () => openBillMatches(inbox),
-      }, 'Match Bills') : null,
-      inbox.duplicates?.length ? el('button', {
-        className: 'btn btn-secondary btn-sm',
-        onClick: () => openDuplicateReview(inbox),
-      }, 'Duplicates') : null,
-    ),
+    extra.length ? el('div', { className: 'review-row-actions' }, ...extra) : null,
   );
 }
 
@@ -119,7 +133,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
         el('div', {},
           el('strong', {}, formatDate(t.date)),
           el('div', {}, t.description || '—'),
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted)' },
+          el('div', { className: 'fs-footnote text-muted' },
             `${TX_TYPE_LABELS[t.type] || t.type} · ${formatCurrency(t.amount)}`,
           ),
         ),
@@ -155,7 +169,7 @@ export function openPendingReview(inbox = store.getReviewInbox()) {
   modal = showModal({
     title: 'Awaiting bank (pending)',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'These were logged manually and do not change checking until they match a CSV import — or you mark them cleared.',
       ),
       list,
@@ -318,7 +332,7 @@ export function openDuplicateReview() {
   modal = showModal({
     title: `Possible duplicates · ${groupsAtOpen.length} left`,
     body: el('div', { className: 'duplicate-review-body' },
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:0.5rem' },
+      el('p', { className: 'tx-form-hint mb-2' },
         'Same amount and similar merchant. Delete true double-posts, or mark unique when both are real. This window stays open until you click Done.',
       ),
       progressEl,
@@ -405,14 +419,13 @@ export function openReviewInbox(_inbox) {
   hub = showModal({
     title: `Review inbox (${inbox.totalCount})`,
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Choose what to work through. The Review count includes all of these queues.',
       ),
       el('div', { className: 'review-hub-list' },
         ...queues.map(q => el('button', {
           type: 'button',
-          className: 'btn btn-secondary review-hub-item',
-          style: 'width:100%;justify-content:space-between;display:flex;margin-bottom:0.5rem',
+          className: 'btn btn-secondary review-hub-item w-full justify-between d-flex mb-2',
           onClick: () => {
             // Open next first so modal stack never hits 0 (avoids page thrash / flash)
             q.open();
@@ -443,14 +456,13 @@ export function openUncategorizedReview() {
   const envelopePicker = createEnvelopePicker({
     id: 'bulk-cat',
     placeholder: 'Type to find envelope (e.g. P for Pets)…',
-    emptyLabel: '— Choose envelope —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
   const remainingHint = el('p', {
-    className: 'tx-form-hint review-envelope-remaining',
-    style: 'margin-top:0.4rem;margin-bottom:0',
-  }, 'Pick an envelope to see what’s left this month.');
+    className: 'tx-form-hint review-envelope-remaining mt-2 mb-0',
+  }, 'Choose an envelope to see what’s left this month.');
   const alwaysUse = el('input', { type: 'checkbox' });
   alwaysUse.checked = true;
   const list = el('div', { className: 'review-list' });
@@ -469,7 +481,7 @@ export function openUncategorizedReview() {
   function updateRemainingHint() {
     const catId = envelopePicker.value;
     if (!catId) {
-      remainingHint.textContent = 'Pick an envelope to see what’s left this month.';
+      remainingHint.textContent = 'Choose an envelope to see what’s left this month.';
       remainingHint.style.color = '';
       return;
     }
@@ -569,8 +581,7 @@ export function openUncategorizedReview() {
       ),
       el('button', {
         type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        style: 'margin-bottom:0.65rem',
+        className: 'btn btn-sm btn-secondary mb-3',
         onClick: () => {
           const n = store.applyRulesToUncategorized();
           showToast(n ? `Applied rules to ${n} transactions` : 'No rules matched', n ? 'success' : 'info');
@@ -580,12 +591,12 @@ export function openUncategorizedReview() {
       }, 'Apply saved rules'),
       list,
       el('div', { className: 'review-assign-dock' },
-        el('div', { className: 'form-group', style: 'margin-bottom:0.5rem' },
+        el('div', { className: 'form-group mb-2' },
           el('label', { for: 'bulk-cat' }, 'Assign selected to envelope'),
           envelopePicker.element,
           remainingHint,
         ),
-        el('div', { className: 'form-option remember-rule', style: 'margin:0.35rem 0 0.65rem' },
+        el('div', { className: 'form-option remember-rule mx-0 mt-1 mb-3' },
           el('div', { className: 'form-option-text' },
             el('span', { className: 'form-option-label' }, 'Always use this envelope'),
             el('span', { className: 'form-option-hint' },
@@ -692,17 +703,16 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
       list.appendChild(el('div', { className: 'review-item bill-match-item' },
         el('div', {},
           el('strong', {}, bill.name),
-          bill.autoPay ? el('span', { className: 'badge badge-autopay', style: 'margin-left:0.35rem' }, 'Auto-pay') : null,
-          el('div', { style: 'font-size:0.8rem;color:var(--text-muted);margin-top:0.2rem' },
+          bill.autoPay ? el('span', { className: 'badge badge-autopay ml-1' }, 'Auto-pay') : null,
+          el('div', { className: 'fs-footnote text-muted mt-1' },
             `${formatDate(t.date)} · ${t.description || '—'} · ${amtNote}`
           ),
           Math.abs(amtDiff) > 0.02
             ? el('div', {
-              className: 'tx-form-hint',
-              style: 'margin-top:0.35rem;margin-bottom:0',
+              className: 'tx-form-hint mt-1 mb-0',
             }, 'Amount differs from the bill plan — linking still marks it paid using the bank amount.')
             : null,
-          bill.autoPay ? el('div', { className: 'tx-form-hint', style: 'margin-top:0.5rem;margin-bottom:0' },
+          bill.autoPay ? el('div', { className: 'tx-form-hint mt-2 mb-0' },
             'Linking marks the bill paid without deducting checking again (CSV already did).'
           ) : null,
         ),
@@ -749,7 +759,7 @@ export function openBillMatches(inbox = store.getReviewInbox()) {
   modal = showModal({
     title: 'Possible bill matches',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Link if this payment is that bill. Dismiss if it is not (e.g. work travel Citi vs household Citi) — keeps the payment and checking, and stops reminding you. Delete only if the row should not exist.',
       ),
       list,

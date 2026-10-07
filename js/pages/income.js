@@ -1,6 +1,7 @@
-import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel } from '../utils.js';
+import { icon } from '../icons.js';
+import { el, formatCurrency, formatDate, getCurrentMonth, getMonthLabel, labelFor } from '../utils.js';
 import { store } from '../store.js';
-import { showToast, confirmDialog } from '../components/modal.js';
+import { showToast, confirmDialog, showModal } from '../components/modal.js';
 import { openPayScheduleEditor } from '../components/pay-schedule-editor.js';
 import { scheduleSummary, getUpcomingChecks, getScheduledChecksForMonth } from '../pay-schedule.js';
 import { isPlannedIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
@@ -21,14 +22,14 @@ export function renderIncome(container) {
 
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
-    el('h2', {}, 'Income & Balances'),
-    el('p', {}, 'Name the source, type the expected amount, and set pay dates. CSV deposits fill the real check when they import.')
+    el('h2', {}, 'Income'),
+    el('p', {}, 'Expected pay, pay dates and balances. Bank deposits fill in real checks on import.')
   ));
 
   container.appendChild(el('div', { className: 'section' },
-    el('div', { className: 'section-title' }, 'Planned Income Sources'),
+    el('div', { className: 'section-title' }, 'Planned income'),
     el('p', { className: 'section-hint' },
-      'Type expected take-home in This Month. Set bank match terms under Edit dates (e.g. “DFAS”, employer name). Imports also match by paycheck amount + pay date. Unmatched deposits go to Bonus Income.',
+      'Expected take-home for this month. Open a source to set pay dates and bank match terms (e.g. “DFAS”). Unmatched deposits go to Bonus Income.',
     ),
     el('div', { className: 'card' },
       el('div', { className: 'table-wrap income-desktop-list' },
@@ -45,12 +46,11 @@ export function renderIncome(container) {
           ),
         ),
       ),
-      el('div', { className: 'income-mobile-list' },
-        ...plannedSources.map(src => incomeCard(src, state)),
+      el('div', { className: 'income-mobile-list list-group' },
+        ...plannedSources.map(src => incomeListRow(src, state)),
       ),
       el('button', {
-        className: 'btn btn-secondary',
-        style: 'margin-top:1rem',
+        className: 'btn btn-secondary mt-4',
         onClick: () => {
           store.update(s => {
             const plannedCount = s.incomeSources.filter(x => x.type !== 'bonus').length;
@@ -70,9 +70,12 @@ export function renderIncome(container) {
           });
           window.appRefresh();
         },
-      }, '+ Add Income Source'),
+      }, '+ Add income source'),
       el('div', { className: 'income-total-row' },
-        el('strong', {}, `Total Planned Income — ${getMonthLabel(month)}`),
+        el('span', { className: 'income-total-label' },
+          el('strong', {}, 'Total planned income'),
+          el('span', { className: 'income-total-month' }, getMonthLabel(month)),
+        ),
         el('strong', { className: 'income-total-value' }, formatCurrency(store.getTotalIncome(month))),
       ),
     ),
@@ -112,11 +115,11 @@ function bonusIncomeCard(month, bonusLogged, state) {
       .sort((a, b) => b.date.localeCompare(a.date))
     : [];
 
-  return el('div', { className: 'card bonus-income-card', style: 'margin-top:1rem' },
+  return el('div', { className: 'card bonus-income-card mt-4' },
     el('div', { className: 'bonus-income-header' },
       el('div', {},
         el('div', { className: 'card-title' }, BONUS_INCOME_NAME),
-        el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:0.25rem 0 0' },
+        el('p', { className: 'fs-footnote text-muted mx-0 mt-1 mb-0' },
           'Refunds and extra deposits sit in the bonus pot. Budget → Assign bonus sends any amount to any envelope. They are not sent back to the original purchase.'
         ),
       ),
@@ -139,11 +142,11 @@ function bonusIncomeCard(month, bonusLogged, state) {
                 }, cat ? `→ ${cat.name}` : 'Assigned to envelope')
                 : null,
             ),
-            el('span', { style: 'font-weight:600;color:var(--positive)' }, `+${formatCurrency(t.amount)}`),
+            el('span', { className: 'fw-semi text-positive' }, `+${formatCurrency(t.amount)}`),
           );
         }),
       )
-      : el('p', { style: 'font-size:0.8rem;color:var(--text-muted);margin:0.5rem 0 0' },
+      : el('p', { className: 'fs-footnote text-muted mx-0 mt-2 mb-0' },
         'No bonus income logged this month. Unmatched CSV deposits or manual income entries appear here.'
       ),
   );
@@ -255,9 +258,9 @@ function incomeCard(src, state) {
   }));
 
   return el('article', { className: 'tx-card income-card' },
-    el('div', { className: 'form-group' }, el('label', {}, 'Source'), nameInput),
+    el('div', { className: 'form-group' }, labelFor('Source', nameInput), nameInput),
     el('div', { className: 'input-row' },
-      el('div', { className: 'form-group' }, el('label', {}, 'Type'), typeSelect),
+      el('div', { className: 'form-group' }, labelFor('Type', typeSelect), typeSelect),
       el('div', { className: 'form-group' }, el('label', {}, 'This month'), expectedAmountInput(src)),
     ),
     el('div', { className: 'tx-card-meta' },
@@ -320,13 +323,13 @@ function balanceCard(title, balance, cls, onSave, target = null) {
   const input = el('input', { type: 'number', step: '0.01', value: balance });
   const card = el('div', { className: 'card' },
     el('div', { className: 'card-title' }, title),
-    el('div', { className: `card-value ${cls}`, style: 'margin-bottom:1rem' }, formatCurrency(balance)),
-    el('div', { className: 'form-group' }, el('label', {}, 'Update Balance'), input),
+    el('div', { className: `card-value ${cls} mb-4` }, formatCurrency(balance)),
+    el('div', { className: 'form-group' }, labelFor('Update Balance', input), input),
   );
 
   if (target) {
     const pct = Math.min(100, (balance / target) * 100);
-    card.appendChild(el('p', { style: 'font-size:0.8rem;color:var(--text-muted)' },
+    card.appendChild(el('p', { className: 'fs-footnote text-muted' },
       `Target: ${formatCurrency(target)} (${pct.toFixed(0)}%)`
     ));
     card.appendChild(el('div', { className: 'progress-bar' },
@@ -335,8 +338,7 @@ function balanceCard(title, balance, cls, onSave, target = null) {
   }
 
   card.appendChild(el('button', {
-    className: 'btn btn-primary btn-sm',
-    style: 'margin-top:0.75rem',
+    className: 'btn btn-primary btn-sm mt-3',
     onClick: () => { onSave(Number(input.value)); showToast('Balance saved!'); window.appRefresh(); },
   }, 'Save'));
 
@@ -346,14 +348,14 @@ function balanceCard(title, balance, cls, onSave, target = null) {
 function renderSavings(state) {
   const wrapper = el('div', {});
   if (!state.balances.savings.length) {
-    wrapper.appendChild(el('p', { style: 'color:var(--text-muted);margin-bottom:1rem' }, 'No additional savings accounts yet.'));
+    wrapper.appendChild(el('p', { className: 'text-muted mb-4' }, 'No additional savings accounts yet.'));
   }
   state.balances.savings.forEach((acct, i) => {
     const nameIn = el('input', { type: 'text', value: acct.name });
     const balIn = el('input', { type: 'number', step: '0.01', value: acct.balance });
     wrapper.appendChild(el('div', { className: 'input-row', style: 'margin-bottom:0.5rem;align-items:flex-end' },
-      el('div', { className: 'form-group' }, el('label', {}, 'Account Name'), nameIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Balance'), balIn),
+      el('div', { className: 'form-group' }, labelFor('Account Name', nameIn), nameIn),
+      el('div', { className: 'form-group' }, labelFor('Balance', balIn), balIn),
       el('button', {
         className: 'btn btn-sm btn-danger',
         onClick: () => {
@@ -377,4 +379,51 @@ function renderSavings(state) {
   }, '+ Add Savings Account'));
 
   return wrapper;
+}
+/** Phone: one tappable row per source; details + schedule open in a sheet. */
+function incomeListRow(src, state) {
+  const month = getCurrentMonth();
+  const checks = getScheduledChecksForMonth(src, month);
+  const meta = checks.length
+    ? `${checks.length} check${checks.length === 1 ? '' : 's'} this month · ${scheduleSummary(src)}`
+    : scheduleSummary(src);
+  const open = () => {
+    let modal;
+    const card = incomeCard(src, state);
+    const actions = card.querySelector('.tx-card-actions');
+    if (actions) actions.remove();
+    modal = showModal({
+      title: src.name || 'Income source',
+      body: el('div', {},
+        card,
+        el('div', { className: 'list-group mt-3' },
+          el('button', {
+            type: 'button', className: 'list-row list-row-button',
+            onClick: () => { modal.close(); openPayScheduleEditor(src); },
+          },
+            el('span', { className: 'list-row__icon' }, icon('clock', 22)),
+            el('span', { className: 'list-row__body' },
+              el('span', { className: 'list-row__title' }, 'Pay schedule'),
+              el('span', { className: 'list-row__meta' }, scheduleSummary(src)),
+            ),
+            el('span', { className: 'list-row__chev' }, icon('chevron', 18)),
+          ),
+        ),
+      ),
+      footer: [
+        el('button', { type: 'button', className: 'btn btn-danger', onClick: () => { modal.close(); confirmDeleteIncomeSource(src); } }, 'Delete source'),
+        el('button', { type: 'button', className: 'btn btn-primary', onClick: () => modal.close() }, 'Done'),
+      ],
+      onClose: () => window.appRefresh(),
+    });
+  };
+  return el('button', { type: 'button', className: 'list-row list-row-button', onClick: open },
+    el('span', { className: 'list-row__icon' }, icon('income', 22)),
+    el('span', { className: 'list-row__body' },
+      el('span', { className: 'list-row__title' }, src.name || 'Income source'),
+      el('span', { className: 'list-row__meta' }, meta),
+    ),
+    el('span', { className: 'list-row__amount' }, formatCurrency(store.getSourceIncomeForMonth(src, month) || Number(src.amount) || 0)),
+    el('span', { className: 'list-row__chev' }, icon('chevron', 18)),
+  );
 }

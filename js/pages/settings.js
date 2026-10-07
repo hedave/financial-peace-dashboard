@@ -1,6 +1,7 @@
-import { el, formatCurrency } from '../utils.js';
+import { icon } from '../icons.js';
+import { el, formatCurrency, labelFor } from '../utils.js';
 import { store } from '../store.js';
-import { showToast, confirmDialog } from '../components/modal.js';
+import { showToast, confirmDialog, showModal } from '../components/modal.js';
 import { hashPassword } from '../utils.js';
 import { PALETTES, applyTheme } from '../themes.js';
 import { exportForGoogleSheets } from '../sheets-export.js';
@@ -15,8 +16,8 @@ import {
  * Only true panels get the open attribute — never open="false" (HTML treats that as open).
  */
 const settingsOpenPanels = {
-  appearance: true,
-  snowball: true,
+  appearance: false,
+  snowball: false,
   security: false,
   cloud: false,
   data: false,
@@ -26,9 +27,18 @@ const settingsOpenPanels = {
   about: false,
 };
 
+const SETTINGS_ICONS = {
+  appearance: 'palette', snowball: 'shield', security: 'lock', cloud: 'cloud',
+  data: 'database', advisor: 'advisor', rules: 'tag', install: 'download', about: 'info',
+};
+
 function settingsAcc(id, title, ...bodyChildren) {
-  const det = el('details', { className: 'settings-acc section' },
-    el('summary', {}, title),
+  const det = el('details', { className: 'settings-acc section', 'data-acc': id },
+    el('summary', {},
+      el('span', { className: 'settings-acc__icon' }, icon(SETTINGS_ICONS[id] || 'settings', 20)),
+      el('span', { className: 'settings-acc__title' }, title),
+      el('span', { className: 'settings-acc__chev' }, icon('chevron', 18)),
+    ),
     el('div', { className: 'settings-acc-body' }, ...bodyChildren),
   );
   det.open = !!settingsOpenPanels[id];
@@ -46,7 +56,7 @@ export function renderSettings(container) {
   container.innerHTML = '';
   container.appendChild(el('div', { className: 'page-header' },
     el('h2', {}, 'Settings'),
-    el('p', {}, 'Customize your FigPig Financial experience')
+    el('p', {}, 'Appearance, sync, data and security')
   ));
 
   const currentPalette = state.settings.palette || 'forest';
@@ -62,7 +72,7 @@ export function renderSettings(container) {
   });
 
   container.appendChild(settingsAcc('appearance', 'Appearance & mode',
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem' }, 'Color palette'),
+    el('p', { className: 'fs-footnote text-muted mb-2' }, 'Color palette'),
     paletteSelector(currentPalette),
     toggleRow('Dark Mode', state.settings.darkMode, val => {
       store.update(s => { s.settings.darkMode = val; });
@@ -90,17 +100,16 @@ export function renderSettings(container) {
         : 'Overspend share hidden');
     }),
     el('p', {
-      className: 'tx-form-hint',
-      style: 'margin-top:0.5rem;margin-bottom:0',
+      className: 'tx-form-hint mt-2 mb-0',
     }, 'Soft only — never blocks spending.'),
   ));
 
   container.appendChild(settingsAcc('snowball', 'Snowball cash safety',
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+    el('p', { className: 'fs-footnote text-muted mb-4 lh-relaxed' },
       'Safe snowball surplus never spends checking below: unpaid bills due by next paycheck + this cushion. Default $50.',
     ),
     el('div', { className: 'form-group' },
-      el('label', {}, 'Cushion left in checking after bills ($)'),
+      labelFor('Cushion left in checking after bills ($)', bufferIn),
       bufferIn,
     ),
     el('button', {
@@ -118,7 +127,7 @@ export function renderSettings(container) {
   const daysSinceBackup = daysSince(state.settings.lastBackupAt);
   if (daysSinceBackup == null || daysSinceBackup >= 30) {
     container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '💾'),
+      el('div', { className: 'banner-icon' }, icon('sync', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, 'Backup recommended'),
         el('p', {},
@@ -128,15 +137,14 @@ export function renderSettings(container) {
         ),
       ),
       el('button', {
-        className: 'btn btn-secondary btn-sm',
-        style: 'margin-left:auto;align-self:center',
+        className: 'btn btn-secondary btn-sm ml-auto self-center',
         onClick: () => downloadJsonBackup(),
       }, 'Export Backup'),
     ));
   }
 
   container.appendChild(settingsAcc('security', 'Security',
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem' },
+    el('p', { className: 'fs-footnote text-muted mb-4' },
       'Optional app lock on this device. It stays in this browser and is not uploaded. It is not bank-grade encryption.',
     ),
     el('div', { className: 'form-group' },
@@ -172,7 +180,7 @@ export function renderSettings(container) {
       },
     }, 'Save Password'),
     state.settings.passwordHash ? el('button', {
-      className: 'btn btn-secondary btn-sm', style: 'margin-left:0.5rem',
+      className: 'btn btn-secondary btn-sm ml-2',
       onClick: () => {
         confirmDialog(
           'Remove app password?',
@@ -188,7 +196,7 @@ export function renderSettings(container) {
   ));
 
   const emailLine = el('p', {
-    style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+    className: 'fs-footnote text-muted mb-3',
   }, cloudOn ? 'Checking sign-in…' : 'Cloud sync is off.');
   const shareHost = el('div', {});
 
@@ -234,14 +242,14 @@ export function renderSettings(container) {
             },
           }, 'Sign Out') : null,
         ),
-        el('p', { className: 'tx-form-hint', style: 'margin-top:0.75rem' },
+        el('p', { className: 'tx-form-hint mt-3' },
           isNotesOnlyRole()
             ? 'You are on a notes-only login. Stickies sync to the household. Money edits stay on the main account.'
             : 'Your login owns the budget. Create a notes-only code so your spouse can add stickies on her own account without changing transactions.',
         ),
         shareHost,
       )
-      : el('p', { style: 'font-size:0.85rem;color:var(--text-muted);line-height:1.6' },
+      : el('p', { className: 'fs-footnote text-muted lh-relaxed' },
         'Cloud sync is not configured on this deploy. See DEPLOY.md to connect Supabase.',
       ),
   ));
@@ -267,7 +275,7 @@ export function renderSettings(container) {
   }
 
   container.appendChild(settingsAcc('data', 'Data Management',
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+    el('p', { className: 'fs-footnote text-muted mb-4 lh-relaxed' },
       'Export a snapshot for Google Sheets, or back up / restore your full dataset. ',
       'CSV bank imports on the Transactions page remain the best way to add new activity.',
     ),
@@ -285,8 +293,7 @@ export function renderSettings(container) {
       }, 'Export Backup (JSON)'),
       state.settings.lastBackupAt
         ? el('p', {
-          className: 'tx-form-hint',
-          style: 'width:100%;margin-top:0.5rem',
+          className: 'tx-form-hint w-full mt-2',
         }, `Last JSON backup: ${new Date(state.settings.lastBackupAt).toLocaleString()}`)
         : null,
       el('button', {
@@ -370,6 +377,7 @@ export function renderSettings(container) {
   const rulesSearch = el('input', {
     type: 'search',
     placeholder: 'Filter rules by merchant…',
+    'aria-label': 'Filter category rules',
     className: 'rules-search',
   });
 
@@ -382,8 +390,7 @@ export function renderSettings(container) {
 
   const clearAllRulesBtn = el('button', {
     type: 'button',
-    className: 'btn btn-secondary btn-sm',
-    style: 'margin-top:0.75rem',
+    className: 'btn btn-secondary btn-sm mt-3',
     onClick: () => {
       confirmDialog('Delete all category rules?', 'You can recreate them when categorizing imports.', () => {
         store.update(s => { s.categoryRules = []; });
@@ -396,7 +403,9 @@ export function renderSettings(container) {
     const list = liveRules();
     rulesSummaryLabel.current = `Category Rules (${list.length})`;
     const sum = rulesHost.closest('details')?.querySelector('summary');
-    if (sum) sum.textContent = rulesSummaryLabel.current;
+    const sumTitle = sum?.querySelector('.settings-acc__title');
+    if (sumTitle) sumTitle.textContent = rulesSummaryLabel.current;
+    else if (sum) sum.textContent = rulesSummaryLabel.current;
     clearAllRulesBtn.hidden = list.length === 0;
 
     const q = query.trim().toLowerCase();
@@ -405,7 +414,7 @@ export function renderSettings(container) {
       : list;
     rulesHost.innerHTML = '';
     if (!filtered.length) {
-      rulesHost.appendChild(el('p', { style: 'color:var(--text-muted);font-size:0.9rem' },
+      rulesHost.appendChild(el('p', { className: 'text-muted fs-footnote' },
         list.length ? 'No rules match that filter.' : 'No rules yet — categorize a transaction and toggle "Remember for future imports".',
       ));
       return;
@@ -423,19 +432,43 @@ export function renderSettings(container) {
           el('button', {
             type: 'button',
             className: 'btn btn-sm btn-secondary',
+            'aria-label': `Edit rule ${rule.pattern}`,
             onClick: () => {
-              const next = window.prompt('Edit merchant pattern (lowercase match text)', rule.pattern);
-              if (next == null) return;
-              const key = next.trim().toLowerCase();
-              if (!key) return;
-              store.update(s => {
-                const r = (s.categoryRules || []).find(x => x.id === rule.id);
-                if (!r) return;
-                s.categoryRules = s.categoryRules.filter(x => x.id !== rule.id && x.pattern !== key);
-                r.pattern = key;
-                s.categoryRules.push(r);
+              const inputId = `rule-edit-${rule.id}`;
+              const input = el('input', {
+                id: inputId, type: 'text', value: rule.pattern,
+                autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false',
               });
-              showToast('Rule updated');
+              let dlg;
+              const save = () => {
+                const key = input.value.trim().toLowerCase();
+                if (!key) { input.focus(); return; }
+                store.update(s => {
+                  const r = (s.categoryRules || []).find(x => x.id === rule.id);
+                  if (!r) return;
+                  s.categoryRules = s.categoryRules.filter(x => x.id !== rule.id && x.pattern !== key);
+                  r.pattern = key;
+                  s.categoryRules.push(r);
+                });
+                dlg.close();
+                showToast('Rule updated');
+              };
+              input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+              dlg = showModal({
+                title: 'Edit rule',
+                body: el('div', {},
+                  el('div', { className: 'form-group' },
+                    el('label', { for: inputId }, 'Merchant text to match'),
+                    input,
+                  ),
+                  el('p', { className: 'tx-form-hint mb-0' },
+                    `Imports whose description contains this text go to ${buildRuleLabel(rule, store.getState().categories)}.`),
+                ),
+                footer: [
+                  el('button', { type: 'button', className: 'btn btn-secondary', onClick: () => dlg.close() }, 'Cancel'),
+                  el('button', { type: 'button', className: 'btn btn-primary', onClick: save }, 'Save'),
+                ],
+              });
             },
           }, 'Edit'),
           el('button', {
@@ -482,15 +515,15 @@ export function renderSettings(container) {
     if (aliases[key]) sel.value = aliases[key];
     else sel.value = '';
     return el('div', { className: 'form-group' },
-      el('label', {}, label),
+      labelFor(label, sel),
       sel,
-      el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' }, hint),
+      el('p', { className: 'tx-form-hint mt-1 mb-0' }, hint),
     );
   }
 
   container.appendChild(settingsAcc('advisor', 'Advisor envelopes',
     el('p', {
-      style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6',
+      className: 'fs-footnote text-muted mb-4 lh-relaxed',
     },
       'Pin which envelopes Advisor uses for dining, vacation, and Christmas. Auto-match works until you rename them — then set a pin here. (Dining is the default pick for “what if we cut ___ %?” until you choose another.)',
     ),
@@ -511,7 +544,7 @@ export function renderSettings(container) {
   ));
 
   container.appendChild(settingsAcc('rules', rulesSummaryLabel.current,
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+    el('p', { className: 'fs-footnote text-muted mb-4 lh-relaxed' },
       'Saved when you check "Remember for future imports" on a transaction. Rules match merchant text in the description. ',
       'Longer patterns win — e.g. “ingles gas” beats a broad “ingles”, so store groceries and pump gas can go to different envelopes. Edit patterns here if a rule is too vague.',
     ),
@@ -522,26 +555,45 @@ export function renderSettings(container) {
   paintRules();
 
   container.appendChild(settingsAcc('install', 'Install App',
-    el('p', { style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6' },
+    el('p', { className: 'fs-footnote text-muted mb-4 lh-relaxed' },
       'Install to your phone or desktop for quick access. In Chrome/Edge: menu → Install app. On iPhone Safari: Share → Add to Home Screen.',
     ),
-    el('p', { style: 'font-size:0.8rem;color:var(--text-muted)' }, 'Works offline for viewing; data saves locally.'),
+    el('p', { className: 'fs-footnote text-muted' }, 'Works offline for viewing; data saves locally.'),
   ));
 
   container.appendChild(settingsAcc('about', 'About',
-    el('p', { style: 'line-height:1.7;color:var(--text-muted)' },
+    el('p', { className: 'lh-relaxed text-muted' },
       'FigPig Financial helps you follow Dave Ramsey\'s Total Money Makeover — Baby Steps, zero-based envelope budgeting, and the debt snowball. ',
       cloudOn
         ? 'Data syncs to your Supabase account when signed in, with a local copy in your browser for speed.'
         : 'Data is stored locally in your browser until cloud sync is configured.',
     ),
-    el('p', { style: 'margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)' },
+    el('p', { className: 'mt-2 fs-footnote text-muted' },
       'Household of ' + (state.settings.familySize || 7)
       + ' · Build ' + ((window.FigPig && window.FigPig.APP_BUILD) || document.querySelector('meta[name="app-build"]')?.content || '?')
       + (getComputedStyle(document.documentElement).getPropertyValue('--sp-4').trim() ? ' · Design 2026-10' : ' · Design legacy')
       + (cloudOn ? ' · Cloud on' : ' · Local only'),
     ),
   ));
+
+  groupSettingsRows(container);
+}
+
+/** ST2: fold consecutive accordions into one inset grouped list (layout only). */
+function groupSettingsRows(container) {
+  let group = null;
+  [...container.children].forEach(node => {
+    if (node.classList?.contains('settings-acc')) {
+      if (!group) {
+        group = el('div', { className: 'settings-group section' });
+        container.insertBefore(group, node);
+      }
+      node.classList.remove('section');
+      group.appendChild(node);
+    } else {
+      group = null;
+    }
+  });
 }
 
 function paletteSelector(currentId) {
@@ -575,14 +627,14 @@ function paletteSelector(currentId) {
 async function householdSharePanel(signedIn) {
   if (!signedIn) return null;
   if (isNotesOnlyRole()) {
-    return el('p', { className: 'tx-form-hint', style: 'margin-top:0.5rem' },
+    return el('p', { className: 'tx-form-hint mt-2' },
       'Household role: notes only.',
     );
   }
 
-  const box = el('div', { className: 'household-share', style: 'margin-top:1rem' });
+  const box = el('div', { className: 'household-share mt-4' });
   const codeEl = el('p', { className: 'household-code', style: 'font-size:1.4rem;font-weight:700;letter-spacing:0.12em;margin:0.5rem 0' }, '');
-  const hint = el('p', { className: 'tx-form-hint', style: 'margin:0' }, '');
+  const hint = el('p', { className: 'tx-form-hint m-0' }, '');
 
   async function paintInvite() {
     const invites = await listHouseholdInvites();
@@ -597,16 +649,15 @@ async function householdSharePanel(signedIn) {
   }
   await paintInvite();
 
-  box.appendChild(el('h3', { style: 'font-size:0.95rem;margin:0 0 0.35rem' }, 'Notes-only account (spouse)'));
+  box.appendChild(el('h3', { className: 'fs-body mx-0 mt-0 mb-1' }, 'Notes-only account (spouse)'));
   box.appendChild(el('p', {
-    style: 'font-size:0.82rem;color:var(--text-muted);line-height:1.45;margin:0 0 0.5rem',
+    className: 'fs-footnote text-muted lh-snug mx-0 mt-0 mb-2',
   }, 'First run supabase-household.sql in the Supabase SQL editor. Then create a code. She will see the budget and can add notes, not transactions.'));
   box.appendChild(codeEl);
   box.appendChild(hint);
   box.appendChild(el('button', {
     type: 'button',
-    className: 'btn btn-sm btn-primary',
-    style: 'margin-top:0.65rem',
+    className: 'btn btn-sm btn-primary mt-3',
     onClick: async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;

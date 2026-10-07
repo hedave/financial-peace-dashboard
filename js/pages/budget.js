@@ -1,7 +1,7 @@
+import { icon } from '../icons.js';
 import {
   el, formatCurrency, formatDate, getPreviousMonth, getMonthLabel, getCurrentMonth,
-  emptyState, getRecentMonths, addMonths, todayISO,
-} from '../utils.js';
+  emptyState, getRecentMonths, addMonths, todayISO, labelFor, showFieldError } from '../utils.js';
 import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createEnvelopePicker } from '../components/envelope-picker.js';
@@ -119,12 +119,13 @@ export function renderBudget(container, arg) {
     el('button', {
       type: 'button',
       className: 'btn btn-sm btn-secondary',
+      'aria-label': 'Previous month',
       disabled: monthOptions[0] === month ? true : undefined,
       onClick: () => {
         budgetViewMonth = addMonths(month, -1);
         window.appRefresh();
       },
-    }, '← Prev'),
+    }, '‹'),
     el('label', { style: 'font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:0.5rem' },
       'Month',
       monthSelect,
@@ -132,13 +133,14 @@ export function renderBudget(container, arg) {
     el('button', {
       type: 'button',
       className: 'btn btn-sm btn-secondary',
+      'aria-label': 'Next month',
       disabled: month >= liveMonth ? true : undefined,
       onClick: () => {
         budgetViewMonth = addMonths(month, 1);
         if (budgetViewMonth > liveMonth) budgetViewMonth = liveMonth;
         window.appRefresh();
       },
-    }, 'Next →'),
+    }, '›'),
     !isCurrentMonth
       ? el('button', {
         type: 'button',
@@ -153,8 +155,7 @@ export function renderBudget(container, arg) {
 
   if (!isCurrentMonth && !store.hasMonthBudgetSnapshot(month)) {
     container.appendChild(el('p', {
-      className: 'tx-form-hint section',
-      style: 'margin-top:0',
+      className: 'tx-form-hint section mt-0',
     }, `No saved budget snapshot for ${getMonthLabel(month)} — budgeted amounts fall back to today’s plan. Spending still uses transactions dated in that month.`));
   }
 
@@ -165,7 +166,7 @@ export function renderBudget(container, arg) {
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, `Monthly Income — ${getMonthLabel(month)}`),
       el('div', { className: 'card-value accent' }, formatCurrency(allocatable)),
-      el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4' },
+      el('p', { className: 'fs-caption text-muted mt-1 lh-snug' },
         bonusLogged > 0.005
           ? `Pay calendar ${formatCurrency(income)} + bonus still free ${formatCurrency(bonusLogged)}`
           : 'From pay-calendar dates & amounts (not checking balance)',
@@ -174,23 +175,23 @@ export function renderBudget(container, arg) {
     el('div', { className: 'card' },
       el('div', { className: 'card-title' }, 'Total Budgeted'),
       el('div', { className: 'card-value' }, formatCurrency(budgeted)),
-      el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem' },
+      el('p', { className: 'fs-caption text-muted mt-1' },
         isCurrentMonth ? 'Sum of envelope monthly budgets' : 'From snapshot or current plan',
       ),
     ),
-    el('div', { className: 'card' },
+    el('div', { className: 'card stat-allocate' },
       el('div', { className: 'card-title' }, 'To Allocate'),
       el('div', { className: `card-value ${unallocated === 0 ? 'positive' : unallocated > 0 ? 'accent' : 'negative'}` },
         formatCurrency(unallocated)
       ),
       el('p', {
-        style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.45',
+        className: 'fs-caption text-muted mt-1 lh-snug',
       },
         `${formatCurrency(allocatable)} income − ${formatCurrency(budgeted)} budgeted`,
       ),
       unallocated === 0
-        ? el('p', { style: 'font-size:0.75rem;color:var(--positive)' }, '✓ Zero-based budget!')
-        : el('p', { style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;line-height:1.4' },
+        ? el('p', { className: 'fs-caption text-positive' }, '✓ Zero-based budget!')
+        : el('p', { className: 'fs-caption text-muted mt-1 lh-snug' },
           unallocated > 0
             ? 'Still needs a job — assign to envelopes'
             : isCurrentMonth
@@ -200,20 +201,19 @@ export function renderBudget(container, arg) {
       isCurrentMonth && unallocated < -0.005 && store.canWriteBudget()
         ? el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          style: 'margin-top:0.55rem',
+          className: 'btn btn-sm btn-secondary mt-2',
           onClick: () => openRightSizeToAllocate(month),
         }, 'Preview a shared cut')
         : null,
     ),
     isCurrentMonth
-      ? el('div', { className: 'card' },
+      ? el('div', { className: 'card stat-bonus' },
         el('div', { className: 'card-title' }, 'Bonus available'),
         el('div', {
           className: `card-value ${bonusAvailable > 0.005 ? 'accent' : ''}`,
         }, formatCurrency(bonusAvailable)),
         el('p', {
-          style: 'font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;line-height:1.4',
+          className: 'fs-caption text-muted mt-1 lh-snug',
         },
           bonusGross > 0.005
             ? `${formatCurrency(bonusGross)} bonus in · ${formatCurrency(bonusUsed)} sent to envelopes`
@@ -235,15 +235,14 @@ export function renderBudget(container, arg) {
     const carryCount = (store.getState().categories || [])
       .filter(c => !c.parentId && Math.abs(Number(c.carryOver) || 0) > 0.005).length;
     container.appendChild(el('p', {
-      className: 'tx-form-hint section',
-      style: 'margin-top:0',
+      className: 'tx-form-hint section mt-0',
     }, `Carry-over from last month: ${formatCurrency(carryTotal)} across ${carryCount} envelope${carryCount === 1 ? '' : 's'}. That leftover is already in Remaining — To Allocate is only new income minus this month’s plan. Use Move to shift leftover this month; Allocate changes the ongoing plan.`));
   }
 
   if (isCurrentMonth && unallocated < -0.005) {
     const rightSize = store.planRightSizeToAllocate(month, { includeSinkingFunds: false });
     container.appendChild(el('div', { className: 'banner banner-warning section' },
-      el('div', { className: 'banner-icon' }, '📐'),
+      el('div', { className: 'banner-icon' }, icon('budget', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `To Allocate over by ${formatCurrency(Math.abs(unallocated))}`),
         el('p', {},
@@ -261,8 +260,7 @@ export function renderBudget(container, arg) {
       store.canWriteBudget()
         ? el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-primary',
-          style: 'margin-left:auto',
+          className: 'btn btn-sm btn-primary ml-auto',
           onClick: () => openRightSizeToAllocate(month),
         }, 'Preview cut')
         : null,
@@ -285,14 +283,14 @@ export function renderBudget(container, arg) {
       ? ` Mapped bills/debts (${overspendShare.protectedNames.slice(0, 3).join(', ')}${overspendShare.protectedCount > 3 ? '…' : ''}) stay out of the share.`
       : '';
     container.appendChild(el('div', { className: 'banner banner-warning section overspend-share-banner' },
-      el('div', { className: 'banner-icon' }, '📉'),
+      el('div', { className: 'banner-icon' }, icon('alert', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(overspendShare.overspendTotal)} overspent — same cash as leftover`),
         el('p', {},
           `${names}${extra} went past their envelope. That money already left checking, so leftover on flexible envelopes is on paper until you cover it.${sinkHit}${billHit}`,
         ),
       ),
-      el('div', { className: 'btn-group', style: 'margin-left:auto' },
+      el('div', { className: 'btn-group ml-auto' },
         el('button', {
           type: 'button',
           className: `btn btn-sm ${shareOn ? 'btn-primary' : 'btn-secondary'}`,
@@ -321,7 +319,7 @@ export function renderBudget(container, arg) {
     }).join(', ');
     const extra = activeHolds.length > 2 ? ` +${activeHolds.length - 2}` : '';
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '📌'),
+      el('div', { className: 'banner-icon' }, icon('target', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(holdReserve)} held out of snowball`),
         el('p', {},
@@ -331,8 +329,7 @@ export function renderBudget(container, arg) {
       store.canWriteBudget()
         ? el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          style: 'margin-left:auto',
+          className: 'btn btn-sm btn-secondary ml-auto',
           onClick: () => openUpcomingHolds(),
         }, 'Edit holds')
         : null,
@@ -346,7 +343,7 @@ export function renderBudget(container, arg) {
       ? ` ${formatCurrency(coverIouSummary.sinkingTotal)} of that is sinking funds.`
       : '';
     container.appendChild(el('div', { className: 'banner banner-action section' },
-      el('div', { className: 'banner-icon' }, '↩️'),
+      el('div', { className: 'banner-icon' }, icon('undo', 22)),
       el('div', { className: 'banner-text' },
         el('h3', {}, `${formatCurrency(coverIouSummary.total)} to restore from bonus`),
         el('p', {},
@@ -359,8 +356,7 @@ export function renderBudget(container, arg) {
       store.canWriteBudget() && bonusAvailable > 0.005
         ? el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-primary',
-          style: 'margin-left:auto',
+          className: 'btn btn-sm btn-primary ml-auto',
           onClick: () => openRepayCoverFromBonus(month),
         }, 'Repay from bonus')
         : null,
@@ -496,8 +492,7 @@ export function renderBudget(container, arg) {
     ));
   } else {
     container.appendChild(el('p', {
-      className: 'tx-form-hint section',
-      style: 'margin-top:0',
+      className: 'tx-form-hint section mt-0',
     }, `Viewing ${getMonthLabel(month)} (read-only plan). Late bank posts: open a transaction → edit its date to the purchase month so it hits that month’s envelopes.`));
   }
 
@@ -561,7 +556,7 @@ export function renderBudget(container, arg) {
   container.appendChild(filterBar);
 
   container.appendChild(el('div', { className: 'toolbar section' },
-    el('label', { style: 'font-size:0.85rem;font-weight:600;color:var(--text-muted)' }, 'Sort by'),
+    el('label', { className: 'fs-footnote fw-semi text-muted' }, 'Sort by'),
     sortSelect,
   ));
 
@@ -777,11 +772,12 @@ function overspendShareLine(cat, remaining, opts = {}) {
   return null;
 }
 
-function envelopeMoreMenu(cat) {
+function envelopeMoreMenu(cat, { isFav = false, isCurrentMonth = true, carry = 0 } = {}) {
   const menu = el('details', { className: 'tx-more-menu' });
   const summary = el('summary', {
-    className: 'btn btn-sm btn-secondary tx-more-trigger',
+    className: 'btn btn-sm btn-tertiary tx-more-trigger',
     title: 'More envelope actions',
+    'aria-label': `More actions for ${cat.name}`,
   }, '⋯');
   summary.addEventListener('click', e => e.stopPropagation());
 
@@ -792,10 +788,41 @@ function envelopeMoreMenu(cat) {
     onClick: (e) => {
       e.stopPropagation();
       menu.removeAttribute('open');
+      toggleFavorite(cat.id);
+    },
+  }, isFav ? 'Unpin favorite' : 'Pin to favorites'));
+  // S10: secondary money actions live here instead of 4 stacked footer buttons
+  const menuItem = (label, fn, extra = {}) => el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    ...extra,
+    onClick: (e) => { e.stopPropagation(); menu.removeAttribute('open'); fn(); },
+  }, label);
+  if (isCurrentMonth) {
+    items.appendChild(menuItem('Move money', () => openMoveBetweenEnvelopes({ fromId: cat.id })));
+    items.appendChild(menuItem('Assign bonus', () => openAssignBonusToEnvelope(cat), {
+      title: 'Put unmatched bonus or leftover from other envelopes on this one',
+    }));
+    if (Math.abs(carry) > 0.005) {
+      items.appendChild(menuItem(
+        carry < 0 ? `Clear overspend (${formatCurrency(carry)})` : `Reset carry (${formatCurrency(carry)})`,
+        () => resetEnvelopeCarry(cat),
+        { title: carry < 0
+          ? 'Forgive prior-month overspend — start this month at $0 carry (budget plan unchanged)'
+          : 'Drop leftover carry-over from prior months (budget plan unchanged)' },
+      ));
+    }
+  }
+  if (isCurrentMonth) items.appendChild(el('button', {
+    type: 'button',
+    className: 'tx-more-item',
+    onClick: (e) => {
+      e.stopPropagation();
+      menu.removeAttribute('open');
       editCategory(cat);
     },
   }, 'Edit'));
-  items.appendChild(el('button', {
+  if (isCurrentMonth) items.appendChild(el('button', {
     type: 'button',
     className: 'tx-more-item tx-more-item-danger',
     onClick: (e) => {
@@ -852,9 +879,16 @@ function envelopeCard(cat, focusId = null, opts = {}) {
     className: `envelope-card envelope-${health}${overCap ? ' envelope-over-cap' : ''} envelope-card-clickable${isFocused ? ' envelope-card-focus' : ''}${isFav ? ' envelope-card-fav' : ''}`,
     'data-category-id': cat.id,
     title: isFocused ? 'Focused from Advisor' : 'Click to see transactions for this envelope',
+    tabindex: '0',
+    role: 'group',
+    'aria-label': `${cat.name}: ${formatCurrency(remaining)} remaining of ${formatCurrency(pool)}`,
     onClick: (e) => {
       if (e.target.closest('button, a, input, select, textarea, label, summary')) return;
       openActivity();
+    },
+    onKeydown: (e) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openActivity(); }
     },
   },
     el('div', { className: 'envelope-card-top' },
@@ -862,28 +896,23 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         el('div', { className: 'envelope-title' },
           el('span', { className: 'envelope-icon' }, cat.icon || '✉️'),
           el('span', { className: 'envelope-name' }, cat.name),
+          isFav ? el('span', { className: 'envelope-fav-star', title: 'Favorite', 'aria-label': 'Favorite' }, '★') : null,
           cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
           healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
           overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
-          hasNote ? el('span', { className: 'envelope-badge-mini', title: cat.note }, '📝') : null,
+          hasNote ? el('span', { className: 'envelope-badge-mini', title: cat.note, 'aria-label': 'Has a note' }, icon('note', 14)) : null,
         ),
-        el('div', { className: 'btn-group envelope-card-tools' },
-          el('button', {
-            type: 'button',
-            className: `btn btn-sm btn-secondary${isFav ? ' fav-on' : ''}`,
-            title: isFav ? 'Unpin favorite' : 'Pin favorite',
-            onClick: (e) => { e.stopPropagation(); toggleFavorite(cat.id); },
-          }, isFav ? '★' : '☆'),
-          isCurrentMonth ? envelopeMoreMenu(cat) : null,
+        el('div', { className: 'envelope-card-tools' },
+          envelopeMoreMenu(cat, { isFav, isCurrentMonth, carry }),
         )
       ),
       el('div', { className: 'envelope-stats' },
         el('div', { className: 'envelope-stat' },
-          el('label', {}, 'Budgeted'),
+          el('span', { className: 'envelope-stat__label' }, 'Budgeted'),
           el('span', {}, formatCurrency(budgeted))
         ),
         el('div', { className: 'envelope-stat envelope-stat-spent' },
-          el('label', {}, 'Spent'),
+          el('span', { className: 'envelope-stat__label' }, 'Spent'),
           el('span', {}, formatCurrency(spent)),
           txCount > 0
             ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
@@ -891,14 +920,14 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         ),
         isCurrentMonth || Math.abs(carry) > 0.005
           ? el('div', { className: 'envelope-stat' },
-            el('label', {}, 'Carry-over'),
+            el('span', { className: 'envelope-stat__label' }, 'Carry-over'),
             el('span', {
-              style: carry < -0.005 ? 'color:var(--negative);font-weight:600' : '',
+              className: carry < -0.005 ? 'text-negative fw-semi' : '',
             }, formatCurrency(carry)),
           )
           : el('div', { className: 'envelope-stat' },
-            el('label', {}, 'Month'),
-            el('span', { style: 'font-size:0.8rem' }, getMonthLabel(month)),
+            el('span', { className: 'envelope-stat__label' }, 'Month'),
+            el('span', { className: 'fs-footnote' }, getMonthLabel(month)),
           ),
       ),
       el('div', { className: `envelope-remaining ${isOver ? 'over' : 'ok'}` },
@@ -939,10 +968,12 @@ function envelopeCard(cat, focusId = null, opts = {}) {
           style: `width:${usedPct}%`,
         }),
       ),
-      el('div', { className: 'envelope-progress-meta' },
-        pool > 0 || spent > 0
-          ? `${Math.round(usedPct)}% used`
-          : 'No budget set',
+      el('div', { className: `envelope-progress-meta${isOver ? ' is-over' : ''}` },
+        isOver
+          ? `Over by ${formatCurrency(Math.abs(remaining))}`
+          : pool > 0 || spent > 0
+            ? `${Math.round(usedPct)}% used`
+            : 'No budget set',
       ),
       el('div', { className: 'envelope-card-mid' },
         isCurrentMonth ? goalBlock(cat) : null,
@@ -951,45 +982,19 @@ function envelopeCard(cat, focusId = null, opts = {}) {
     ),
     el('div', { className: 'envelope-card-footer' },
       el('button', {
-        className: 'btn btn-sm btn-secondary', style: 'width:100%',
+        type: 'button',
+        className: 'btn btn-sm btn-tertiary envelope-tx-link',
         onClick: (e) => { e.stopPropagation(); openActivity(); },
-      }, txCount ? `View ${txCount} transaction${txCount === 1 ? '' : 's'}` : 'View transactions'),
+      }, txCount ? `${txCount} transaction${txCount === 1 ? '' : 's'}` : 'Activity'),
       isCurrentMonth
         ? el('button', {
-          className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
-          onClick: (e) => { e.stopPropagation(); openMoveBetweenEnvelopes({ fromId: cat.id }); },
-        }, 'Move $')
-        : null,
-      isCurrentMonth && Math.abs(carry) > 0.005
-        ? el('button', {
-          className: 'btn btn-sm btn-secondary',
-          style: 'width:100%;margin-top:0.5rem',
-          title: carry < 0
-            ? 'Forgive prior-month overspend — start this month at $0 carry (budget plan unchanged)'
-            : 'Drop leftover carry-over from prior months (budget plan unchanged)',
-          onClick: (e) => {
-            e.stopPropagation();
-            resetEnvelopeCarry(cat);
-          },
-        }, carry < 0
-          ? `Clear overspend (${formatCurrency(carry)})`
-          : `Reset carry (${formatCurrency(carry)})`)
-        : null,
-      isCurrentMonth
-        ? el('button', {
-          className: 'btn btn-sm btn-secondary', style: 'width:100%;margin-top:0.5rem',
-          title: 'Put unmatched bonus or leftover from other envelopes on this one',
-          onClick: (e) => { e.stopPropagation(); openAssignBonusToEnvelope(cat); },
-        }, 'Assign bonus')
-        : null,
-      isCurrentMonth
-        ? el('button', {
-          className: 'btn btn-sm btn-primary', style: 'width:100%;margin-top:0.5rem',
+          type: 'button',
+          className: 'btn btn-sm btn-primary envelope-allocate',
+          'aria-label': `Allocate to ${cat.name}`,
           onClick: (e) => { e.stopPropagation(); fundEnvelope(cat); },
         }, 'Allocate')
         : el('p', {
-          className: 'tx-form-hint',
-          style: 'margin:0.5rem 0 0;font-size:0.75rem;line-height:1.35',
+          className: 'tx-form-hint envelope-footer-wide fs-caption m-0',
         }, 'Past month — edit a transaction’s date to move a late post here.'),
       cat.note && String(cat.note).trim()
         ? el('div', { className: 'envelope-note' },
@@ -1169,7 +1174,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
       ta.value = noteText;
       noteBox.appendChild(el('span', { className: 'envelope-note-label' }, 'Envelope note'));
       noteBox.appendChild(ta);
-      noteBox.appendChild(el('div', { className: 'btn-group', style: 'margin-top:0.5rem;flex-wrap:wrap;gap:0.35rem' },
+      noteBox.appendChild(el('div', { className: 'btn-group mt-2 flex-wrap gap-1' },
         el('button', {
           type: 'button',
           className: 'btn btn-sm btn-primary',
@@ -1207,8 +1212,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
       noteBox.appendChild(el('p', { className: 'envelope-note-text' }, noteText));
       noteBox.appendChild(el('button', {
         type: 'button',
-        className: 'btn btn-sm btn-secondary',
-        style: 'margin-top:0.45rem',
+        className: 'btn btn-sm btn-secondary mt-2',
         onClick: () => {
           confirmDialog(
             'Clear envelope note?',
@@ -1220,13 +1224,11 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
     } else {
       noteBox.appendChild(el('span', { className: 'envelope-note-label' }, 'Envelope note'));
       noteBox.appendChild(el('p', {
-        className: 'envelope-note-text',
-        style: 'color:var(--text-muted);font-style:italic',
+        className: 'envelope-note-text text-muted italic',
       }, 'No note yet — for gift money context, kid reminders, etc.'));
       noteBox.appendChild(el('button', {
         type: 'button',
-        className: 'btn btn-sm btn-primary',
-        style: 'margin-top:0.45rem',
+        className: 'btn btn-sm btn-primary mt-2',
         onClick: () => { editingNote = true; paint(); },
       }, '+ Add note'));
     }
@@ -1235,8 +1237,7 @@ export function openEnvelopeActivity(cat, { range: initialRange = 'month', month
     bodyHost.appendChild(noteBox);
     if (isPastMonth && range === 'month') {
       bodyHost.appendChild(el('p', {
-        className: 'tx-form-hint',
-        style: 'margin:0 0 0.65rem;line-height:1.4',
+        className: 'tx-form-hint mx-0 mt-0 mb-3 lh-snug',
       }, `Showing ${getMonthLabel(activityMonth)}. A purchase that posted this month but belongs here: Edit → set the date to the purchase day so it leaves the new month and hits this envelope.`));
     }
     bodyHost.appendChild(chips);
@@ -1376,7 +1377,7 @@ function clearAllNegativeCarry() {
  * Month-only envelope reallocation (rob Peter to pay Paul).
  * Does not change monthlyBudget plan or bank checking.
  */
-function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
+export function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
   const month = getCurrentMonth();
   const cats = store.getState().categories.filter(c => !c.parentId);
   if (cats.length < 2) {
@@ -1388,7 +1389,7 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     id: 'move-from-env',
     value: fromId || '',
     placeholder: 'From envelope…',
-    emptyLabel: '— From —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -1396,7 +1397,7 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     id: 'move-to-env',
     value: toId || '',
     placeholder: 'To envelope…',
-    emptyLabel: '— To —',
+    emptyLabel: 'Choose envelope',
     showRemaining: true,
     allowEmpty: true,
   });
@@ -1410,7 +1411,7 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     type: 'text',
     placeholder: 'Optional note (e.g. cover groceries overage)',
   });
-  const hint = el('p', { className: 'tx-form-hint', style: 'margin-top:0.5rem;margin-bottom:0' }, '');
+  const hint = el('p', { className: 'tx-form-hint mt-2 mb-0' }, '');
   const historyHost = el('div', { className: 'envelope-move-history' });
 
   function fromRemaining() {
@@ -1445,14 +1446,12 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
     const moves = store.getEnvelopeMoves(month);
     if (!moves.length) {
       historyHost.appendChild(el('p', {
-        className: 'tx-form-hint',
-        style: 'margin:0.75rem 0 0',
+        className: 'tx-form-hint mx-0 mt-3 mb-0',
       }, 'No moves yet this month.'));
       return;
     }
     historyHost.appendChild(el('div', {
-      className: 'section-title',
-      style: 'margin:1rem 0 0.5rem;font-size:0.85rem',
+      className: 'section-title mx-0 mt-4 mb-2 fs-footnote',
     }, 'This month’s moves'));
     const list = el('div', { className: 'envelope-move-list' });
     [...moves].reverse().forEach(m => {
@@ -1462,7 +1461,7 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
         el('div', { className: 'envelope-move-row-main' },
           el('strong', {}, formatCurrency(m.amount)),
           el('span', {}, ` ${from?.name || '?'} → ${to?.name || '?'}`),
-          m.note ? el('div', { className: 'tx-form-hint', style: 'margin:0.15rem 0 0' }, m.note) : null,
+          m.note ? el('div', { className: 'tx-form-hint mx-0 mt-1 mb-0' }, m.note) : null,
         ),
         el('button', {
           type: 'button',
@@ -1488,7 +1487,7 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
   const modal = showModal({
     title: 'Move between envelopes',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Shift leftover room for ',
         el('strong', {}, getMonthLabel(month)),
         ' only — like covering an overspent envelope with Insurance leftover. ',
@@ -1503,12 +1502,12 @@ function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
         toPicker.element,
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'Amount'),
+        labelFor('Amount', amountIn),
         amountIn,
         hint,
       ),
       el('div', { className: 'form-group' },
-        el('label', {}, 'Note (optional)'),
+        labelFor('Note (optional)', noteIn),
         noteIn,
       ),
       historyHost,
@@ -1584,12 +1583,12 @@ export function openUpcomingHolds() {
   const picker = createEnvelopePicker({
     value: medical?.id || '',
     placeholder: 'Envelope (optional)',
-    emptyLabel: '— Cash hold, no envelope —',
+    emptyLabel: 'No envelope (cash hold)',
     showRemaining: true,
     allowEmpty: true,
   });
 
-  const list = el('div', { className: 'envelope-move-list', style: 'margin-bottom:1rem' });
+  const list = el('div', { className: 'envelope-move-list mb-4' });
   function paintList() {
     list.innerHTML = '';
     const holds = store.getUpcomingHolds();
@@ -1641,15 +1640,15 @@ export function openUpcomingHolds() {
   const modal = showModal({
     title: 'Upcoming hold',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         'Known future spend (next month’s medical, travel, etc.). Held out of snowball and safe-to-send. Does not change To Allocate or checking. Drops when you spend it on that envelope or dismiss it.',
       ),
       el('div', { className: 'section-title' }, 'Active'),
       list,
       el('div', { className: 'section-title' }, 'Add one'),
-      el('div', { className: 'form-group' }, el('label', {}, 'What'), descIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'When'), dateIn),
-      el('div', { className: 'form-group' }, el('label', {}, 'Amount'), amountIn),
+      el('div', { className: 'form-group' }, labelFor('What', descIn), descIn),
+      el('div', { className: 'form-group' }, labelFor('When', dateIn), dateIn),
+      el('div', { className: 'form-group' }, labelFor('Amount', amountIn), amountIn),
       el('div', { className: 'form-group' }, el('label', {}, 'Envelope'), picker.element),
     ),
     footer: [
@@ -1696,13 +1695,13 @@ function openRightSizeToAllocate(month = getCurrentMonth()) {
     const plan = store.planRightSizeToAllocate(month, { includeSinkingFunds: includeSinking });
     preview.innerHTML = '';
     const pct = plan.haircutPct > 0 ? Math.round(plan.haircutPct * 100) : 0;
-    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.75rem' },
+    preview.appendChild(el('p', { className: 'tx-form-hint mx-0 mt-0 mb-3' },
       `Lowers monthly budgets (the ongoing plan), not just this month’s leftover. `
       + `Bills, debts, and Work travel are never cut. Checking does not change. `
       + (includeSinking ? 'Includes sinking funds.' : 'Sinking funds are left alone.'),
     ));
     if (!plan.cuts.length) {
-      preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+      preview.appendChild(el('p', { className: 'tx-form-hint m-0' },
         plan.need < 0.005
           ? 'To Allocate is already at or above $0.'
           : 'No unused leftover on flexible envelopes to cut. Include sinking, or lower budgets by hand.',
@@ -1722,20 +1721,19 @@ function openRightSizeToAllocate(month = getCurrentMonth()) {
       ));
     });
     preview.appendChild(list);
-    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0.75rem 0 0' },
+    preview.appendChild(el('p', { className: 'tx-form-hint mx-0 mt-3 mb-0' },
       `Cuts ${formatCurrency(plan.total)}`
       + (pct ? ` (~${pct}% of unused leftover in the pool)` : '')
       + `. To Allocate ${formatCurrency(plan.toAllocateBefore)} → ${formatCurrency(plan.toAllocateAfter)}.`,
     ));
     if (plan.shortfall > 0.005) {
       preview.appendChild(el('p', {
-        className: 'tx-form-hint',
-        style: 'margin:0.5rem 0 0;color:var(--negative)',
+        className: 'tx-form-hint mx-0 mt-2 mb-0 text-negative',
       }, `${formatCurrency(plan.shortfall)} still over — leftover on flexible envelopes isn’t enough.`));
     }
   }
 
-  const sinkToggle = el('label', { className: 'form-option', style: 'margin-top:0.5rem' },
+  const sinkToggle = el('label', { className: 'form-option mt-2' },
     el('input', {
       type: 'checkbox',
       checked: includeSinking ? true : undefined,
@@ -1752,7 +1750,7 @@ function openRightSizeToAllocate(month = getCurrentMonth()) {
   const modal = showModal({
     title: 'Trim To Allocate',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         `The plan is ${formatCurrency(Math.abs(store.getToAllocate()))} bigger than this month’s income. `
         + 'Take a percentage of unused leftover on flexible envelopes (bigger leftover pays more, capped at that envelope’s monthly budget so it doesn’t go red).',
       ),
@@ -1799,14 +1797,14 @@ function openCoverOverspend(month = getCurrentMonth()) {
   function paint() {
     const plan = store.planCoverOverspend(month, { includeSinkingFunds: includeSinking });
     preview.innerHTML = '';
-    preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.75rem' },
+    preview.appendChild(el('p', { className: 'tx-form-hint mx-0 mt-0 mb-3' },
       `Moves ${formatCurrency(plan.total)} this month only — next month’s budget plan is unchanged. `
       + (includeSinking
         ? 'Includes sinking funds.'
         : 'Sinking funds (Christmas, vacation, etc.) are left alone.'),
     ));
     if (!plan.moves.length) {
-      preview.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+      preview.appendChild(el('p', { className: 'tx-form-hint m-0' },
         plan.overspendTotal > 0.005
           ? 'Not enough leftover in the selected envelopes to cover this. Turn on sinking funds, or Move leftover by hand.'
           : 'Nothing is overspent this month.',
@@ -1833,13 +1831,12 @@ function openCoverOverspend(month = getCurrentMonth()) {
     preview.appendChild(list);
     if (plan.shortfall > 0.005) {
       preview.appendChild(el('p', {
-        className: 'tx-form-hint',
-        style: 'margin:0.75rem 0 0;color:var(--negative)',
+        className: 'tx-form-hint mx-0 mt-3 mb-0 text-negative',
       }, `${formatCurrency(plan.shortfall)} still uncovered — leftover isn’t enough.`));
     }
   }
 
-  const sinkToggle = el('label', { className: 'form-option', style: 'margin-top:0.5rem' },
+  const sinkToggle = el('label', { className: 'form-option mt-2' },
     el('input', {
       type: 'checkbox',
       checked: includeSinking ? true : undefined,
@@ -1857,7 +1854,7 @@ function openCoverOverspend(month = getCurrentMonth()) {
   const modal = showModal({
     title: 'Cover overspend',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         `${formatCurrency(share.overspendTotal)} overspent this month. Take a percentage of leftover on flexible envelopes (bigger leftover pays more) and move it onto the overspent ones. Envelopes mapped to a bill amount or an active debt are never skimmed. Checking does not change. We’ll remember who chipped in and offer to restore them from bonus later.`,
       ),
       sinkToggle,
@@ -1920,7 +1917,7 @@ function openRepayCoverFromBonus(month = getCurrentMonth()) {
   const modal = showModal({
     title: 'Repay cover from bonus',
     body: el('div', {},
-      el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+      el('p', { className: 'tx-form-hint mb-4' },
         `Put ${formatCurrency(plan.total)} of free bonus back onto envelopes that covered overspend. `
         + `Sinking funds first. Does not undo the original cover — those overspent envelopes stay covered. `
         + (plan.leftoverIou > 0.005
@@ -1975,7 +1972,7 @@ function openAssignBonusToEnvelope(cat, { onDone } = {}) {
   function paintHistory() {
     history.innerHTML = '';
     if (!prior.length) {
-      history.appendChild(el('p', { className: 'tx-form-hint', style: 'margin:0' },
+      history.appendChild(el('p', { className: 'tx-form-hint m-0' },
         'Nothing from the bonus pot on this envelope yet.'));
       return;
     }
@@ -2006,10 +2003,10 @@ function openAssignBonusToEnvelope(cat, { onDone } = {}) {
   modal = showModal({
     title: 'Assign bonus → ' + cat.name,
     body: el('div', {},
-      el('div', { className: 'card', style: 'margin-bottom:1rem' },
+      el('div', { className: 'card mb-4' },
         el('div', { className: 'card-title' }, 'Bonus available'),
         el('div', { className: 'card-value accent' }, formatCurrency(available)),
-        el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0;line-height:1.4' },
+        el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0 lh-snug' },
           formatCurrency(gross) + ' bonus in this month · '
           + formatCurrency(used) + ' already sent to envelopes'
           + (here > 0.005 ? ' · ' + formatCurrency(here) + ' already on ' + cat.name : '')
@@ -2017,8 +2014,8 @@ function openAssignBonusToEnvelope(cat, { onDone } = {}) {
         ),
       ),
       deposits.length
-        ? el('div', { style: 'margin-bottom:1rem' },
-          el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.4rem' },
+        ? el('div', { className: 'mb-4' },
+          el('p', { className: 'tx-form-hint mx-0 mt-0 mb-2' },
             'Feeding the pot (not assigned to a specific envelope):'),
           ...deposits.slice(0, 8).map(t => el('div', { className: 'assign-leftover-row assign-leftover-row-static' },
             el('span', { className: 'assign-leftover-row-main' },
@@ -2028,11 +2025,11 @@ function openAssignBonusToEnvelope(cat, { onDone } = {}) {
             el('span', { className: 'assign-leftover-row-amt' }, formatCurrency(t.amount)),
           )),
           deposits.length > 8
-            ? el('p', { className: 'tx-form-hint', style: 'margin:0.35rem 0 0' },
+            ? el('p', { className: 'tx-form-hint mx-0 mt-1 mb-0' },
               '+' + (deposits.length - 8) + ' more')
             : null,
         )
-        : el('p', { className: 'tx-form-hint', style: 'margin-bottom:1rem' },
+        : el('p', { className: 'tx-form-hint mb-4' },
           'No bonus deposits this month yet. Imported refunds and extra income land here automatically.',
         ),
       el('div', { className: 'form-group' },
@@ -2040,16 +2037,15 @@ function openAssignBonusToEnvelope(cat, { onDone } = {}) {
         amountIn,
         el('button', {
           type: 'button',
-          className: 'btn btn-sm btn-secondary',
-          style: 'margin-top:0.45rem',
+          className: 'btn btn-sm btn-secondary mt-2',
           disabled: available < 0.005 ? true : undefined,
           onClick: () => { amountIn.value = String(available); },
         }, 'Use all available'),
       ),
-      el('p', { className: 'tx-form-hint', style: 'margin:0 0 0.5rem' },
+      el('p', { className: 'tx-form-hint mx-0 mt-0 mb-2' },
         "This month only. Remaining on this envelope goes up. The bonus pot and To Allocate go down. Next month's plan is unchanged.",
       ),
-      el('div', { className: 'section-title', style: 'margin-top:0.5rem' }, 'Already on this envelope'),
+      el('div', { className: 'section-title mt-2' }, 'Already on this envelope'),
       history,
     ),
     footer: [
@@ -2098,21 +2094,20 @@ function fundEnvelope(cat) {
     title: `Allocate: ${cat.name}`,
     body: el('div', {},
       el('p', {
-        className: 'tx-form-hint',
-        style: 'margin-bottom:1rem',
+        className: 'tx-form-hint mb-4',
       },
         'This gives dollars a job in this envelope. Money stays in your bank checking — only the budget assignment changes.',
       ),
       el('p', {
-        style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+        className: 'fs-footnote text-muted mb-3',
       }, `To Allocate right now: ${formatCurrency(toAllocate)}`),
       goal > 0
         ? el('p', {
-          style: 'font-size:0.85rem;color:var(--text-muted);margin-bottom:0.75rem',
+          className: 'fs-footnote text-muted mb-3',
         }, `${cat.isSinkingFund ? 'Goal' : 'Soft cap'}: ${formatCurrency(goal)} · currently budgeted ${formatCurrency(budgeted)}`)
         : null,
       el('div', { className: 'form-group' },
-        el('label', {}, 'Amount to assign'),
+        labelFor('Amount to assign', input),
         input,
       ),
     ),
@@ -2173,7 +2168,7 @@ function goalField(isSinking, value = 0) {
   const row = el('div', { className: 'form-group' },
     el('label', {}, isSinking ? 'Savings goal (optional)' : 'Soft cap (optional)'),
     input,
-    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+    el('p', { className: 'tx-form-hint mt-1 mb-0' },
       isSinking
         ? 'Target to save toward (e.g. Christmas $800). Soft warning if you assign more than the goal.'
         : 'Optional max for this envelope (e.g. $400 on Eating Out). Leave blank for no cap. Soft warning only.',
@@ -2199,9 +2194,9 @@ function noteField(value = '') {
   // textarea value via attribute may not stick in all browsers through el()
   input.value = value || '';
   const row = el('div', { className: 'form-group' },
-    el('label', {}, 'Note (optional)'),
+    labelFor('Note (optional)', input),
     input,
-    el('p', { className: 'tx-form-hint', style: 'margin-top:0.35rem;margin-bottom:0' },
+    el('p', { className: 'tx-form-hint mt-1 mb-0' },
       'Shows on the envelope card and activity — gift money, kid context, reminders for your spouse.',
     ),
   );
@@ -2210,7 +2205,7 @@ function noteField(value = '') {
 
 function addCategory(isSinking) {
   const nameIn = el('input', { type: 'text', placeholder: 'Category name' });
-  const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: 0 });
+  const budgetIn = el('input', { type: 'number', step: '0.01', min: 0, value: '', placeholder: '0.00', inputMode: 'decimal' });
   const iconIn = el('input', { type: 'text', placeholder: 'Icon (emoji)', value: isSinking ? '🎯' : '📁' });
   const { row: sinkingRow, input: sinkingIn } = sinkingFundToggle(isSinking);
   const { row: goalRow, input: goalIn } = goalField(isSinking, 0);
@@ -2230,20 +2225,24 @@ function addCategory(isSinking) {
   const modal = showModal({
     title: 'Add Envelope',
     body: el('div', {},
-      el('div', { className: 'form-group' }, el('label', {}, 'Name'), nameIn),
+      el('div', { className: 'form-group' }, labelFor('Name', nameIn), nameIn),
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Icon'), iconIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
+        el('div', { className: 'form-group' }, labelFor('Icon', iconIn), iconIn),
+        el('div', { className: 'form-group' }, labelFor('Monthly Budget', budgetIn), budgetIn),
       ),
       goalRow,
       noteRow,
       sinkingRow,
     ),
-    footer: el('button', {
+    footer: [el('button', {
+      type: 'button',
+      className: 'btn btn-secondary',
+      onClick: () => modal.close(),
+    }, 'Cancel'), el('button', {
       type: 'button',
       className: 'btn btn-primary',
       onClick: () => {
-        if (!nameIn.value.trim()) return;
+        if (!nameIn.value.trim()) { showFieldError(nameIn, 'Enter an envelope name'); return; }
         store.update(s => {
           s.categories.push({
             id: crypto.randomUUID(),
@@ -2258,9 +2257,9 @@ function addCategory(isSinking) {
           });
         });
         modal.close();
-        showToast('Envelope added!');
+        showToast('Envelope added');
       },
-    }, 'Add'),
+    }, 'Add envelope')],
   });
 }
 
@@ -2287,10 +2286,10 @@ function editCategory(cat) {
   const modal = showModal({
     title: 'Edit Envelope',
     body: el('div', {},
-      el('div', { className: 'form-group' }, el('label', {}, 'Name'), nameIn),
+      el('div', { className: 'form-group' }, labelFor('Name', nameIn), nameIn),
       el('div', { className: 'input-row' },
-        el('div', { className: 'form-group' }, el('label', {}, 'Icon'), iconIn),
-        el('div', { className: 'form-group' }, el('label', {}, 'Monthly Budget'), budgetIn),
+        el('div', { className: 'form-group' }, labelFor('Icon', iconIn), iconIn),
+        el('div', { className: 'form-group' }, labelFor('Monthly Budget', budgetIn), budgetIn),
       ),
       goalRow,
       noteRow,

@@ -1,3 +1,4 @@
+import { addPasswordToggle } from '../utils.js';
 import { signIn, signUp, joinHousehold } from '../cloud-sync.js';
 import { store } from '../store.js';
 
@@ -10,26 +11,29 @@ export function showCloudAuthScreen(onComplete) {
   card.style.maxWidth = '420px';
 
   card.innerHTML = `
-    <h2>☁️ Cloud Sync</h2>
-    <p style="color:var(--text-muted);font-size:0.9rem;line-height:1.5">
-      Main account: sign in as usual. Notes-only (spouse): create her own email login, then enter the household code from Settings.
-    </p>
+    <img src="icons/icon-192.png" alt="" width="64" height="64" class="auth-app-icon" />
+    <h2>Sign in to FigPig</h2>
+    <p class="auth-sub">Your budget syncs across your devices.</p>
     <div class="form-group">
-      <label>Email</label>
-      <input type="email" id="cloud-email" placeholder="you@example.com" autocomplete="username" />
+      <label for="cloud-email">Email</label>
+      <input type="email" id="cloud-email" placeholder="you@example.com" autocomplete="username" inputmode="email" />
     </div>
     <div class="form-group">
-      <label>Password</label>
-      <input type="password" id="cloud-pw" placeholder="Password" autocomplete="current-password" />
+      <label for="cloud-pw">Password</label>
+      <input type="password" id="cloud-pw" autocomplete="current-password" />
     </div>
-    <div class="form-group">
-      <label>Household code (notes-only, optional)</label>
-      <input type="text" id="cloud-join" placeholder="ABC123" autocomplete="off" style="text-transform:uppercase;letter-spacing:0.08em" />
-    </div>
-    <p id="cloud-auth-error" style="color:var(--negative);font-size:0.8rem;display:none;margin-bottom:0.75rem"></p>
-    <button class="btn btn-primary" style="width:100%;margin-bottom:0.5rem" id="cloud-signin">Sign In</button>
-    <button class="btn btn-secondary" style="width:100%;margin-bottom:0.5rem" id="cloud-signup">Create Account</button>
-    <button class="btn btn-secondary btn-sm" style="width:100%" id="cloud-offline">Continue offline (this device only)</button>
+    <details class="auth-join">
+      <summary>Joining a household? Enter code</summary>
+      <div class="form-group">
+        <label for="cloud-join">Household code</label>
+        <input type="text" id="cloud-join" placeholder="ABC123" autocomplete="off" autocapitalize="characters" class="input-code" />
+        <p class="hint">Have a household code? Enter it to join with notes-only access.</p>
+      </div>
+    </details>
+    <p id="cloud-auth-error" class="form-error" role="alert" style="display:none"></p>
+    <button class="btn btn-primary btn-lg btn-block" id="cloud-signin">Sign in</button>
+    <button class="btn btn-secondary btn-lg btn-block" id="cloud-signup">Create account</button>
+    <button class="btn btn-tertiary btn-block" id="cloud-offline">Continue offline (this device only)</button>
   `;
 
   overlay.appendChild(card);
@@ -39,6 +43,7 @@ export function showCloudAuthScreen(onComplete) {
   const pwIn = card.querySelector('#cloud-pw');
   const joinIn = card.querySelector('#cloud-join');
   const errEl = card.querySelector('#cloud-auth-error');
+  addPasswordToggle(pwIn);
 
   function showError(msg) {
     errEl.textContent = msg;
