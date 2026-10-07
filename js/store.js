@@ -290,6 +290,9 @@ function normalizeState(state) {
   if (!state.monthBudgetSnapshots || typeof state.monthBudgetSnapshots !== 'object') {
     state.monthBudgetSnapshots = {};
   }
+  if (!state.monthOpeningCarrySnapshots || typeof state.monthOpeningCarrySnapshots !== 'object') {
+    state.monthOpeningCarrySnapshots = {};
+  }
   if (!state.monthEnvelopeMoves || typeof state.monthEnvelopeMoves !== 'object') {
     state.monthEnvelopeMoves = {};
   }
@@ -791,11 +794,12 @@ class Store {
         this.saveMonthBudgetSnapshot(cursor, false);
         this.state.categories.forEach(cat => {
           // remaining = budget + opening carry + that month's envelope moves − spent.
-          // Must pass includeCarry: cursor is already a past month, and remaining
-          // otherwise zeros carry (that's correct for *viewing* history, wrong here).
-          // Bake the whole remaining into carry for the next month (moves are not
-          // re-applied later — getEnvelopeMoveDelta is month-scoped). Do NOT add
-          // remaining on top of old carry again.
+          // Must pass includeCarry: at this moment cat.carryOver is still this month's
+          // opening carry (snapshot just saved it). Bake the whole remaining into
+          // carry for the next month (moves are not re-applied later —
+          // getEnvelopeMoveDelta is month-scoped). Do NOT add remaining on top of
+          // old carry again. History views now use opening carry from snapshots /
+          // derivation — same number rollover uses here.
           const remaining = this.getCategoryRemaining(cat.id, cursor, { includeCarry: true });
           cat.carryOver = Math.round(remaining * 100) / 100;
         });
@@ -1483,27 +1487,81 @@ class Store {
     return Math.round((base + extra) * 100) / 100;
   }
 
+  /**
+   * Month activity without opening carry: budget + moves + bonus − spent.
+   * Used to derive historical opening carry from the next month's known end remaining.
+   */
+  getCategoryActivityWithoutCarry(categoryId, month = getCurrentMonth()) {
+    const budgeted = this.getCategoryBudgeted(categoryId, month);
+    const move = this.getEnvelopeMoveDelta(categoryId, month);
+    const bonus = this.getBonusAllocationDelta(categoryId, month);
+    const spent = this.getCategorySpent(categoryId, month);
+    return Math.round((budgeted + move + bonus - spent) * 100) / 100;
+  }
+
+  /**
+   * Opening carry that applied at the start of `month` for an envelope.
+   * Current month: live cat.carryOver.
+   * Past months: snapshot taken at rollover/close, else derive by walking back from
+   * live carryOver (end remaining of current−1 === live carry after rollover).
+   * Never applies today's live carry to every past month.
+   */
+  getOpeningCarryForMonth(categoryId, month = getCurrentMonth()) {
+    const cat = this.state.categories.find(c => c.id === categoryId);
+    if (!cat) return 0;
+    const current = getCurrentMonth();
+    if (month === current) return Math.round((Number(cat.carryOver) || 0) * 100) / 100;
+
+    const stored = this.state.monthOpeningCarrySnapshots?.[month]?.[categoryId];
+    if (stored != null && Number.isFinite(Number(stored))) {
+      return Math.round((Number(stored) || 0) * 100) / 100;
+    }
+
+    // Derive: live carryOver === end remaining of (current − 1).
+    // Walk back month-by-month: opening_m = endRem_m − activityWithoutCarry_m,
+    // and endRem_{m−1} === opening_m.
+    let endRemaining = Math.round((Number(cat.carryOver) || 0) * 100) / 100;
+    let m = getPreviousMonth(current);
+    let guard = 0;
+    while (m && m > month && guard < 36) {
+      const without = this.getCategoryActivityWithoutCarry(categoryId, m);
+      const opening = Math.round((endRemaining - without) * 100) / 100;
+      endRemaining = opening;
+      m = getPreviousMonth(m);
+      guard++;
+    }
+    if (!m || m !== month) return 0;
+    const without = this.getCategoryActivityWithoutCarry(categoryId, month);
+    return Math.round((endRemaining - without) * 100) / 100;
+  }
+
   getCategoryRemaining(categoryId, month = getCurrentMonth(), opts = {}) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
     const budgeted = this.getCategoryBudgeted(categoryId, month);
-    // Carry-over only applies to the live month when *viewing* history.
-    // Rollover must pass includeCarry so stacked leftovers survive the flip.
+    // True envelope available = budget + opening carry + moves + bonus − spent.
+    // Current month (and rollover includeCarry): live cat.carryOver is opening.
+    // Past months: per-month opening from snapshot or derivation — not zero, and
+    // not today's live carry applied blindly to every history month.
     const isCurrent = month === getCurrentMonth();
-    const carry = (opts.includeCarry || isCurrent) ? (Number(cat.carryOver) || 0) : 0;
+    const carry = (opts.includeCarry || isCurrent)
+      ? (Number(cat.carryOver) || 0)
+      : this.getOpeningCarryForMonth(categoryId, month);
     const move = this.getEnvelopeMoveDelta(categoryId, month);
     const bonus = this.getBonusAllocationDelta(categoryId, month);
     const spent = this.getCategorySpent(categoryId, month);
     return Math.round((budgeted + carry + move + bonus - spent) * 100) / 100;
   }
 
-  /** Available pool for progress bars (budget + carry + month moves). */
+  /** Available pool for progress bars (budget + opening carry + month moves + bonus). */
   getCategoryPool(categoryId, month = getCurrentMonth()) {
     const cat = this.state.categories.find(c => c.id === categoryId);
     if (!cat) return 0;
     const budgeted = this.getCategoryBudgeted(categoryId, month);
     const isCurrent = month === getCurrentMonth();
-    const carry = isCurrent ? (Number(cat.carryOver) || 0) : 0;
+    const carry = isCurrent
+      ? (Number(cat.carryOver) || 0)
+      : this.getOpeningCarryForMonth(categoryId, month);
     const move = this.getEnvelopeMoveDelta(categoryId, month);
     const bonus = this.getBonusAllocationDelta(categoryId, month);
     return Math.round((budgeted + carry + move + bonus) * 100) / 100;
@@ -2903,10 +2961,17 @@ class Store {
 
   saveMonthBudgetSnapshot(month = getCurrentMonth(), persist = true) {
     const snapshot = {};
+    const openingCarry = {};
     this.state.categories.forEach(cat => {
       snapshot[cat.id] = Number(cat.monthlyBudget) || 0;
+      // At rollover/close time, cat.carryOver is still this month's opening carry.
+      openingCarry[cat.id] = Math.round((Number(cat.carryOver) || 0) * 100) / 100;
     });
     this.state.monthBudgetSnapshots[month] = snapshot;
+    if (!this.state.monthOpeningCarrySnapshots || typeof this.state.monthOpeningCarrySnapshots !== 'object') {
+      this.state.monthOpeningCarrySnapshots = {};
+    }
+    this.state.monthOpeningCarrySnapshots[month] = openingCarry;
     if (persist) this.saveSilently();
   }
 
@@ -4569,8 +4634,16 @@ class Store {
       s.babyStep = s.babyStep || 1;
       s.lastMonthProcessed = getCurrentMonth();
       const snap = {};
-      s.categories.forEach(cat => { snap[cat.id] = Number(cat.monthlyBudget) || 0; });
+      const opening = {};
+      s.categories.forEach(cat => {
+        snap[cat.id] = Number(cat.monthlyBudget) || 0;
+        opening[cat.id] = Math.round((Number(cat.carryOver) || 0) * 100) / 100;
+      });
       s.monthBudgetSnapshots[getCurrentMonth()] = snap;
+      if (!s.monthOpeningCarrySnapshots || typeof s.monthOpeningCarrySnapshots !== 'object') {
+        s.monthOpeningCarrySnapshots = {};
+      }
+      s.monthOpeningCarrySnapshots[getCurrentMonth()] = opening;
     });
   }
 }

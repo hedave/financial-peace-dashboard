@@ -828,7 +828,8 @@ function envelopeCard(cat, focusId = null, opts = {}) {
   const spent = store.getCategorySpent(cat.id, month);
   const remaining = store.getCategoryRemaining(cat.id, month);
   const budgeted = store.getCategoryBudgeted(cat.id, month);
-  const carry = isCurrentMonth ? (Number(cat.carryOver) || 0) : 0;
+  // Opening carry for the viewed month (live for current; snapshot/derived for past).
+  const carry = store.getOpeningCarryForMonth(cat.id, month);
   const moveDelta = store.getEnvelopeMoveDelta(cat.id, month);
   const health = store.getEnvelopeHealth(cat.id, month);
   const isOver = remaining < 0 && health === 'over';
@@ -888,7 +889,7 @@ function envelopeCard(cat, focusId = null, opts = {}) {
             ? el('span', { className: 'envelope-tx-hint' }, `${txCount} tx`)
             : null,
         ),
-        isCurrentMonth
+        isCurrentMonth || Math.abs(carry) > 0.005
           ? el('div', { className: 'envelope-stat' },
             el('label', {}, 'Carry-over'),
             el('span', {
@@ -904,6 +905,12 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         el('span', {}, 'Remaining'),
         el('span', { className: 'amount' }, formatCurrency(remaining))
       ),
+      Math.abs(carry) > 0.005
+        ? el('div', {
+          className: 'envelope-move-delta',
+          title: 'Remaining includes opening carry from prior months',
+        }, `includes ${formatCurrency(carry)} carry`)
+        : null,
       overspendShareLine(cat, remaining, opts),
       coverIouLine(cat),
       Math.abs(moveDelta) > 0.005
