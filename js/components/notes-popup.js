@@ -20,11 +20,12 @@ export function showNotesPopup() {
   function paint() {
     const b = store.getNoteBoards().find(x => x.id === board.id) || store.getNoteBoards()[0];
     list.innerHTML = '';
-    if (!b?.stickies?.length) {
+    const live = (b?.stickies || []).filter(n => n && n.archived !== true);
+    if (!live.length) {
       list.appendChild(el('p', { className: 'tx-form-hint' }, 'No stickies yet — add one below.'));
       return;
     }
-    b.stickies.slice(0, 12).forEach(n => {
+    live.slice(0, 12).forEach(n => {
       const preview = (n.title || n.text || 'Empty sticky').trim().slice(0, 80);
       list.appendChild(el('button', {
         type: 'button',

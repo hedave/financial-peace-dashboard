@@ -62,6 +62,12 @@ import {
   listNoteLinks,
   normalizeNoteLinkState,
 } from './note-matcher.js';
+import {
+  normalizeStickyArchive,
+  archiveSticky,
+  unarchiveSticky,
+  deleteBoardKeepingArchive,
+} from './note-archive.js';
 
 const STORAGE_KEY = 'financial-peace-dashboard';
 
@@ -294,6 +300,8 @@ function normalizeState(state) {
       if (!n.createdAt && n.updatedAt) n.createdAt = n.updatedAt;
       // Author tag: 'owner' (main app) | 'notes' (notes-only login) | null (unknown / legacy)
       if (n.createdBy !== 'owner' && n.createdBy !== 'notes') n.createdBy = null;
+      // Archive fields: archived (bool) + archivedAt (ISO | null) — js/note-archive.js
+      normalizeStickyArchive(n);
     });
   });
   normalizeNoteLinkState(state);
@@ -733,13 +741,37 @@ class Store {
     }, { notes: true });
   }
 
+  /**
+   * Delete a page and its live stickies. Archived stickies are kept (still archived)
+   * on the first remaining page so archived note text is never deleted.
+   */
   deleteNoteBoard(boardId) {
+    let res = { moved: 0, fallbackBoardId: null };
     this.update(s => {
-      s.noteBoards = (s.noteBoards || []).filter(b => b.id !== boardId);
-      if (!s.noteBoards.length) {
-        s.noteBoards = [{ id: generateId(), title: 'General', stickies: [] }];
-      }
+      res = deleteBoardKeepingArchive(s, boardId, generateId);
+      if (res.moved) s.notesUpdatedAt = new Date().toISOString();
     }, { notes: true });
+    return res;
+  }
+
+  /** Archive a sticky (both roles). Only archived/archivedAt change; text is untouched. */
+  archiveStickyNote(noteId) {
+    let res = { ok: false };
+    this.update(s => {
+      res = archiveSticky(s, noteId);
+      if (res.ok && res.reason !== 'already-archived') s.notesUpdatedAt = new Date().toISOString();
+    }, { notes: true });
+    return res;
+  }
+
+  /** Unarchive back onto the board the sticky lives on (its original page). */
+  unarchiveStickyNote(noteId) {
+    let res = { ok: false };
+    this.update(s => {
+      res = unarchiveSticky(s, noteId);
+      if (res.ok) s.notesUpdatedAt = new Date().toISOString();
+    }, { notes: true });
+    return res;
   }
 
   addStickyNote(boardId, { title = '', text = '', color = 'yellow' } = {}) {
