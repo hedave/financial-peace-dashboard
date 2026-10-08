@@ -215,8 +215,26 @@ function installFigPigApi() {
   };
 }
 
+/** Strict note → transaction auto-match (owner login only; see js/note-matcher.js). */
+function runNoteMatcherQuietly() {
+  try {
+    const res = store.runNoteMatcher();
+    if (res?.linked > 0) {
+      showToast(`Linked ${res.linked} note${res.linked === 1 ? '' : 's'} to ${res.linked === 1 ? 'a transaction' : 'transactions'} · see Log`, 'info', 4000);
+    }
+    return res;
+  } catch (err) {
+    console.warn('Note matcher failed', err);
+    return null;
+  }
+}
+
+// After any cloud pull lands (startup, poll, Settings sync), match notes once more.
+store.onRemoteApplied = () => { runNoteMatcherQuietly(); };
+
 function bootstrap() {
   const shell = document.getElementById('app');
+  runNoteMatcherQuietly();
   const intent = getRouteIntent();
   if (intent.page) currentPage = intent.page;
   else if (intent.openImport) currentPage = 'transactions';
@@ -476,7 +494,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261007i';
+const APP_BUILD = '20261008a';
 
 installFigPigApi();
 

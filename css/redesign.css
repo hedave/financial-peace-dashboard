@@ -889,6 +889,22 @@ p.field-error { margin: var(--sp-1) 0 0; }
   .report-summary .card { padding-inline: var(--sp-2); }
 }
 
+/* ---- Notes to review (20261008a): note ↔ transaction links on Log ------- */
+.note-review .note-review-intro { margin: 0 0 var(--sp-3); }
+.note-review-item { padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
+.note-review-item:first-of-type { border-top: 0; }
+.note-review-text {
+  margin: 0; font-weight: var(--fw-semi); color: var(--text);
+  overflow-wrap: anywhere; white-space: normal;
+}
+.note-review-meta { margin: var(--sp-1) 0 var(--sp-2); font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-muted); }
+.note-review-candidates .list-row { min-height: 52px; }
+.note-review-candidates .list-row__title, .note-review-linked-text { overflow-wrap: anywhere; }
+.note-review-actions { display: flex; justify-content: flex-end; margin-top: var(--sp-2); }
+.note-review-linked { margin-top: var(--sp-3); }
+.note-review-linked > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: var(--fw-semi); color: var(--primary); }
+.note-review-linked .list-row__title { white-space: normal; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

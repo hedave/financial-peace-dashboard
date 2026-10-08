@@ -530,6 +530,8 @@ When **bonus** (or return-like) income is logged, the app can try to match a pri
 
 Use boards for: month checklist, agreement notes, shopping lists, snowball motivation, “ask spouse” items.
 
+**Notes ↔ transactions (main login only).** When a sticky mentions a dollar amount (e.g. “Costco $42.17 party supplies”), FigPig looks for the matching transaction. It links automatically only when the amount matches (within a few cents), the transaction is within about 3 days of when the note was written, a word in the note fits the merchant, and exactly one transaction passes. The note is then added to the end of that transaction’s memo (“· Note: …”); your own memo text is kept. Anything less certain shows up on **Log → Notes to review** with **Link** / **Dismiss**; linked notes have **Unlink**, which removes just the note text from the memo. Notes you write on the main login and Advisor plan stickies are not auto-matched. Note text itself is never changed.
+
 ---
 
 ## 17. Cloud sync, backups, two devices

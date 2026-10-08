@@ -1,4 +1,4 @@
-const CACHE = 'figpig-20261007i';
+const CACHE = 'figpig-20261008a';
 
 // Minimal precache — HTML/JS/CSS always network-first so deploys win
 const PRECACHE = [

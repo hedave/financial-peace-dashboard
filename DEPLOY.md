@@ -13,6 +13,7 @@
    - **Save**
    - You do **not** need to enable **Anonymous** sign-ins
 6. (Optional, spouse notes-only login) SQL Editor → paste `supabase-household.sql` → **Run**. Then in the app: Settings → Cloud → **Create household code**. She creates her own email login and enters that code.
+   - Then (optional) SQL Editor → paste `supabase-notes-author.sql` → **Run**. The server then tags each sticky with `createdBy` (`notes` for new stickies from the notes-only login; existing stickies keep their tag) and validates note saves. The app works without it. Re-run it if you ever re-run `supabase-household.sql`.
 7. **Project Settings** → **API** (or **API Keys**) → copy:
    - **Project URL** (e.g. `https://abcdefgh.supabase.co`)
    - **Publishable key** (`sb_publishable_...`) — this replaced the old name "anon key"

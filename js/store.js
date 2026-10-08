@@ -53,6 +53,15 @@ import {
   refreshHousehold,
 } from './cloud-sync.js';
 import { findReconciliationCandidates } from './reconcile-match.js';
+import {
+  applyAutoNoteLinks,
+  computeNoteMatches,
+  linkNoteToTransaction,
+  unlinkNote as unlinkNoteInState,
+  dismissNote as dismissNoteInState,
+  listNoteLinks,
+  normalizeNoteLinkState,
+} from './note-matcher.js';
 
 const STORAGE_KEY = 'financial-peace-dashboard';
 
@@ -283,8 +292,11 @@ function normalizeState(state) {
       if (!n.color) n.color = 'yellow';
       if (!n.updatedAt && n.createdAt) n.updatedAt = n.createdAt;
       if (!n.createdAt && n.updatedAt) n.createdAt = n.updatedAt;
+      // Author tag: 'owner' (main app) | 'notes' (notes-only login) | null (unknown / legacy)
+      if (n.createdBy !== 'owner' && n.createdBy !== 'notes') n.createdBy = null;
     });
   });
+  normalizeNoteLinkState(state);
   if (!Array.isArray(state.removedDefaultCategories)) state.removedDefaultCategories = [];
   if (!Array.isArray(state.categoryRules)) state.categoryRules = [];
   if (!state.monthBudgetSnapshots || typeof state.monthBudgetSnapshots !== 'object') {
@@ -458,6 +470,19 @@ class Store {
     return !isNotesOnlyRole();
   }
 
+  /**
+   * Browser app sets `onRemoteApplied` (e.g. to run the note matcher after a cloud pull).
+   * Netlify functions never set it, so nothing here runs server-side.
+   */
+  afterRemoteApplied() {
+    if (typeof this.onRemoteApplied !== 'function') return;
+    try {
+      this.onRemoteApplied();
+    } catch (e) {
+      console.warn('After-sync hook failed', e);
+    }
+  }
+
   hasMeaningfulLocalData() {
     return !isBlankBudgetState(this.state);
   }
@@ -498,6 +523,7 @@ class Store {
     this.processMonthRollover();
     this.writeLocal();
     this.notify();
+    this.afterRemoteApplied();
     return true;
   }
 
@@ -556,6 +582,7 @@ class Store {
       this.processMonthRollover();
       this.writeLocal();
       this.notify();
+      this.afterRemoteApplied();
       return { hadRemote: true, applied: true };
     }
     return { hadRemote: true, applied: false };
@@ -724,6 +751,9 @@ class Store {
       color: color || 'yellow',
       createdAt: now,
       updatedAt: now,
+      // The server stamps 'notes' authoritatively for the notes-only login
+      // (update_household_notes); this local value keeps the UI consistent until then.
+      createdBy: isNotesOnlyRole() ? 'notes' : 'owner',
     };
     this.update(s => {
       const b = (s.noteBoards || []).find(x => x.id === boardId);
@@ -764,6 +794,46 @@ class Store {
       if (!b || !Array.isArray(b.stickies)) return;
       b.stickies = b.stickies.filter(n => n.id !== noteId);
     }, { notes: true });
+  }
+
+  // --- Note ↔ transaction links (js/note-matcher.js) ---
+  /**
+   * Strict auto-match pass. Owner login only: the notes-only login cannot write
+   * transactions (update_household_notes only saves notes), so it never runs there.
+   * Saves through the normal save path only when something changed.
+   */
+  runNoteMatcher() {
+    if (isNotesOnlyRole()) return { linked: 0, pruned: 0, changed: false, skipped: 'notes-role' };
+    if (!this.state?.setupComplete) return { linked: 0, pruned: 0, changed: false, skipped: 'setup' };
+    const res = applyAutoNoteLinks(this.state);
+    if (res.changed) this.save();
+    return res;
+  }
+
+  getNoteReview() {
+    if (isNotesOnlyRole()) return { review: [], links: [] };
+    return {
+      review: computeNoteMatches(this.state).review,
+      links: listNoteLinks(this.state),
+    };
+  }
+
+  linkNoteManually(noteId, txId) {
+    let res = { ok: false };
+    this.update(s => { res = linkNoteToTransaction(s, noteId, txId, 'manual'); });
+    return res;
+  }
+
+  dismissNoteMatch(noteId) {
+    let res = { ok: false };
+    this.update(s => { res = dismissNoteInState(s, noteId); });
+    return res;
+  }
+
+  unlinkNoteLink(linkId) {
+    let res = { ok: false };
+    this.update(s => { res = unlinkNoteInState(s, linkId); });
+    return res;
   }
 
   syncLegacyNotesFromStickies() {
