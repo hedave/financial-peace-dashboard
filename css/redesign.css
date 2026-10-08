@@ -905,6 +905,167 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .note-review-linked > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: var(--fw-semi); color: var(--primary); }
 .note-review-linked .list-row__title { white-space: normal; }
 
+/* ---- Sticky archive + month stacks (20261008b, stack redesign 20261008c) ----------------------------- */
+.sticky-archive-tab { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.sticky-archive-tab .ico-wrap { display: inline-flex; }
+.sticky-archive-count {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); line-height: 1;
+  background: var(--primary-tint); color: var(--primary);
+}
+.sticky-archive-tab.active .sticky-archive-count { background: rgba(255, 255, 255, .22); color: #fff; }
+.sticky-note-archive { display: inline-flex; align-items: center; justify-content: center; color: rgba(0, 0, 0, .5); }
+[data-theme="dark"] .sticky-note-archive { color: rgba(255, 255, 255, .7); }
+
+.booklet-shelf-head { margin-bottom: var(--sp-4); }
+.booklet-shelf-head .section-title { margin-bottom: var(--sp-1); }
+.booklet-shelf-head .card-sub { margin: 0; }
+.booklet-empty .empty-icon { color: var(--primary); }
+
+/* Shelf: one square stack of stickies per month (20261008c).
+   Each layer gets --tilt/--dx/--dy from a hash of its note id (stickyTilt), so the
+   pile looks hand-dropped but never jitters between renders. */
+.stack-shelf {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-6) var(--sp-5); padding: var(--sp-3) var(--sp-2) var(--sp-6);
+}
+.stack-slot { min-width: 0; }
+.note-stack {
+  position: relative; display: block; width: 100%; aspect-ratio: 1 / 1;
+  padding: 0; margin: 0; border: 0; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  border-radius: 4px;
+  transition: transform var(--dur) var(--ease);
+}
+.note-stack:hover { transform: translateY(-3px); }
+.note-stack:active { transform: translateY(0) scale(.98); }
+.note-stack:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 8px; }
+
+/* Shared sticky-paper look: square-ish corners, soft lifted shadow, a sheen across
+   the top and a little curl at the bottom-right corner. */
+.note-stack-layer, .note-stack-top, .flipstack-layer, .flipstack-note {
+  border-radius: 2px 2px 3px 3px / 2px 2px 3px 3px;
+  border-bottom-right-radius: 14px 5px;
+  transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--tilt, 0deg));
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, .08),
+    0 6px 10px -6px rgba(0, 0, 0, .28),
+    0 14px 18px -14px rgba(0, 0, 0, .3);
+}
+.note-stack-layer, .flipstack-layer { position: absolute; inset: 0; }
+.note-stack-top::after, .flipstack-note::after, .note-stack-layer::after, .flipstack-layer::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, .06), rgba(0, 0, 0, 0) 9%),            /* glue strip */
+    linear-gradient(155deg, rgba(255, 255, 255, .42), rgba(255, 255, 255, 0) 38%),   /* sheen */
+    linear-gradient(315deg, rgba(0, 0, 0, .1), rgba(0, 0, 0, 0) 14%);               /* curl shade */
+}
+[data-theme="dark"] .note-stack-top::after, [data-theme="dark"] .flipstack-note::after,
+[data-theme="dark"] .note-stack-layer::after, [data-theme="dark"] .flipstack-layer::after {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, .14), rgba(0, 0, 0, 0) 9%),
+    linear-gradient(155deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0) 38%),
+    linear-gradient(315deg, rgba(0, 0, 0, .22), rgba(0, 0, 0, 0) 14%);
+}
+.note-stack-top {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: var(--sp-4) var(--sp-3) var(--sp-3); overflow: hidden;
+}
+.note-stack-top > * { position: relative; z-index: 1; }
+.note-stack-month { font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
+.note-stack-year { font-size: var(--fs-footnote); line-height: var(--lh-footnote); font-weight: var(--fw-semi); opacity: .72; }
+.note-stack-peek {
+  flex: 1; min-height: 0; margin-top: var(--sp-2);
+  font-size: var(--fs-footnote); line-height: var(--lh-footnote); font-style: italic; opacity: .74;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere;
+}
+.note-stack-count {
+  position: relative; z-index: 1; align-self: flex-start; padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-semi); line-height: 1.4;
+  background: rgba(0, 0, 0, .09);
+}
+[data-theme="dark"] .note-stack-count { background: rgba(255, 255, 255, .14); }
+
+/* Stack viewer (inside the sheet). One stack, one readable top note at every width:
+   that's what a real pad is, and it keeps the bottom-up flip legible. */
+.modal.modal-booklet { max-width: 560px; }
+@media (min-width: 769px) { .modal.modal-booklet { max-height: min(92vh, 92dvh, 48rem); } }
+.flipstack { display: flex; flex-direction: column; gap: var(--sp-5); }
+.flipstack-stage { outline: none; padding: var(--sp-5) var(--sp-3) var(--sp-3); }
+.flipstack-stack {
+  position: relative; width: min(calc(100% - 24px), 26rem); margin: 0 auto;
+  perspective: 1600px; transform-style: preserve-3d;
+}
+.flipstack-note {
+  position: relative; z-index: 4; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0;
+  aspect-ratio: 1 / 1; padding: var(--sp-5) var(--sp-4) var(--sp-4);
+  transform-origin: 50% 0;   /* glued along the top edge */
+}
+.flipstack-note > * { position: relative; z-index: 1; }
+.flipstack-note-title { margin: 0; font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
+.flipstack-note-text {
+  margin: 0; flex: 1; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: var(--fs-body); line-height: var(--lh-body);
+}
+.flipstack-note-meta, .flipstack-note-link { margin: 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); opacity: .78; overflow-wrap: anywhere; }
+.flipstack-note-link { font-weight: var(--fw-semi); opacity: .9; }
+.flipstack-note-actions { display: flex; justify-content: flex-end; }
+.flipstack-note-actions .btn { background: rgba(255, 255, 255, .7); border-color: rgba(0, 0, 0, .15); color: inherit; }
+[data-theme="dark"] .flipstack-note-actions .btn { background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .25); }
+.flipstack-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.flipstack-nav {
+  width: 48px; height: 48px; flex: 0 0 48px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); background: var(--bg-card); color: var(--text); cursor: pointer;
+  transition: background var(--dur) var(--ease), transform 80ms var(--ease);
+}
+.flipstack-nav:active:not(:disabled) { transform: scale(.94); }
+.flipstack-nav:disabled { opacity: .35; cursor: default; }
+.flipstack-nav:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 2px; }
+.flipstack-indicator { margin: 0; font-size: var(--fs-headline); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* Bottom-up flip: the note lifts from its bottom edge, hinges on its top edge and
+   flips up and away. Back = the same motion reversed, landing onto the stack. */
+.flipstack-peel { position: absolute; inset: 0 0 auto 0; z-index: 6; pointer-events: none; }
+.peel-up { animation: fp-peel-up 520ms cubic-bezier(.45, .05, .35, 1) forwards; }
+.peel-down { z-index: 6; animation: fp-peel-up 480ms cubic-bezier(.45, .05, .35, 1) reverse both; }
+@keyframes fp-peel-up {
+  0% {
+    transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--tilt, 0deg)) rotateX(0deg);
+    opacity: 1;
+  }
+  30% { /* bottom edge lifts toward you */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 2px)) rotate(var(--tilt, 0deg)) rotateX(32deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, .08), 0 24px 28px -12px rgba(0, 0, 0, .34);
+    opacity: 1;
+  }
+  65% { /* swinging up around the glued top edge */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 3%)) rotate(var(--tilt, 0deg)) rotateX(76deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, .06), 0 30px 34px -12px rgba(0, 0, 0, .28);
+    opacity: 1;
+  }
+  100% { /* over the top and away */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 12%)) rotate(var(--tilt, 0deg)) rotateX(112deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, 0), 0 30px 34px -12px rgba(0, 0, 0, 0);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .peel-up, .peel-down { animation: none; }
+  .peel-up { display: none; }
+  .note-stack, .note-stack:hover, .note-stack:active { transition: none; transform: none; }
+}
+html[data-reduce-motion="true"] .peel-up, html[data-reduce-motion="true"] .peel-down { animation: none; }
+html[data-reduce-motion="true"] .peel-up { display: none; }
+html[data-reduce-motion="true"] .note-stack, html[data-reduce-motion="true"] .note-stack:hover { transition: none; transform: none; }
+@media (max-width: 640px) {
+  .stack-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-5); padding-inline: var(--sp-2); }
+  .note-stack-top { padding: var(--sp-3) var(--sp-3) var(--sp-3); }
+  .flipstack-stage { padding: var(--sp-5) var(--sp-2) var(--sp-2); }
+  .flipstack-note { padding: var(--sp-4) var(--sp-4) var(--sp-3); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

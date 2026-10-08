@@ -40,7 +40,10 @@ function paintStickyWhen(host, note) {
   }
 }
 import { store } from '../store.js';
-import { showToast, confirmDialog, showModal } from '../components/modal.js';
+import { showToast, confirmDialog, showModal, showUndoToast } from '../components/modal.js';
+import { icon } from '../icons.js';
+import { activeStickies, countArchived } from '../note-archive.js';
+import { renderArchiveShelf } from '../components/note-booklets.js';
 
 const STICKY_COLORS = [
   { id: 'yellow', label: 'Yellow' },
@@ -53,6 +56,8 @@ const STICKY_COLORS = [
 
 let activeBoardId = null;
 let notesSearch = '';
+/** 'board' (live stickies) | 'archive' (month sticky stacks) */
+let notesView = 'board';
 
 /** For Quick Notes popup — last board viewed on the Notes page. */
 export function getActiveNotesBoardId() {
@@ -101,20 +106,40 @@ export function renderNotes(container) {
     ),
   ));
 
+  const inArchive = notesView === 'archive';
+  const archivedCount = countArchived(store.getState());
   const tabs = el('div', { className: 'sticky-board-tabs section' });
   boards.forEach(b => {
     const tab = el('button', {
       type: 'button',
-      className: `sticky-board-tab${b.id === board?.id ? ' active' : ''}`,
+      className: `sticky-board-tab${!inArchive && b.id === board?.id ? ' active' : ''}`,
+      'aria-pressed': !inArchive && b.id === board?.id ? 'true' : 'false',
       onClick: () => {
         activeBoardId = b.id;
+        notesView = 'board';
         notesSearch = '';
         window.appRefresh();
       },
     }, b.title || 'Page');
     tabs.appendChild(tab);
   });
+  tabs.appendChild(el('button', {
+    type: 'button',
+    className: `sticky-board-tab sticky-archive-tab${inArchive ? ' active' : ''}`,
+    'aria-pressed': inArchive ? 'true' : 'false',
+    'aria-label': `Archive, ${archivedCount} archived ${archivedCount === 1 ? 'sticky' : 'stickies'}`,
+    onClick: () => {
+      notesView = 'archive';
+      notesSearch = '';
+      window.appRefresh();
+    },
+  }, icon('archive', 16), 'Archive', archivedCount ? el('span', { className: 'sticky-archive-count' }, String(archivedCount)) : null));
   container.appendChild(tabs);
+
+  if (inArchive) {
+    container.appendChild(renderArchiveShelf({ onChange: () => window.appRefresh() }));
+    return;
+  }
 
   let boardEl = null;
   if (board) {
@@ -150,7 +175,7 @@ export function renderNotes(container) {
           onClick: () => {
             confirmDialog(
               'Delete this page?',
-              `Remove “${board.title}” and all its stickies?`,
+              `Remove “${board.title}” and its stickies? Archived stickies from this page stay in the Archive (they move to your first page).`,
               () => {
                 store.deleteNoteBoard(board.id);
                 activeBoardId = null;
@@ -181,16 +206,20 @@ export function renderNotes(container) {
 
 function paintBoard(boardEl, board) {
   const q = String(notesSearch || '').trim().toLowerCase();
-  const stickies = (board.stickies || []).filter(n => {
+  const live = activeStickies(board);
+  const stickies = live.filter(n => {
     if (!q) return true;
     const hay = `${n.title || ''} ${n.text || ''}`.toLowerCase();
     return hay.includes(q);
   });
 
   boardEl.innerHTML = '';
-  if (!board.stickies?.length) {
+  if (!live.length) {
+    const archivedHere = (board.stickies || []).length - live.length;
     boardEl.appendChild(el('div', { className: 'sticky-board-empty' },
-      el('p', {}, 'Nothing on this page yet.'),
+      el('p', {}, archivedHere
+        ? `Nothing on this page right now · ${archivedHere} archived (see Archive).`
+        : 'Nothing on this page yet.'),
       el('button', {
         type: 'button',
         className: 'btn btn-primary',
@@ -275,6 +304,30 @@ function renderSticky(boardId, note) {
     },
   }, '×');
 
+  const archiveBtn = el('button', {
+    type: 'button',
+    className: 'sticky-note-tool sticky-note-archive',
+    title: 'Archive sticky',
+    'aria-label': 'Archive sticky',
+    onClick: (e) => {
+      e.stopPropagation();
+      // Flush a pending autosave first so the archived copy has the latest text
+      const pending = stickyTimers.get(note.id);
+      if (pending) {
+        clearTimeout(pending);
+        stickyTimers.delete(note.id);
+        store.patchStickyNote(boardId, note.id, { title: titleIn.value, text: bodyIn.value });
+      }
+      const res = store.archiveStickyNote(note.id);
+      if (!res?.ok) return;
+      window.appRefresh();
+      showUndoToast('Sticky archived', () => {
+        store.unarchiveStickyNote(note.id);
+        window.appRefresh();
+      });
+    },
+  }, icon('archive', 18));
+
   const swatches = el('div', { className: 'sticky-note-swatches' },
     ...STICKY_COLORS.map(c => el('button', {
       type: 'button',
@@ -292,7 +345,7 @@ function renderSticky(boardId, note) {
 
   card.appendChild(el('div', { className: 'sticky-note-bar' },
     swatches,
-    el('div', { className: 'sticky-note-tools' }, savedEl, delBtn),
+    el('div', { className: 'sticky-note-tools' }, savedEl, archiveBtn, delBtn),
   ));
   card.appendChild(whenEl);
   card.appendChild(titleIn);

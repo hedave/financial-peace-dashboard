@@ -11,6 +11,10 @@
 --         createdBy (the notes login cannot re-tag owner or legacy notes)
 --       - sticky id not stored yet -> 'notes'
 --   * input validation (array/object shapes, string ids, size caps); fails closed
+--   * archive fields on stickies (build 20261008b): `archived` must be a JSON
+--     boolean and `archivedAt` an ISO-8601 timestamp string (<= 40 chars) or
+--     null, when present. Any other type is rejected. (The first version of this
+--     file already passed these keys through untouched; this only tightens types.)
 --   * row lock (FOR UPDATE) so read-modify-write is atomic
 --   * notesUpdatedAt = null is stored as JSON null (the old body hit the
 --     state NOT NULL constraint because jsonb_set(..., null) returns null)
@@ -120,6 +124,17 @@ begin
           or coalesce(length(s ->> 'id'), 0) = 0
           or length(s ->> 'id') > 200 then
           raise exception 'Invalid sticky';
+        end if;
+        -- Archive fields (build 20261008b+): strict types when present.
+        if s ? 'archived' and coalesce(jsonb_typeof(s -> 'archived'), '') <> 'boolean' then
+          raise exception 'Invalid sticky archive flag';
+        end if;
+        if s ? 'archivedAt' and coalesce(jsonb_typeof(s -> 'archivedAt'), '') <> 'null' and (
+             coalesce(jsonb_typeof(s -> 'archivedAt'), '') <> 'string'
+             or length(s ->> 'archivedAt') > 40
+             or (s ->> 'archivedAt') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]{1,6})?)?(Z|[+-][0-9]{2}:?[0-9]{2})$'
+           ) then
+          raise exception 'Invalid sticky archive time';
         end if;
         sid := s ->> 'id';
         if prior ? sid then
