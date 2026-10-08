@@ -159,8 +159,12 @@ export function createDefaultState() {
     celebrations: [],
     notes: '',
     notesUpdatedAt: null,
-    /** Sticky-note boards: [{ id, title, stickies: [{ id, title, text, color, createdAt, updatedAt }] }] */
+    /** Sticky-note boards: [{ id, title, stickies: [{ id, title, text, color, createdAt, updatedAt, createdBy }] }] */
     noteBoards: [],
+    /** Note ↔ transaction links: [{ id, noteId, txId, linkedAt, mode: 'auto'|'manual', appended }] */
+    noteLinks: [],
+    /** Never auto-link again: [{ noteId, txId|null, at }] (txId null = whole note dismissed) */
+    noteLinkDismissals: [],
     removedDefaultCategories: [],
     categoryRules: [],
     monthBudgetSnapshots: {},

@@ -1,6 +1,7 @@
 -- Run in Supabase SQL Editor (safe to re-run) so a second login can share notes.
 -- Notes-only members can read the owner's budget. Money writes stay on the owner.
 -- Notes saves go through update_household_notes.
+-- Then run supabase-notes-author.sql (newer update_household_notes: sticky author tag + validation).
 
 create table if not exists household_members (
   user_id uuid primary key references auth.users(id) on delete cascade,

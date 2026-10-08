@@ -187,6 +187,32 @@ export function isBlankBudgetState(state) {
   return !hasActivity;
 }
 
+/**
+ * Author tag for stickies, mirroring update_household_notes (supabase-notes-author.sql):
+ * a sticky already in `priorBoards` keeps its stored createdBy (cannot be re-tagged);
+ * a sticky not seen before gets `author`. Returns new board objects; input is not mutated.
+ */
+export function stampNoteAuthors(nextBoards, priorBoards, author) {
+  const prior = new Map();
+  (Array.isArray(priorBoards) ? priorBoards : []).forEach(b => {
+    (Array.isArray(b?.stickies) ? b.stickies : []).forEach(n => {
+      if (n && n.id && !prior.has(n.id)) prior.set(n.id, n.createdBy ?? null);
+    });
+  });
+  return (Array.isArray(nextBoards) ? nextBoards : []).map(b => {
+    if (!b || typeof b !== 'object') return b;
+    const stickies = Array.isArray(b.stickies) ? b.stickies : [];
+    return {
+      ...b,
+      stickies: stickies.map(n => {
+        if (!n || typeof n !== 'object') return n;
+        const createdBy = n.id && prior.has(n.id) ? prior.get(n.id) : author;
+        return { ...n, createdBy };
+      }),
+    };
+  });
+}
+
 function notesSlice(state) {
   return {
     notes: state?.notes || '',
@@ -237,6 +263,8 @@ export async function pushState(state) {
   let payload = stateForCloud(state);
 
   if (household.role === 'notes') {
+    // createdBy: new stickies from this login carry 'notes' (set in store.addStickyNote).
+    // With supabase-notes-author.sql applied, the server re-stamps authoritatively.
     const noteArgs = {
       p_notes: state?.notes || '',
       p_notes_updated_at: state?.notesUpdatedAt || null,
@@ -266,7 +294,10 @@ export async function pushState(state) {
       throw readErr;
     }
     const remote = data?.state && typeof data.state === 'object' ? data.state : {};
-    payload = stateForCloud({ ...remote, ...notesSlice(state) });
+    const slice = notesSlice(state);
+    // Same author rule as the server function: new stickies are 'notes', existing keep theirs.
+    slice.noteBoards = stampNoteAuthors(slice.noteBoards, remote.noteBoards, 'notes');
+    payload = stateForCloud({ ...remote, ...slice });
     const stamp = new Date().toISOString();
     const upd = await sb.from('budget_states')
       .update({ state: payload, updated_at: stamp })

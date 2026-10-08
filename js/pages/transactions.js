@@ -10,6 +10,7 @@ import { isBonusIncomeSource, BONUS_INCOME_NAME } from '../income-sources.js';
 import { parseBankPdfFile, rowsToImportObjects } from '../pdf-import.js';
 import { guessMerchantPattern } from '../category-rules.js';
 import { parseBankCsvText } from '../csv-import.js';
+import { renderNoteReviewCard } from '../components/note-review.js';
 
 let openMode = null;
 
@@ -240,6 +241,9 @@ export function renderTransactions(container, arg) {
       }, 'Show Duplicates'),
     ));
   }
+
+  const noteReview = renderNoteReviewCard();
+  if (noteReview) container.appendChild(noteReview);
 
   const txTools = el('details', { className: 'page-tools-menu' });
   txTools.appendChild(el('summary', { className: 'btn btn-secondary' }, 'More actions'));
