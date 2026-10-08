@@ -10,7 +10,11 @@ import {
   countArchived,
   groupArchivedBooklets,
   bookletKey,
-  paginate,
+  stickyTilt,
+  hashString,
+  TILT_MIN_DEG,
+  TILT_MAX_DEG,
+  TILT_MAX_OFFSET_PX,
   normalizeStickyArchive,
   isIsoTimestamp,
   UNDATED_KEY,
@@ -110,7 +114,6 @@ function contentOf(n) {
   expect(!books.some(b => b.notes.some(x => x.note.id === 'm6')), 'live notes are not in booklets');
   expect(books[0].label === 'October 2026' && books[3].label === 'December 2025', 'month/year labels');
   expect(books[1].notes.map(x => x.note.text).join('|') === 'aug a|aug b', 'booklet notes read oldest → newest');
-  expect(JSON.stringify(paginate([1, 2, 3, 4, 5], 4)) === '[[1,2,3,4],[5]]' && paginate([1, 2, 3], 1).length === 3, 'pagination: few per page wide, one per page phone');
 }
 
 // ---- normalize: strict types --------------------------------------------------
@@ -221,7 +224,7 @@ const { stampNoteAuthors } = await import('../js/cloud-sync.js');
   const created = [];
   class FakeText { constructor(t) { this.nodeType = 3; this._t = String(t); } get textContent() { return this._t; } }
   class FakeEl {
-    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.attrs = {}; this.className = ''; this.classList = { add: (...c) => { this.className += ' ' + c.join(' '); } }; }
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.attrs = {}; this.className = ''; this.classList = { add: (...c) => { this.className += ' ' + c.join(' '); } }; const props = {}; this.style = { setProperty: (k, v) => { props[k] = String(v); }, getPropertyValue: k => props[k] ?? '' }; }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return this.attrs[k] ?? null; }
     addEventListener() {}
@@ -255,6 +258,50 @@ const { stampNoteAuthors } = await import('../js/cloud-sync.js');
   const shelf = renderArchiveShelf({});
   expect(shelf.textContent.includes('September') && shelf.textContent.includes('1 note'), 'shelf shows month + count');
   expect(!innerHtmlWrites.some(h => h.includes('onload')), 'shelf never puts note text in innerHTML');
+
+  // Shelf stack: one layer per real note (max 4), each tilted by its own id
+  store.hydrateFromObject({ setupComplete: true, noteBoards: [{ id: 'b1', title: 'G', stickies: [
+    ...['s1', 's2', 's3', 's4', 's5', 's6'].map((id, i) => ({ id, title: '', text: `fake ${id}`, color: ['yellow', 'pink', 'blue', 'green', 'purple', 'orange'][i], createdAt: at(`2026-09-0${i + 1}`), archived: true, archivedAt: at('2026-10-01') })),
+    { id: 't1', title: '', text: 'lonely', color: 'blue', createdAt: at('2026-07-04'), archived: true, archivedAt: at('2026-10-01') },
+  ] }] });
+  const walk = (n, out = []) => { if (n && n.children) { out.push(n); n.children.forEach(c => walk(c, out)); } return out; };
+  const stacks = walk(renderArchiveShelf({})).filter(n => String(n.className).split(/\s+/).includes("note-stack"));
+  expect(stacks.length === 2, 'one stack per month');
+  const sepLayers = stacks[0].children.filter(Boolean);
+  expect(sepLayers.length === 4, `busy month shows 4 layers max (got ${sepLayers.length})`);
+  expect(stacks[1].children.filter(Boolean).length === 1, 'single-note month is a single sticky');
+  const top = sepLayers[sepLayers.length - 1];
+  expect(/note-stack-top/.test(top.className) && /sticky-yellow/.test(top.className) && top.textContent.includes('September'), 'top note is the first note, in its own color, with the month label');
+  expect(top.style.getPropertyValue('--tilt') === `${stickyTilt('s1').angle}deg`, 'top note tilt comes from its id');
+  const peekColors = sepLayers.slice(0, 3).map(n => (n.className.match(/sticky-(\w+)/) || [])[1]).join(',');
+  expect(peekColors === 'green,blue,pink', `peeking layers use those notes' own colors, back to front (got ${peekColors})`);
+  expect(sepLayers[0].style.getPropertyValue('--tilt') === `${stickyTilt('s4').angle}deg` && sepLayers[2].style.getPropertyValue('--tilt') === `${stickyTilt('s2').angle}deg`, 'each peeking layer is askew by its own id');
+  const again = walk(renderArchiveShelf({})).filter(n => String(n.className).split(/\s+/).includes("note-stack"))[0].children.map(n => n.style.getPropertyValue('--tilt')).join();
+  expect(again === sepLayers.map(n => n.style.getPropertyValue('--tilt')).join(), 'stack angles identical across re-renders');
+}
+
+// ---- askew stacks: tilt is a pure function of the note id, within bounds ----
+{
+  expect(hashString('abc') === hashString('abc') && hashString('abc') !== hashString('abd'), 'hash is stable and id-sensitive');
+  const ids = Array.from({ length: 500 }, (_, i) => `fake-note-${i}`).concat(['', 'x', 'm1', 'a'.repeat(200), '🙂 ünïcode']);
+  let pos = 0; let neg = 0;
+  const angles = new Set();
+  ids.forEach(id => {
+    const a = stickyTilt(id);
+    const b = stickyTilt(id);
+    expect(JSON.stringify(a) === JSON.stringify(b), `tilt deterministic for ${JSON.stringify(id)}`);
+    const mag = Math.abs(a.angle);
+    expect(Number.isFinite(a.angle) && mag >= TILT_MIN_DEG && mag <= TILT_MAX_DEG, `tilt angle within ±${TILT_MIN_DEG}–${TILT_MAX_DEG}° for ${JSON.stringify(id)} (got ${a.angle})`);
+    expect(Number.isInteger(a.dx) && Number.isInteger(a.dy) && Math.abs(a.dx) <= TILT_MAX_OFFSET_PX && Math.abs(a.dy) <= TILT_MAX_OFFSET_PX, `tilt offset within ±${TILT_MAX_OFFSET_PX}px for ${JSON.stringify(id)}`);
+    if (a.angle > 0) pos++; else neg++;
+    angles.add(a.angle);
+  });
+  expect(pos > 150 && neg > 150, `tilts lean both ways (pos ${pos}, neg ${neg})`);
+  expect(angles.size > 200, 'notes get their own angles, not a handful of presets');
+  expect(TILT_MIN_DEG === 1 && TILT_MAX_DEG === 4, 'bounds are ±1–4°');
+  // Same id from a fresh module instance → same tilt (no per-session randomness)
+  const fresh = await import('../js/note-archive.js?fresh=1');
+  expect(JSON.stringify(fresh.stickyTilt('fake-note-7')) === JSON.stringify(stickyTilt('fake-note-7')), 'tilt survives a reload');
 }
 
 if (failures.length) {

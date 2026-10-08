@@ -905,7 +905,7 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .note-review-linked > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: var(--fw-semi); color: var(--primary); }
 .note-review-linked .list-row__title { white-space: normal; }
 
-/* ---- Sticky archive + booklets (20261008b) ----------------------------- */
+/* ---- Sticky archive + month stacks (20261008b, stack redesign 20261008c) ----------------------------- */
 .sticky-archive-tab { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .sticky-archive-tab .ico-wrap { display: inline-flex; }
 .sticky-archive-count {
@@ -921,114 +921,149 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .booklet-shelf-head { margin-bottom: var(--sp-4); }
 .booklet-shelf-head .section-title { margin-bottom: var(--sp-1); }
 .booklet-shelf-head .card-sub { margin: 0; }
-.booklet-shelf {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--sp-5) var(--sp-4); padding: var(--sp-1) 6px var(--sp-6) 0;
-}
-.booklet-slot { min-width: 0; }
-.booklet {
-  position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: stretch;
-  width: 100%; aspect-ratio: 3 / 4; min-height: 168px;
-  padding: var(--sp-4) var(--sp-3) var(--sp-3) calc(var(--sp-3) + 14px);
-  border: 1px solid rgba(0, 0, 0, .08); border-radius: 6px var(--r-sm) var(--r-sm) 6px;
-  font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
-  /* page edges peeking out behind the cover */
-  box-shadow:
-    3px 3px 0 -1px var(--bg-card), 3px 3px 0 0 var(--border-strong),
-    6px 6px 0 -1px var(--bg-card), 6px 6px 0 0 var(--border),
-    0 10px 22px -10px rgba(16, 24, 40, .35);
-  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-.booklet::before { /* spine */
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
-  border-radius: 6px 0 0 6px; background: rgba(0, 0, 0, .14);
-  box-shadow: inset -1px 0 0 rgba(0, 0, 0, .12);
-}
-.booklet::after { /* binding stitch */
-  content: ""; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 0;
-  border-left: 2px dotted rgba(255, 255, 255, .55);
-}
-.booklet:hover { transform: translateY(-2px); }
-.booklet:active { transform: translateY(0) scale(.98); }
-.booklet:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 4px; }
-.booklet-label {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-xs);
-  background: rgba(255, 255, 255, .78); color: #1d2433;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
-}
-[data-theme="dark"] .booklet-label { background: rgba(0, 0, 0, .35); color: #fff; }
-.booklet-month { font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
-.booklet-year { font-size: var(--fs-footnote); line-height: var(--lh-footnote); font-weight: var(--fw-semi); opacity: .75; }
-.booklet-peek {
-  flex: 1; margin: var(--sp-3) 2px var(--sp-2); min-height: 0;
-  font-size: var(--fs-footnote); line-height: 1.5rem; font-style: italic; opacity: .72;
-  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere;
-  /* faint ruled lines, like the first page showing through */
-  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.5rem - 1px), rgba(0, 0, 0, .09) calc(1.5rem - 1px), rgba(0, 0, 0, .09) 1.5rem);
-}
-.booklet-count {
-  align-self: flex-start; padding: 4px 10px; border-radius: var(--r-pill);
-  font-size: var(--fs-footnote); font-weight: var(--fw-semi); line-height: var(--lh-footnote);
-  background: rgba(0, 0, 0, .1);
-}
 .booklet-empty .empty-icon { color: var(--primary); }
 
-/* Flip book (inside the sheet) */
-.modal.modal-booklet { max-width: 960px; }
-@media (min-width: 769px) { .modal.modal-booklet { max-height: min(90vh, 90dvh, 46rem); } }
-.flipbook { display: flex; flex-direction: column; gap: var(--sp-3); }
-.flipbook-stage {
-  position: relative; perspective: 1400px; touch-action: pan-y; outline: none;
-  padding: var(--sp-3); border-radius: var(--r-md);
-  background: var(--bg-sunken, rgba(0, 0, 0, .04));
-  box-shadow: inset 0 0 0 1px var(--border);
+/* Shelf: one square stack of stickies per month (20261008c).
+   Each layer gets --tilt/--dx/--dy from a hash of its note id (stickyTilt), so the
+   pile looks hand-dropped but never jitters between renders. */
+.stack-shelf {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-6) var(--sp-5); padding: var(--sp-3) var(--sp-2) var(--sp-6);
 }
-.flipbook-page { display: grid; gap: var(--sp-3); grid-template-columns: 1fr; transform-origin: left center; }
-.flipbook-page.per-2, .flipbook-page.per-4 { grid-template-columns: 1fr 1fr; }
-.flipbook-note {
-  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0;
-  min-height: 15rem; padding: var(--sp-4);
-  border-radius: 4px 4px var(--r-xs) var(--r-xs);
-  box-shadow: 2px 3px 10px rgba(0, 0, 0, .12); border: 1px solid rgba(0, 0, 0, .06);
+.stack-slot { min-width: 0; }
+.note-stack {
+  position: relative; display: block; width: 100%; aspect-ratio: 1 / 1;
+  padding: 0; margin: 0; border: 0; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  border-radius: 4px;
+  transition: transform var(--dur) var(--ease);
 }
-.flipbook-page.per-1 .flipbook-note { min-height: min(52vh, 26rem); }
-.flipbook-note-title { margin: 0; font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
-.flipbook-note-text {
+.note-stack:hover { transform: translateY(-3px); }
+.note-stack:active { transform: translateY(0) scale(.98); }
+.note-stack:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 8px; }
+
+/* Shared sticky-paper look: square-ish corners, soft lifted shadow, a sheen across
+   the top and a little curl at the bottom-right corner. */
+.note-stack-layer, .note-stack-top, .flipstack-layer, .flipstack-note {
+  border-radius: 2px 2px 3px 3px / 2px 2px 3px 3px;
+  border-bottom-right-radius: 14px 5px;
+  transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--tilt, 0deg));
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, .08),
+    0 6px 10px -6px rgba(0, 0, 0, .28),
+    0 14px 18px -14px rgba(0, 0, 0, .3);
+}
+.note-stack-layer, .flipstack-layer { position: absolute; inset: 0; }
+.note-stack-top::after, .flipstack-note::after, .note-stack-layer::after, .flipstack-layer::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, .06), rgba(0, 0, 0, 0) 9%),            /* glue strip */
+    linear-gradient(155deg, rgba(255, 255, 255, .42), rgba(255, 255, 255, 0) 38%),   /* sheen */
+    linear-gradient(315deg, rgba(0, 0, 0, .1), rgba(0, 0, 0, 0) 14%);               /* curl shade */
+}
+[data-theme="dark"] .note-stack-top::after, [data-theme="dark"] .flipstack-note::after,
+[data-theme="dark"] .note-stack-layer::after, [data-theme="dark"] .flipstack-layer::after {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, .14), rgba(0, 0, 0, 0) 9%),
+    linear-gradient(155deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0) 38%),
+    linear-gradient(315deg, rgba(0, 0, 0, .22), rgba(0, 0, 0, 0) 14%);
+}
+.note-stack-top {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 2px;
+  padding: var(--sp-4) var(--sp-3) var(--sp-3); overflow: hidden;
+}
+.note-stack-top > * { position: relative; z-index: 1; }
+.note-stack-month { font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
+.note-stack-year { font-size: var(--fs-footnote); line-height: var(--lh-footnote); font-weight: var(--fw-semi); opacity: .72; }
+.note-stack-peek {
+  flex: 1; min-height: 0; margin-top: var(--sp-2);
+  font-size: var(--fs-footnote); line-height: var(--lh-footnote); font-style: italic; opacity: .74;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere;
+}
+.note-stack-count {
+  position: relative; z-index: 1; align-self: flex-start; padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-semi); line-height: 1.4;
+  background: rgba(0, 0, 0, .09);
+}
+[data-theme="dark"] .note-stack-count { background: rgba(255, 255, 255, .14); }
+
+/* Stack viewer (inside the sheet). One stack, one readable top note at every width:
+   that's what a real pad is, and it keeps the bottom-up flip legible. */
+.modal.modal-booklet { max-width: 560px; }
+@media (min-width: 769px) { .modal.modal-booklet { max-height: min(92vh, 92dvh, 48rem); } }
+.flipstack { display: flex; flex-direction: column; gap: var(--sp-5); }
+.flipstack-stage { outline: none; padding: var(--sp-5) var(--sp-3) var(--sp-3); }
+.flipstack-stack {
+  position: relative; width: min(calc(100% - 24px), 26rem); margin: 0 auto;
+  perspective: 1600px; transform-style: preserve-3d;
+}
+.flipstack-note {
+  position: relative; z-index: 4; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0;
+  aspect-ratio: 1 / 1; padding: var(--sp-5) var(--sp-4) var(--sp-4);
+  transform-origin: 50% 0;   /* glued along the top edge */
+}
+.flipstack-note > * { position: relative; z-index: 1; }
+.flipstack-note-title { margin: 0; font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: var(--fw-bold); overflow-wrap: anywhere; }
+.flipstack-note-text {
   margin: 0; flex: 1; white-space: pre-wrap; overflow-wrap: anywhere;
   font-size: var(--fs-body); line-height: var(--lh-body);
-  max-height: 22rem; overflow-y: auto;
 }
-.flipbook-note-meta, .flipbook-note-link { margin: 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); opacity: .78; overflow-wrap: anywhere; }
-.flipbook-note-link { font-weight: var(--fw-semi); opacity: .9; }
-.flipbook-note-actions { display: flex; justify-content: flex-end; }
-.flipbook-note-actions .btn { background: rgba(255, 255, 255, .7); border-color: rgba(0, 0, 0, .15); color: inherit; }
-[data-theme="dark"] .flipbook-note-actions .btn { background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .25); }
-.flipbook-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-.flipbook-nav {
+.flipstack-note-meta, .flipstack-note-link { margin: 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); opacity: .78; overflow-wrap: anywhere; }
+.flipstack-note-link { font-weight: var(--fw-semi); opacity: .9; }
+.flipstack-note-actions { display: flex; justify-content: flex-end; }
+.flipstack-note-actions .btn { background: rgba(255, 255, 255, .7); border-color: rgba(0, 0, 0, .15); color: inherit; }
+[data-theme="dark"] .flipstack-note-actions .btn { background: rgba(0, 0, 0, .25); border-color: rgba(255, 255, 255, .25); }
+.flipstack-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.flipstack-nav {
   width: 48px; height: 48px; flex: 0 0 48px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border-strong); background: var(--bg-card); color: var(--text); cursor: pointer;
   transition: background var(--dur) var(--ease), transform 80ms var(--ease);
 }
-.flipbook-nav:active:not(:disabled) { transform: scale(.94); }
-.flipbook-nav:disabled { opacity: .35; cursor: default; }
-.flipbook-nav:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 2px; }
-.flipbook-indicator { margin: 0; font-size: var(--fs-headline); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; color: var(--text-muted); }
-.flip-in-next { animation: fp-flip-next 260ms var(--ease) both; }
-.flip-in-prev { animation: fp-flip-prev 260ms var(--ease) both; }
-@keyframes fp-flip-next { from { opacity: 0; transform: rotateY(-14deg) translateX(28px); } to { opacity: 1; transform: none; } }
-@keyframes fp-flip-prev { from { opacity: 0; transform: rotateY(14deg) translateX(-28px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .flip-in-next, .flip-in-prev { animation: none; }
-  .booklet, .booklet:hover, .booklet:active { transition: none; transform: none; }
+.flipstack-nav:active:not(:disabled) { transform: scale(.94); }
+.flipstack-nav:disabled { opacity: .35; cursor: default; }
+.flipstack-nav:focus-visible { outline: 3px solid var(--primary-ring); outline-offset: 2px; }
+.flipstack-indicator { margin: 0; font-size: var(--fs-headline); font-weight: var(--fw-semi); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* Bottom-up flip: the note lifts from its bottom edge, hinges on its top edge and
+   flips up and away. Back = the same motion reversed, landing onto the stack. */
+.flipstack-peel { position: absolute; inset: 0 0 auto 0; z-index: 6; pointer-events: none; }
+.peel-up { animation: fp-peel-up 520ms cubic-bezier(.45, .05, .35, 1) forwards; }
+.peel-down { z-index: 6; animation: fp-peel-up 480ms cubic-bezier(.45, .05, .35, 1) reverse both; }
+@keyframes fp-peel-up {
+  0% {
+    transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--tilt, 0deg)) rotateX(0deg);
+    opacity: 1;
+  }
+  30% { /* bottom edge lifts toward you */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 2px)) rotate(var(--tilt, 0deg)) rotateX(32deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, .08), 0 24px 28px -12px rgba(0, 0, 0, .34);
+    opacity: 1;
+  }
+  65% { /* swinging up around the glued top edge */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 3%)) rotate(var(--tilt, 0deg)) rotateX(76deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, .06), 0 30px 34px -12px rgba(0, 0, 0, .28);
+    opacity: 1;
+  }
+  100% { /* over the top and away */
+    transform: translate(var(--dx, 0), calc(var(--dy, 0px) - 12%)) rotate(var(--tilt, 0deg)) rotateX(112deg);
+    box-shadow: 0 2px 2px rgba(0, 0, 0, 0), 0 30px 34px -12px rgba(0, 0, 0, 0);
+    opacity: 0;
+  }
 }
-html[data-reduce-motion="true"] .flip-in-next, html[data-reduce-motion="true"] .flip-in-prev { animation: none; }
-html[data-reduce-motion="true"] .booklet, html[data-reduce-motion="true"] .booklet:hover { transition: none; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .peel-up, .peel-down { animation: none; }
+  .peel-up { display: none; }
+  .note-stack, .note-stack:hover, .note-stack:active { transition: none; transform: none; }
+}
+html[data-reduce-motion="true"] .peel-up, html[data-reduce-motion="true"] .peel-down { animation: none; }
+html[data-reduce-motion="true"] .peel-up { display: none; }
+html[data-reduce-motion="true"] .note-stack, html[data-reduce-motion="true"] .note-stack:hover { transition: none; transform: none; }
 @media (max-width: 640px) {
-  .booklet-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-4); }
-  .booklet { aspect-ratio: 4 / 5; }
-  .flipbook-stage { padding: var(--sp-2); }
+  .stack-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-5); padding-inline: var(--sp-2); }
+  .note-stack-top { padding: var(--sp-3) var(--sp-3) var(--sp-3); }
+  .flipstack-stage { padding: var(--sp-5) var(--sp-2) var(--sp-2); }
+  .flipstack-note { padding: var(--sp-4) var(--sp-4) var(--sp-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {

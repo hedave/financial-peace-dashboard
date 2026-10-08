@@ -162,10 +162,35 @@ export function groupArchivedBooklets(state) {
   return out;
 }
 
-/** Split a booklet's notes into flip-book pages of `perPage`. */
-export function paginate(items, perPage) {
-  const size = Math.max(1, Math.floor(Number(perPage) || 1));
-  const pages = [];
-  for (let i = 0; i < items.length; i += size) pages.push(items.slice(i, i + size));
-  return pages;
+/** 32-bit FNV-1a — tiny, stable string hash (same input → same number, every render/device). */
+export function hashString(str) {
+  let h = 0x811c9dc5;
+  const s = String(str ?? '');
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+export const TILT_MIN_DEG = 1;
+export const TILT_MAX_DEG = 4;
+export const TILT_MAX_OFFSET_PX = 4;
+
+/**
+ * How askew a sticky sits on its stack, derived only from its id:
+ * angle ±[1°, 4°] (never flat), x/y offset within ±4px. Stable across renders.
+ * @returns {{ angle: number, dx: number, dy: number }}
+ */
+export function stickyTilt(id) {
+  const h = hashString(`tilt:${id}`);
+  const span = TILT_MAX_DEG - TILT_MIN_DEG;
+  const mag = TILT_MIN_DEG + ((h % 1000) / 999) * span;
+  const sign = (h >>> 10) & 1 ? 1 : -1;
+  const off = (bits) => (((h >>> bits) % (TILT_MAX_OFFSET_PX * 2 + 1)) - TILT_MAX_OFFSET_PX);
+  return {
+    angle: Math.round(sign * mag * 100) / 100,
+    dx: off(12),
+    dy: off(20),
+  };
 }

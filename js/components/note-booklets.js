@@ -2,24 +2,31 @@ import { el, formatDate, formatCurrency } from '../utils.js';
 import { icon } from '../icons.js';
 import { store } from '../store.js';
 import { showModal, showToast } from './modal.js';
-import { groupArchivedBooklets, paginate, UNDATED_KEY } from '../note-archive.js';
+import { groupArchivedBooklets, stickyTilt, UNDATED_KEY } from '../note-archive.js';
 
 /**
- * Archive shelf (one booklet per month/year) + flip-book viewer.
+ * Archive shelf (one sticky-note stack per month/year) + stack viewer where the
+ * top note flips up from its bottom edge, like a pad glued along the top.
  * Plain JS/CSS. Every piece of note text goes in as a text node (el() string
  * children / textContent) — never innerHTML.
  */
+
+/** Notes visible in a stack (top + up to 3 peeking underneath). */
+export const STACK_LAYERS = 4;
+const FLIP_MS = 520;
 
 function prefersReducedMotion() {
   if (document.documentElement.getAttribute('data-reduce-motion') === 'true') return true;
   return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Notes per flip-book page: one on phones, a few on wider screens. */
-export function notesPerPage(width = window.innerWidth) {
-  if (width <= 640) return 1;
-  if (width < 960) return 2;
-  return 4;
+/** Apply a note's stable tilt via CSSOM custom properties (no style-attribute strings). */
+function applyTilt(node, noteId, depth = 0) {
+  const t = stickyTilt(noteId);
+  node.style.setProperty('--tilt', `${t.angle}deg`);
+  node.style.setProperty('--dx', `${t.dx + depth * 2}px`);
+  node.style.setProperty('--dy', `${t.dy + depth * 4}px`);
+  return node;
 }
 
 function localDay(iso) {
@@ -36,58 +43,69 @@ function linkedTxFor(noteId) {
   return (st.transactions || []).find(t => t && t.id === link.txId) || null;
 }
 
-/** A short teaser from the newest note in the booklet (plain text, one-line-ish). */
-function peekText(b) {
-  const last = b.notes[b.notes.length - 1]?.note;
-  const raw = String(last?.title || '').trim() || String(last?.text || '').trim();
+/** Short plain-text teaser (title, else text). */
+function teaser(note, max = 80) {
+  const raw = String(note?.title || '').trim() || String(note?.text || '').trim();
   const flat = raw.replace(/\s+/g, ' ');
-  return flat.length > 90 ? `${flat.slice(0, 89)}…` : flat;
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Shelf of booklets. Returns a DOM node. `onChange` re-renders the Notes page. */
+/** Peeking notes under a top note: their own colors + their own tilt. */
+function underLayers(entries, className) {
+  return entries.map((entry, i) => applyTilt(
+    el('span', { className: `${className} sticky-${entry.note.color || 'yellow'}`, 'aria-hidden': 'true' }),
+    entry.note.id,
+    i + 1,
+  ));
+}
+
+/** Shelf of month stacks. Returns a DOM node. `onChange` re-renders the Notes page. */
 export function renderArchiveShelf({ onChange } = {}) {
   const booklets = groupArchivedBooklets(store.getState());
   const wrap = el('section', { className: 'booklet-shelf-wrap section', 'aria-labelledby': 'booklet-shelf-title' });
   wrap.appendChild(el('div', { className: 'booklet-shelf-head' },
     el('h3', { className: 'section-title', id: 'booklet-shelf-title' }, 'Archive'),
-    el('p', { className: 'card-sub' }, 'Old stickies, bound by month. Tap a booklet to flip through it.'),
+    el('p', { className: 'card-sub' }, 'Old stickies, stacked by month. Tap a stack to flip through it.'),
   ));
   if (!booklets.length) {
     wrap.appendChild(el('div', { className: 'empty-state booklet-empty', role: 'status' },
-      el('div', { className: 'empty-icon', 'aria-hidden': 'true' }, icon('book', 32)),
+      el('div', { className: 'empty-icon', 'aria-hidden': 'true' }, icon('archive', 32)),
       el('h3', {}, 'No archived stickies yet'),
       el('p', {}, 'Tap the archive button on a sticky to file it here. You can unarchive it anytime.'),
     ));
     return wrap;
   }
-  const shelf = el('div', { className: 'booklet-shelf', role: 'list' });
+  const shelf = el('div', { className: 'stack-shelf', role: 'list' });
   booklets.forEach(b => {
     const countLabel = `${b.count} note${b.count === 1 ? '' : 's'}`;
-    shelf.appendChild(el('div', { role: 'listitem', className: 'booklet-slot' },
+    const [first, ...rest] = b.notes;
+    // Back-to-front: deepest peeking note first so the top note paints last
+    const layers = underLayers(rest.slice(0, STACK_LAYERS - 1), 'note-stack-layer').reverse();
+    const top = applyTilt(el('span', { className: `note-stack-top sticky-${first.note.color || 'yellow'}` },
+      el('span', { className: 'note-stack-month' }, b.month),
+      b.year ? el('span', { className: 'note-stack-year' }, b.year) : null,
+      el('span', { className: 'note-stack-peek', 'aria-hidden': 'true' }, teaser(first.note)),
+      el('span', { className: 'note-stack-count' }, countLabel),
+    ), first.note.id, 0);
+    shelf.appendChild(el('div', { role: 'listitem', className: 'stack-slot' },
       el('button', {
         type: 'button',
-        className: `booklet sticky-${b.color}`,
-        'aria-label': `${b.label}, ${countLabel}. Open booklet`,
+        className: 'note-stack',
+        'aria-label': `${b.label}, ${countLabel}. Open stack`,
         onClick: () => openBooklet(b.key, { onChange }),
-      },
-        el('span', { className: 'booklet-label' },
-          el('span', { className: 'booklet-month' }, b.month),
-          b.year ? el('span', { className: 'booklet-year' }, b.year) : null,
-        ),
-        el('span', { className: 'booklet-peek', 'aria-hidden': 'true' }, peekText(b)),
-        el('span', { className: 'booklet-count' }, countLabel),
-      ),
+      }, ...layers, top),
     ));
   });
   wrap.appendChild(shelf);
   return wrap;
 }
 
+/** The readable top note of the viewer (exported for tests). */
 export function renderFlipbookNote(entry, { onUnarchive }) {
   const { note, boardTitle } = entry;
-  const card = el('article', { className: `flipbook-note sticky-${note.color || 'yellow'}` });
-  if (String(note.title || '').trim()) card.appendChild(el('h4', { className: 'flipbook-note-title' }, String(note.title)));
-  const body = el('p', { className: 'flipbook-note-text' });
+  const card = el('article', { className: `flipstack-note sticky-${note.color || 'yellow'}` });
+  if (String(note.title || '').trim()) card.appendChild(el('h4', { className: 'flipstack-note-title' }, String(note.title)));
+  const body = el('p', { className: 'flipstack-note-text' });
   body.textContent = String(note.text || '').trim() || (note.title ? '' : 'Empty sticky');
   card.appendChild(body);
   const meta = [
@@ -95,13 +113,13 @@ export function renderFlipbookNote(entry, { onUnarchive }) {
     note.archivedAt ? `Archived ${localDay(note.archivedAt)}` : null,
     `Page: ${boardTitle}`,
   ].filter(Boolean).join(' · ');
-  card.appendChild(el('p', { className: 'flipbook-note-meta' }, meta));
+  card.appendChild(el('p', { className: 'flipstack-note-meta' }, meta));
   const tx = linkedTxFor(note.id);
   if (tx) {
-    card.appendChild(el('p', { className: 'flipbook-note-link' },
+    card.appendChild(el('p', { className: 'flipstack-note-link' },
       `Linked to ${String(tx.description || 'a transaction')} · ${formatCurrency(Math.abs(Number(tx.amount) || 0))}`));
   }
-  card.appendChild(el('div', { className: 'flipbook-note-actions' },
+  card.appendChild(el('div', { className: 'flipstack-note-actions' },
     el('button', {
       type: 'button',
       className: 'btn btn-secondary btn-sm',
@@ -112,23 +130,72 @@ export function renderFlipbookNote(entry, { onUnarchive }) {
   return card;
 }
 
-/** Open one month's booklet as a flip book (modal). */
+/** Open one month as a sticky stack; the top note flips up to reveal the next. */
 export function openBooklet(key, { onChange } = {}) {
   let booklet = groupArchivedBooklets(store.getState()).find(b => b.key === key);
   if (!booklet) return null;
-  let perPage = notesPerPage();
-  let pageIndex = 0;
+  let index = 0;
+  let peeling = null; // outgoing note mid-flip
 
-  const stage = el('div', { className: 'flipbook-stage', tabIndex: '-1' });
-  const prevBtn = el('button', { type: 'button', className: 'flipbook-nav flipbook-prev', 'aria-label': 'Previous page' }, icon('chevronLeft', 22));
-  const nextBtn = el('button', { type: 'button', className: 'flipbook-nav flipbook-next', 'aria-label': 'Next page' }, icon('chevron', 22));
-  const indicator = el('p', { className: 'flipbook-indicator', 'aria-live': 'polite', 'aria-atomic': 'true' });
-  const book = el('div', { className: 'flipbook' },
+  const stack = el('div', { className: 'flipstack-stack' });
+  const stage = el('div', { className: 'flipstack-stage', tabIndex: '-1' }, stack);
+  const prevBtn = el('button', { type: 'button', className: 'flipstack-nav flipstack-prev', 'aria-label': 'Previous note' }, icon('chevronLeft', 22));
+  const nextBtn = el('button', { type: 'button', className: 'flipstack-nav flipstack-next', 'aria-label': 'Next note' }, icon('chevron', 22));
+  const indicator = el('p', { className: 'flipstack-indicator', 'aria-live': 'polite', 'aria-atomic': 'true' });
+  const view = el('div', { className: 'flipstack' },
     stage,
-    el('div', { className: 'flipbook-controls' }, prevBtn, indicator, nextBtn),
+    el('div', { className: 'flipstack-controls' }, prevBtn, indicator, nextBtn),
   );
 
-  const pages = () => paginate(booklet.notes, perPage);
+  function finishPeel() {
+    if (!peeling) return;
+    clearTimeout(peeling.timer);
+    peeling.node.remove();
+    peeling = null;
+  }
+
+  function buildTop(entry) {
+    return applyTilt(renderFlipbookNote(entry, { onUnarchive }), entry.note.id, 0);
+  }
+
+  /** direction: 0 = instant, 1 = top note flips up and away, -1 = previous note flips back down */
+  function paint(direction = 0) {
+    finishPeel();
+    const notes = booklet.notes;
+    index = Math.max(0, Math.min(index, notes.length - 1));
+    const animate = direction !== 0 && !prefersReducedMotion();
+    const outgoing = stack.querySelector('.flipstack-note');
+
+    const under = underLayers(notes.slice(index + 1, index + STACK_LAYERS), 'flipstack-layer').reverse();
+    const top = buildTop(notes[index]);
+    top.classList.add('is-top');
+    stack.replaceChildren(...under, top);
+
+    if (animate && direction > 0 && outgoing) {
+      // Old top lifts from its bottom edge, hinges on its top edge, flips up and away.
+      outgoing.classList.remove('is-top');
+      outgoing.classList.add('flipstack-peel', 'peel-up');
+      outgoing.setAttribute('aria-hidden', 'true');
+      outgoing.inert = true;
+      stack.appendChild(outgoing);
+      peeling = { node: outgoing, timer: setTimeout(finishPeel, FLIP_MS + 120) };
+      outgoing.addEventListener('animationend', finishPeel, { once: true });
+    } else if (animate && direction < 0) {
+      // Previous note flips back down onto the stack (same hinge, reversed).
+      top.classList.add('peel-down');
+      top.addEventListener('animationend', () => top.classList.remove('peel-down'), { once: true });
+    }
+    indicator.textContent = `${index + 1} / ${notes.length}`;
+    prevBtn.disabled = index === 0;
+    nextBtn.disabled = index >= notes.length - 1;
+  }
+
+  function go(delta) {
+    const next = Math.max(0, Math.min(index + delta, booklet.notes.length - 1));
+    if (next === index) return;
+    index = next;
+    paint(delta);
+  }
 
   function onUnarchive(note) {
     const res = store.unarchiveStickyNote(note.id);
@@ -140,76 +207,60 @@ export function openBooklet(key, { onChange } = {}) {
       modal.close();
       return;
     }
-    pageIndex = Math.min(pageIndex, pages().length - 1);
     paint(0);
-  }
-
-  function paint(direction = 0) {
-    const all = pages();
-    const total = all.length;
-    pageIndex = Math.max(0, Math.min(pageIndex, total - 1));
-    const page = el('div', { className: `flipbook-page per-${perPage}` });
-    all[pageIndex].forEach(entry => page.appendChild(renderFlipbookNote(entry, { onUnarchive })));
-    if (direction && !prefersReducedMotion()) {
-      page.classList.add(direction > 0 ? 'flip-in-next' : 'flip-in-prev');
-    }
-    stage.replaceChildren(page);
-    indicator.textContent = `${pageIndex + 1} / ${total}`;
-    prevBtn.disabled = pageIndex === 0;
-    nextBtn.disabled = pageIndex >= total - 1;
-  }
-
-  function go(delta) {
-    const total = pages().length;
-    const next = Math.max(0, Math.min(pageIndex + delta, total - 1));
-    if (next === pageIndex) return;
-    pageIndex = next;
-    paint(delta);
   }
 
   prevBtn.addEventListener('click', () => go(-1));
   nextBtn.addEventListener('click', () => go(1));
 
-  // Swipe (touch / pen / mouse drag) — horizontal only, vertical scroll still works.
-  let sx = null; let sy = 0;
-  stage.addEventListener('pointerdown', e => {
-    if (e.target.closest('button')) return;
-    sx = e.clientX; sy = e.clientY;
-  });
-  const endSwipe = e => {
-    if (sx == null) return;
-    const dx = e.clientX - sx; const dy = e.clientY - sy;
-    sx = null;
-    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
+  // Swipe: up (or left) = next, down (or right) = back. Touch events still fire when
+  // the browser scrolls, so a long note scrolls first and only a non-scroll swipe flips.
+  const body = () => stage.closest('.modal-body');
+  let start = null;
+  const begin = (x, y) => { start = { x, y, scroll: body()?.scrollTop || 0 }; };
+  const end = (x, y) => {
+    if (!start) return;
+    const dx = x - start.x; const dy = y - start.y;
+    const scrolled = Math.abs((body()?.scrollTop || 0) - start.scroll) > 2;
+    start = null;
+    if (scrolled) return;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx) * 1.3) go(dy < 0 ? 1 : -1);
+    else if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) go(dx < 0 ? 1 : -1);
   };
-  stage.addEventListener('pointerup', endSwipe);
-  stage.addEventListener('pointercancel', () => { sx = null; });
+  stage.addEventListener('touchstart', e => {
+    if (e.target.closest('button') || e.touches.length !== 1) { start = null; return; }
+    begin(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  stage.addEventListener('touchend', e => {
+    const t = e.changedTouches[0];
+    if (t) end(t.clientX, t.clientY);
+  }, { passive: true });
+  stage.addEventListener('touchcancel', () => { start = null; }, { passive: true });
+  stage.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || e.target.closest('button')) return;
+    begin(e.clientX, e.clientY);
+  });
+  stage.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'mouse') return;
+    end(e.clientX, e.clientY);
+  });
 
-  // Keyboard: ←/→ turn pages. Escape closes (modal.js handles Escape for every sheet).
+  // Keyboard: ←/→ flip. Escape closes (modal.js handles Escape for every sheet).
   const onKey = e => {
-    if (!document.body.contains(book)) return;
+    if (!document.body.contains(view)) return;
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
   };
-  const onResize = () => {
-    const next = notesPerPage();
-    if (next === perPage) return;
-    const firstNote = pageIndex * perPage;
-    perPage = next;
-    pageIndex = Math.floor(firstNote / perPage);
-    paint(0);
-  };
   document.addEventListener('keydown', onKey);
-  window.addEventListener('resize', onResize);
 
   const label = key === UNDATED_KEY ? 'Undated notes' : booklet.label;
   const modal = showModal({
     title: label,
-    body: book,
+    body: view,
     onClose: () => {
+      finishPeel();
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', onResize);
     },
   });
   modal.modal.classList.add('modal-booklet');

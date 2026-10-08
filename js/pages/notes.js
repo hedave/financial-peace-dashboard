@@ -56,7 +56,7 @@ const STICKY_COLORS = [
 
 let activeBoardId = null;
 let notesSearch = '';
-/** 'board' (live stickies) | 'archive' (booklet shelf) */
+/** 'board' (live stickies) | 'archive' (month sticky stacks) */
 let notesView = 'board';
 
 /** For Quick Notes popup — last board viewed on the Notes page. */
