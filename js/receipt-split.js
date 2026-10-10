@@ -7,10 +7,15 @@
  *     similarity ≥ 0.6 (descriptionSimilarity), not already split.
  *     A match.externalId wins over the fuzzy search.
  *   - 0 or >1 candidates → refuse (no_match / multiple_matches).
- *   - splits must equal the bank amount within $0.01 (sum_mismatch); a 1¢
- *     rounding gap is absorbed by the largest split so stored splits sum exactly.
- *   - already split → already_split, unless it was split by the same receiptId
- *     (idempotent no-op, status "unchanged").
+ *   - splits must equal the bank amount within $0.03 (the same tolerance used
+ *     to list the row as a candidate), else sum_mismatch. A gap of up to 3¢ is
+ *     put on the largest split so the stored splits equal the bank amount
+ *     exactly; the adjustment is reported (API) and shown (Receipts to review).
+ *   - already split → already_split.
+ *   - receiptId already on a row: compared by fingerprint (row id + split
+ *     cents). Same → "unchanged"; different → receipt_conflict; the user
+ *     removed / changed the split since → "removed_by_user" / "changed_by_user"
+ *     (never re-applied).
  *   - an existing single envelope is only replaced when it is Groceries,
  *     Household / Misc, missing, or was set by a merchant rule
  *     (tx.categorySource === 'rule'); otherwise category_conflict.
@@ -20,7 +25,10 @@ import { descriptionSimilarity, resolveRequestedEnvelope } from './csv-import.js
 
 export const RECEIPT_REPLACEABLE_ENVELOPES = ['Groceries', 'Household / Misc'];
 export const AMOUNT_TOLERANCE_CENTS = 3;
+/** Receipt lines vs the receipt's own total (review intake). */
 export const SUM_TOLERANCE_CENTS = 1;
+/** Split total vs the BANK amount: same window as candidate matching, so a listed row can always be approved. */
+export const BANK_TOLERANCE_CENTS = AMOUNT_TOLERANCE_CENTS;
 export const DATE_WINDOW_DAYS = 3;
 export const MERCHANT_MIN_SIMILARITY = 0.6;
 export const MAX_SPLITS = 12;
@@ -52,6 +60,8 @@ export const ERROR_STATUS = {
   already_split: 409,
   category_conflict: 409,
   not_expense: 409,
+  receipt_conflict: 409,
+  not_a_candidate: 409,
   review_full: 409,
   review_not_found: 404,
 };
@@ -59,10 +69,12 @@ export const ERROR_STATUS = {
 export const ERROR_MESSAGE = {
   no_match: 'No bank transaction fits this receipt (amount ±$0.03, date ±3 days, merchant).',
   multiple_matches: 'More than one bank transaction fits; send it to review instead.',
-  sum_mismatch: 'Splits must add up to the bank amount (within $0.01).',
+  sum_mismatch: 'Splits must add up to the bank amount (within $0.03).',
   already_split: 'That transaction is already split.',
   category_conflict: 'That transaction already has a different envelope set by hand.',
   not_expense: 'That transaction is not an expense.',
+  receipt_conflict: 'That receiptId was already used for a different transaction or different splits.',
+  not_a_candidate: 'That transaction is not one of this receipt’s candidates.',
   unknown_envelope: 'Envelope not found.',
   invalid_splits: 'Need at least two different envelopes with positive amounts.',
   review_full: 'Too many receipts waiting for review.',
@@ -305,23 +317,41 @@ export function resolveSplitEnvelopes(lines, categories) {
 }
 
 /**
- * Splits must equal the bank amount within 1¢. A 1¢ gap goes on the largest
- * line (first one on ties) so the stored splits sum exactly to the bank amount.
+ * Splits must equal the bank amount within BANK_TOLERANCE_CENTS (3¢). The gap
+ * goes on the largest line (first one on ties) so the stored splits sum
+ * exactly to the bank amount. Returns which line moved and by how much.
  */
-export function reconcileSplitCents(lines, bankCents) {
+export function reconcileSplitCents(lines, bankCents, tolerance = BANK_TOLERANCE_CENTS) {
   const sum = lines.reduce((s, l) => s + l.cents, 0);
   const diff = bankCents - sum;
-  if (Math.abs(diff) > SUM_TOLERANCE_CENTS) {
+  if (Math.abs(diff) > tolerance) {
     return fail('sum_mismatch', { bankAmount: fromCents(bankCents), splitsTotal: fromCents(sum) });
   }
   const out = lines.map(l => ({ ...l }));
+  let adjustedCategoryId = null;
   if (diff !== 0) {
     let big = 0;
     out.forEach((l, i) => { if (l.cents > out[big].cents) big = i; });
     out[big].cents += diff;
     if (out[big].cents <= 0) return fail('sum_mismatch', { bankAmount: fromCents(bankCents), splitsTotal: fromCents(sum) });
+    adjustedCategoryId = out[big].categoryId ?? null;
   }
-  return { ok: true, value: out, adjustedCents: diff };
+  return { ok: true, value: out, adjustedCents: diff, adjustedCategoryId };
+}
+
+/** "+3¢ on Groceries to match bank" (null when no adjustment). */
+export function describeAdjustment(cents, envelopeName) {
+  if (!cents) return null;
+  const sign = cents > 0 ? '+' : '\u2212';
+  return `${sign}${Math.abs(cents)}¢ on ${envelopeName || 'the largest envelope'} to match bank`;
+}
+
+/** Stable fingerprint of an applied receipt: row id + split cents per envelope. */
+export function receiptFingerprint(txId, splits) {
+  const parts = (splits || [])
+    .map(sp => `${sp.categoryId}=${sp.cents ?? Math.round((Number(sp.amount) || 0) * 100)}`)
+    .sort();
+  return `${txId}|${parts.join(',')}`;
 }
 
 /** Fuzzy candidates (any split state). */
@@ -378,6 +408,8 @@ export function planSplitForTx(state, tx, lines) {
     tx,
     splits: rec.value.map(l => ({ categoryId: l.categoryId, amount: fromCents(l.cents) })),
     adjustedCents: rec.adjustedCents,
+    adjustedCategoryId: rec.adjustedCategoryId,
+    fingerprint: receiptFingerprint(tx.id, rec.value),
   };
 }
 
@@ -386,14 +418,50 @@ export function findReceiptTx(state, receiptId) {
   return (state?.transactions || []).find(t => t && t.receiptId === receiptId) || null;
 }
 
+/** Does this request's match point at `tx`? externalId wins when any row carries it. */
+function requestTargetsTx(state, match, tx) {
+  if (match.externalId) {
+    const owner = (state?.transactions || []).find(t => t && t.externalId && String(t.externalId) === match.externalId);
+    if (owner) return owner.id === tx.id;
+    if (!match.merchant) return false;
+  }
+  return fuzzyCandidates([tx], match).length === 1;
+}
+
+/**
+ * The receiptId is already on `done`. Never writes.
+ *   request ≠ stored fingerprint (other row or other split cents) → receipt_conflict
+ *   user removed the split since → status removed_by_user
+ *   user changed the split since → status changed_by_user
+ *   otherwise → status unchanged (idempotent retry)
+ */
+function planRepeat(state, input, done, resolvedLines) {
+  const stored = typeof done.receiptFingerprint === 'string' && done.receiptFingerprint
+    ? done.receiptFingerprint
+    : receiptFingerprint(done.id, done.splits || []);
+  const rec = reconcileSplitCents(resolvedLines, txCents(done));
+  const requested = rec.ok && requestTargetsTx(state, input.match, done)
+    ? receiptFingerprint(done.id, rec.value)
+    : null;
+  if (requested !== stored) return fail('receipt_conflict');
+  if (!isSplitTx(done)) return { ok: true, status: 'removed_by_user', tx: done, splits: [] };
+  if (receiptFingerprint(done.id, done.splits) !== stored) {
+    return { ok: true, status: 'changed_by_user', tx: done, splits: done.splits };
+  }
+  return { ok: true, status: 'unchanged', tx: done, splits: done.splits };
+}
+
 /**
  * Full plan for an API apply request (validated input from validateSplitBody).
- * status 'unchanged' = same receiptId already applied → idempotent no-op.
+ * A receiptId already on a row never writes (see planRepeat).
  */
 export function planReceiptSplit(state, input) {
-  const done = findReceiptTx(state, input.receiptId);
-  if (done) return { ok: true, status: 'unchanged', tx: done, splits: done.splits || [] };
   const resolved = resolveSplitEnvelopes(input.splits, state?.categories);
+  const done = findReceiptTx(state, input.receiptId);
+  if (done) {
+    if (!resolved.ok) return fail('receipt_conflict');
+    return planRepeat(state, input, done, resolved.value);
+  }
   if (!resolved.ok) return resolved;
   const found = findSplitCandidate(state, input.match);
   if (!found.ok) return found;

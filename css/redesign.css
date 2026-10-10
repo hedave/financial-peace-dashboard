@@ -905,7 +905,7 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .note-review-linked > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: var(--fw-semi); color: var(--primary); }
 .note-review-linked .list-row__title { white-space: normal; }
 
-/* ---- Receipts to review (20261009a): receipt splits on Log, in-flow card -- */
+/* ---- Receipts to review (20261009a/b): receipt splits on Log, in-flow card -- */
 .receipt-review .receipt-review-intro { margin: 0 0 var(--sp-3); }
 .receipt-review-item { padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .receipt-review-item:first-of-type { border-top: 0; }
@@ -924,6 +924,8 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .receipt-review-candidates .list-row { min-height: 52px; }
 .receipt-review-candidates .list-row__title { overflow-wrap: anywhere; }
 .receipt-review-wait { margin: 0; }
+.receipt-review-adjust { display: block; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.receipt-review-adjust--blocked { color: var(--danger); }
 .receipt-review-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .receipt-review-editor { margin-top: var(--sp-2); }
 .receipt-review-editor[hidden] { display: none; }

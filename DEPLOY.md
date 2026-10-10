@@ -151,7 +151,7 @@ Netlify env (add; do not reuse ingest or bills-read secrets):
 
 Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Merchant category rules run (uncategorized only when no rule matches). No bill auto-match, auto-pay, or envelope assignment. Optional `checkingBalance` overwrites `state.balances.checking` after import; omit it and import math updates checking.
 
-## Receipt split API (build 20261009a)
+## Receipt split API (build 20261009b)
 
 Splits an existing bank row from a receipt and feeds Log → Receipts to review. See `docs/TRANSACTIONS-API.md` → *Receipt split*.
 

@@ -56,7 +56,7 @@ When CoS (or David) sends bank screenshots or a list of transactions:
   "receiptId": "store-date-last4-of-receipt-number",
   "memo": "Sam's Club receipt"
 }
-   Splits must add up to the BANK amount (to the penny; 1 cent of rounding is fixed for you). Use the same receiptId on retries; a repeat is a safe no-op. Try "dryRun": true first if unsure.
+   Splits must add up to the BANK amount (FigPig fixes up to 3 cents on the largest split and tells you in "adjustment"). Use the same receiptId only to retry the SAME split on the SAME charge (a repeat is a safe no-op); a new receipt needs a new receiptId, otherwise you get receipt_conflict. If the answer is removed_by_user or changed_by_user, David edited it: stop, do not resend. Try "dryRun": true first if unsure.
 10. If it answers no_match, multiple_matches, sum_mismatch, already_split or category_conflict, or you are unsure how to sort items: send the receipt to review instead with {"review": true, "receipt": {receiptId, store, date, total, proposedSplits, items, reason}}. David approves it on Log → Receipts to review. Never guess a transaction.
 
 If the API returns 409 (no cloud budget yet), tell CoS: David must open FigPig once and Sync Now. Then retry the same payload. Do not open the site for him.

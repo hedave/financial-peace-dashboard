@@ -27,6 +27,7 @@ import {
   planSplitForTx,
   findReceiptTx,
   closeReviewItem,
+  receiptFingerprint,
   splitsFromItemBuckets,
 } from './receipt-split.js';
 import { findBillForTransaction, findAutoPayBillForTransaction, findExactBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
@@ -889,7 +890,12 @@ class Store {
   applyReceiptSplit(plan, { receiptId, memo = '' } = {}, opts = {}) {
     const tx = this.state.transactions.find(t => t.id === plan?.tx?.id);
     if (!tx) return { ok: false, code: 'no_match' };
-    const updates = { splits: plan.splits, receiptId, categorySource: 'receipt' };
+    const updates = {
+      splits: plan.splits,
+      receiptId,
+      receiptFingerprint: plan.fingerprint || receiptFingerprint(tx.id, plan.splits),
+      categorySource: 'receipt',
+    };
     if (memo && !String(tx.memo || '').trim()) updates.memo = memo;
     this.updateTransaction(tx.id, updates, opts);
     const after = this.state.transactions.find(t => t.id === tx.id);
@@ -900,25 +906,55 @@ class Store {
     return { ok: true, tx: after, memoSet: updates.memo !== undefined };
   }
 
+  /**
+   * Candidate rows for one review item: live fuzzy matches (±3¢, ±3 days,
+   * merchant) plus rows FigPig stored when it was queued, unsplit expenses only.
+   * This is the ONLY set Approve accepts.
+   */
+  receiptReviewCandidates(item, s = this.state) {
+    const live = reviewCandidates(s, { ...item, totalCents: Math.round((Number(item.total) || 0) * 100) });
+    const ids = new Set(live.map(t => t.id));
+    (item.candidates || []).forEach(id => {
+      const t = s.transactions.find(x => x.id === id);
+      if (t && !this.isSplitTransaction(t) && t.type === 'expense' && !ids.has(t.id) && ids.size < 5) {
+        live.push(t);
+        ids.add(t.id);
+      }
+    });
+    return live;
+  }
+
   /** Pending review items with live candidate transactions (newest first). */
   getReceiptReview() {
     if (isNotesOnlyRole()) return [];
     const s = this.state;
     return (s.receiptReview || [])
       .filter(r => r.status === 'pending' && !findReceiptTx(s, r.receiptId))
-      .map(r => {
-        const live = reviewCandidates(s, { ...r, totalCents: Math.round((Number(r.total) || 0) * 100) });
-        const ids = new Set(live.map(t => t.id));
-        (r.candidates || []).forEach(id => {
-          const t = s.transactions.find(x => x.id === id);
-          if (t && !this.isSplitTransaction(t) && t.type === 'expense' && !ids.has(t.id) && ids.size < 5) {
-            live.push(t);
-            ids.add(t.id);
-          }
-        });
-        return { item: r, candidates: live };
-      })
+      .map(r => ({ item: r, candidates: this.receiptReviewCandidates(r, s) }))
       .sort((a, b) => String(b.item.date).localeCompare(String(a.item.date)));
+  }
+
+  /**
+   * Dry-run Approve (no write): the plan for this item on this candidate, incl.
+   * the ≤3¢ adjustment that makes the split equal the bank amount.
+   * @returns {{ok:true, plan, adjustedCents, adjustedCategoryId} | {ok:false, code}}
+   */
+  previewReceiptReview(receiptId, txId, splits = null) {
+    const item = (this.state.receiptReview || []).find(r => r.receiptId === receiptId && r.status === 'pending');
+    if (!item) return { ok: false, code: 'review_not_found' };
+    if (findReceiptTx(this.state, receiptId)) return { ok: false, code: 'already_split' };
+    const allowed = this.receiptReviewCandidates(item);
+    const tx = allowed.find(t => t.id === txId);
+    if (!tx) return { ok: false, code: 'not_a_candidate' };
+    const lines = splits || (item.proposedSplits || []).map(p => ({
+      categoryId: p.categoryId,
+      cents: Math.round((Number(p.amount) || 0) * 100),
+    }));
+    const resolved = resolveSplitEnvelopes(lines, this.state.categories);
+    if (!resolved.ok) return resolved;
+    const plan = planSplitForTx(this.state, tx, resolved.value);
+    if (!plan.ok) return plan;
+    return { ok: true, plan, item, adjustedCents: plan.adjustedCents, adjustedCategoryId: plan.adjustedCategoryId };
   }
 
   getReceiptReviewCount() {
@@ -932,24 +968,16 @@ class Store {
   /**
    * Approve a review item onto one candidate. splits: optional
    * [{categoryId, cents}] from the Edit view; default = proposedSplits.
-   * Same checks as the API (sum within 1¢, not already split, envelope guard).
+   * txId must be one of the item's candidates (receiptReviewCandidates).
+   * Same checks as the API (bank amount within 3¢ with the gap on the largest
+   * split, not already split, envelope guard).
    */
   approveReceiptReview(receiptId, txId, splits = null, opts = {}) {
-    const item = (this.state.receiptReview || []).find(r => r.receiptId === receiptId && r.status === 'pending');
-    if (!item) return { ok: false, code: 'review_not_found' };
-    if (findReceiptTx(this.state, receiptId)) return { ok: false, code: 'already_split' };
-    const tx = this.state.transactions.find(t => t.id === txId);
-    if (!tx) return { ok: false, code: 'no_match' };
-    const lines = splits || (item.proposedSplits || []).map(p => ({
-      categoryId: p.categoryId,
-      cents: Math.round((Number(p.amount) || 0) * 100),
-    }));
-    const resolved = resolveSplitEnvelopes(lines, this.state.categories);
-    if (!resolved.ok) return resolved;
-    const plan = planSplitForTx(this.state, tx, resolved.value);
-    if (!plan.ok) return plan;
-    const memo = `Receipt: ${item.store}`.slice(0, 200);
-    return this.applyReceiptSplit(plan, { receiptId, memo }, opts);
+    const pre = this.previewReceiptReview(receiptId, txId, splits);
+    if (!pre.ok) return pre;
+    const memo = `Receipt: ${pre.item.store}`.slice(0, 200);
+    const res = this.applyReceiptSplit(pre.plan, { receiptId, memo }, opts);
+    return res.ok ? { ...res, adjustedCents: pre.adjustedCents, adjustedCategoryId: pre.adjustedCategoryId } : res;
   }
 
   /** Edit view helper: bucket totals for an item assignment. */
@@ -3933,6 +3961,11 @@ class Store {
     this.update(s => {
       const tx = s.transactions.find(x => x.id === id);
       if (!tx) return;
+      const envelopeKey = t => JSON.stringify([
+        t.categoryId || null,
+        this.normalizeSplits(t.splits).map(sp => [sp.categoryId, Math.round(sp.amount * 100)]),
+      ]);
+      const envelopeBefore = envelopeKey(tx);
 
       const oldType = tx.type;
       const oldAmount = Math.abs(Number(tx.amount)) || 0;
@@ -3983,16 +4016,21 @@ class Store {
         }
       }
       // Who set the envelope: 'rule' (merchant rule) / 'receipt' (receipt split).
-      // Any other envelope edit (the Log form) is manual and clears it.
+      // A manual edit clears it only when the envelope or splits actually change
+      // (the Log form always resends categoryId/splits, even for a memo-only edit).
       if (updates.categorySource !== undefined) {
         if (updates.categorySource) tx.categorySource = String(updates.categorySource);
         else delete tx.categorySource;
-      } else if (updates.categoryId !== undefined || updates.splits !== undefined) {
+      } else if (envelopeKey(tx) !== envelopeBefore) {
         delete tx.categorySource;
       }
       if (updates.receiptId !== undefined) {
         if (updates.receiptId) tx.receiptId = String(updates.receiptId);
         else delete tx.receiptId;
+      }
+      if (updates.receiptFingerprint !== undefined) {
+        if (updates.receiptFingerprint) tx.receiptFingerprint = String(updates.receiptFingerprint).slice(0, 2000);
+        else delete tx.receiptFingerprint;
       }
       if (updates.debtId !== undefined) tx.debtId = updates.debtId || null;
       if (updates.incomeSourceId !== undefined) {

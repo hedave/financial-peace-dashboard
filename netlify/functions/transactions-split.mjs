@@ -8,6 +8,7 @@ import {
   upsertReviewItem,
   candidateSummary,
   publicSplits,
+  describeAdjustment,
   ERROR_STATUS,
   ERROR_MESSAGE,
 } from '../../js/receipt-split.js';
@@ -120,7 +121,11 @@ async function loadBudget(url, key, ownerId) {
   return Array.isArray(rows) ? rows[0] : null;
 }
 
-/** PATCH only if updated_at is still what we loaded (optimistic concurrency). */
+/**
+ * PATCH only if updated_at is still what we loaded (optimistic concurrency).
+ * Returns {ok:false} ONLY for a real updated_at mismatch (2xx with zero rows).
+ * Any other failure (4xx/5xx, bad body, network) throws → 502 upstream_error.
+ */
 async function saveBudget(url, key, ownerId, state, prevUpdatedAt) {
   const stamp = new Date().toISOString();
   const payload = { ...state, _cloudUpdatedAt: Date.now() };
@@ -132,9 +137,12 @@ async function saveBudget(url, key, ownerId, state, prevUpdatedAt) {
     headers: { ...sbHeaders(key), Prefer: 'return=representation' },
     body: JSON.stringify({ state: payload, updated_at: stamp }),
   });
-  const body = await res.json().catch(() => []);
-  const rows = Array.isArray(body) ? body : [];
-  return { ok: res.ok && rows.length > 0 };
+  if (!res.ok) throw new Error(`Save budget failed (${res.status})`);
+  const body = await res.json().catch(() => {
+    throw new Error('Save budget returned a non-JSON body');
+  });
+  if (!Array.isArray(body)) throw new Error('Save budget returned an unexpected body');
+  return { ok: body.length > 0 };
 }
 
 let storeLock = Promise.resolve();
@@ -185,9 +193,19 @@ export function applyToState(remoteState, input) {
     candidate: candidateSummary(plan.tx),
     splits: publicSplits(plan.splits, state.categories),
   };
-  if (plan.status === 'unchanged' || input.dryRun) {
-    return { plan: { ...plan, status: input.dryRun && plan.status !== 'unchanged' ? 'dry_run' : plan.status }, summary, write: false };
+  if (plan.adjustedCents) {
+    const env = state.categories.find(c => c.id === plan.adjustedCategoryId)?.name || null;
+    summary.adjustment = {
+      envelope: env,
+      amount: plan.adjustedCents / 100,
+      note: describeAdjustment(plan.adjustedCents, env),
+    };
   }
+  if (plan.status !== 'ready') {
+    // unchanged / removed_by_user / changed_by_user: receiptId already used, never re-applied
+    return { plan, summary, write: false };
+  }
+  if (input.dryRun) return { plan: { ...plan, status: 'dry_run' }, summary, write: false };
   const res = store.applyReceiptSplit(plan, { receiptId: input.receiptId, memo: input.memo }, { persist: false });
   if (!res.ok) return { plan: res };
   return { plan: { ok: true, status: 'applied' }, summary: { ...summary, memoSet: res.memoSet }, write: true };
@@ -257,7 +275,7 @@ export default async (req) => {
   if (result.missing) return json(409, { ok: false, error: 'no_budget', message: 'No FigPig budget in the cloud yet.' });
   if (result.error) {
     console.error('transactions-split failed', result.error);
-    return json(502, { ok: false, error: 'upstream_failed' });
+    return json(502, { ok: false, error: 'upstream_error' });
   }
   if (!result.plan.ok) return errorResponse(result.plan);
   if (result.write && !result.saved) {
@@ -274,6 +292,7 @@ export default async (req) => {
     receiptId: input.receiptId,
     candidate: result.summary.candidate,
     splits: result.summary.splits,
+    ...(result.summary.adjustment ? { adjustment: result.summary.adjustment } : {}),
     ...(status === 'applied' ? { memoSet: !!result.summary.memoSet } : {}),
   });
 };

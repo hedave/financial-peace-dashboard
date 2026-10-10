@@ -185,9 +185,13 @@ FigPig finds exactly one candidate: an **expense**, `|amount|` within **$0.03**,
 
 Then:
 
-- Splits must equal the **bank** amount within **$0.01**. A 1¢ rounding gap goes on the largest split so the stored splits add up exactly.
+- Splits must equal the **bank** amount within **$0.03** (the same window used to pick the row). Any gap up to 3¢ goes on the largest split so the stored splits equal the bank amount exactly; the response then carries `adjustment` (e.g. `"+3¢ on Groceries to match bank"`), and Receipts to review shows the same note before Approve.
 - An existing single envelope is replaced only if it is **Groceries**, **Household / Misc**, missing, or was set by a merchant rule (`categorySource: "rule"`; any manual edit in the Log clears that tag).
-- Same `receiptId` already on a transaction → `200 {"status":"unchanged"}` and no write (even if the splits differ).
+- `receiptId` already on a transaction → **never re-applied**. FigPig stores a fingerprint (row id + split cents) with it:
+  - same row and same split cents → `200 {"status":"unchanged"}`
+  - different row or different split cents → `409 receipt_conflict`
+  - David removed the split since → `200 {"status":"removed_by_user"}` (stop; do not resend)
+  - David changed the split since → `200 {"status":"changed_by_user"}` (stop; do not resend)
 - Saved with the `budget_states.updated_at` optimistic-concurrency check. On conflict FigPig reloads, re-plans and retries **once**; a second conflict → `409 conflict` (retry the same payload).
 
 ### Responses (trimmed: nothing else from the budget)
@@ -198,23 +202,26 @@ Then:
   "status": "applied",
   "receiptId": "sams-2026-10-05-0001",
   "candidate": { "id": "tx-id", "date": "2026-10-05", "amount": 120, "description": "SAMS CLUB #0000" },
-  "splits": [ { "envelope": "Groceries", "amount": 80 }, { "envelope": "Household / Misc", "amount": 40 } ],
+  "splits": [ { "envelope": "Groceries", "amount": 80.03 }, { "envelope": "Household / Misc", "amount": 40 } ],
+  "adjustment": { "envelope": "Groceries", "amount": 0.03, "note": "+3¢ on Groceries to match bank" },
   "memoSet": true
 }
 ```
 
-`status`: `applied`, `unchanged` (idempotent), or `dry_run`.
+`status`: `applied`, `dry_run`, `unchanged` (idempotent), `removed_by_user`, or `changed_by_user`. `adjustment` appears only when the split was nudged to match the bank amount.
 
 | Error (`{"ok":false,"error":…}`) | HTTP | Meaning |
 | --- | --- | --- |
 | `no_match` | 404 | No bank row fits |
 | `multiple_matches` | 409 | More than one fits (`count` only). Send it to review |
-| `sum_mismatch` | 422 | Splits ≠ bank amount (`bankAmount`, `splitsTotal`) |
+| `sum_mismatch` | 422 | Splits off from the bank amount by more than 3¢ (`bankAmount`, `splitsTotal`) |
+| `receipt_conflict` | 409 | `receiptId` already used for a different row or different split cents |
 | `already_split` | 409 | Row already split by something else |
 | `category_conflict` | 409 | Row has another envelope set by hand |
 | `not_expense` | 409 | `externalId` points at a non-expense |
 | `unknown_envelope` / `invalid_splits` | 422 | Envelope not found / fewer than 2 envelopes |
-| `conflict` | 409 | Cloud changed twice while saving |
+| `conflict` | 409 | Cloud changed twice while saving (real `updated_at` mismatch only) |
+| `upstream_error` | 502 | Supabase load/save failed (4xx/5xx/bad body). Not a conflict; safe to retry later |
 | `no_budget` | 409 | No cloud budget yet |
 
 ## Send a receipt to "Receipts to review"
@@ -246,4 +253,4 @@ When FigPig refuses (or the bot isn't sure), queue the receipt for David instead
 - Idempotent by `receiptId`: a pending item is refreshed (`updated`); an applied/dismissed one, or a receipt already on a transaction, stays put (`unchanged`). Max 50 pending (`review_full`).
 - Response: `{"ok":true,"status":"queued"|"updated"|"unchanged"|"dry_run","receiptId":"…","candidates":2,"pending":3}`.
 
-David sees it on **Log → Receipts to review** (Log tab badge counts it): **Approve** on the right bank row applies the same checks as the API, **Edit** moves receipt items between envelopes (tax/coupons shared by each envelope's share), **Dismiss** drops it.
+David sees it on **Log → Receipts to review** (Log tab badge counts it): **Approve** on one of the listed bank rows (only those rows are accepted) applies the same checks as the API, including the ≤3¢ adjustment shown on the row, **Edit** moves receipt items between envelopes (tax/coupons shared by each envelope's share), **Dismiss** drops it.

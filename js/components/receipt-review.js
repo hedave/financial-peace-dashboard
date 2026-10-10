@@ -1,7 +1,7 @@
 import { el, formatCurrency, formatDate } from '../utils.js';
 import { store } from '../store.js';
 import { showToast } from './modal.js';
-import { RECEIPT_REPLACEABLE_ENVELOPES } from '../receipt-split.js';
+import { RECEIPT_REPLACEABLE_ENVELOPES, describeAdjustment } from '../receipt-split.js';
 
 /**
  * "Receipts to review" card for the Log page (modeled on Notes to review).
@@ -31,6 +31,16 @@ const RESULT_MESSAGE = {
   unknown_envelope: 'One of those envelopes no longer exists. Nothing changed.',
   no_match: 'That transaction is gone. Nothing changed.',
   review_not_found: 'That receipt was already handled.',
+  not_a_candidate: 'That transaction isn’t one of this receipt’s matches. Nothing changed.',
+};
+
+/** Short per-row reason when Approve can't work on that bank row. */
+const ROW_BLOCKED = {
+  sum_mismatch: 'More than 3¢ off this bank amount',
+  category_conflict: 'Has another envelope set by hand',
+  already_split: 'Already split',
+  invalid_splits: 'Put items in at least two envelopes',
+  unknown_envelope: 'An envelope no longer exists',
 };
 
 function envelopeName(id) {
@@ -85,14 +95,16 @@ function reviewItem({ item, candidates }) {
     [item.date ? formatDate(item.date) : null, REASON_LABEL[item.reason] || null].filter(Boolean).join(' · ')));
 
   const splitsHost = el('div', { className: 'receipt-review-split-host' });
+  const candidatesHost = el('div', { className: 'receipt-review-candidates-host' });
   const renderSplits = () => {
     const r = current();
     splitsHost.replaceChildren(r.ok
       ? splitLines(r.value)
       : el('p', { className: 'receipt-review-warn', role: 'status' }, 'Put items in at least two envelopes.'));
+    renderCandidates(r);
   };
-  renderSplits();
   wrap.appendChild(splitsHost);
+  wrap.appendChild(candidatesHost);
 
   const approve = (tx) => {
     const r = current();
@@ -101,32 +113,50 @@ function reviewItem({ item, candidates }) {
       return;
     }
     const res = store.approveReceiptReview(item.receiptId, tx.id, r.edited ? r.value : null);
-    if (res?.ok) showToast('Split saved · amount and checking unchanged', 'success');
+    if (res?.ok) {
+      const adj = describeAdjustment(res.adjustedCents, envelopeName(res.adjustedCategoryId));
+      showToast(`Split saved${adj ? ` (${adj})` : ''} · amount and checking unchanged`, 'success');
+    }
     else showToast(RESULT_MESSAGE[res?.code] || 'Could not apply that split.', 'info');
   };
 
-  if (candidates.length) {
+  // One row per candidate; each shows the ≤3¢ nudge (or why it can't be used)
+  // for the split as it stands now, so Approve never surprises.
+  function renderCandidates(r) {
+    if (!candidates.length) {
+      candidatesHost.replaceChildren(el('p', { className: 'card-sub receipt-review-wait' },
+        'No bank transaction fits yet. It shows up here after the next bank sync.'));
+      return;
+    }
     const list = el('div', { className: 'list-group receipt-review-candidates' });
     candidates.forEach(tx => {
       const { desc, meta } = txSummary(tx);
+      const pre = r.ok
+        ? store.previewReceiptReview(item.receiptId, tx.id, r.edited ? r.value : null)
+        : { ok: false, code: 'invalid_splits' };
+      const note = pre.ok
+        ? describeAdjustment(pre.adjustedCents, envelopeName(pre.adjustedCategoryId))
+        : (ROW_BLOCKED[pre.code] || 'Can’t use this one');
       list.appendChild(el('div', { className: 'list-row' },
         el('div', { className: 'list-row__body' },
           el('span', { className: 'list-row__title' }, desc),
           el('span', { className: 'list-row__meta' }, meta),
+          note ? el('span', {
+            className: `receipt-review-adjust${pre.ok ? '' : ' receipt-review-adjust--blocked'}`,
+          }, note) : null,
         ),
         el('button', {
           type: 'button',
           className: 'btn btn-primary btn-sm',
-          'aria-label': `Approve split on ${desc}, ${meta}`,
+          disabled: !pre.ok,
+          'aria-label': `Approve split on ${desc}, ${meta}${note ? `, ${note}` : ''}`,
           onClick: () => approve(tx),
         }, 'Approve'),
       ));
     });
-    wrap.appendChild(list);
-  } else {
-    wrap.appendChild(el('p', { className: 'card-sub receipt-review-wait' },
-      'No bank transaction fits yet. It shows up here after the next bank sync.'));
+    candidatesHost.replaceChildren(list);
   }
+  renderSplits();
 
   const actions = el('div', { className: 'receipt-review-actions' });
   if ((item.items || []).length) {
