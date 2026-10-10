@@ -20,6 +20,16 @@ import {
   looksLikeFederalTravelPayment,
 } from './csv-import.js';
 import { findMatchingRule, applyRuleToTransaction } from './category-rules.js';
+import {
+  sanitizeReceiptReview,
+  reviewCandidates,
+  resolveSplitEnvelopes,
+  planSplitForTx,
+  findReceiptTx,
+  closeReviewItem,
+  receiptFingerprint,
+  splitsFromItemBuckets,
+} from './receipt-split.js';
 import { findBillForTransaction, findAutoPayBillForTransaction, findExactBillForTransaction, findDebtForTransaction } from './bill-matcher.js';
 import {
   normalizePaySchedule,
@@ -262,6 +272,7 @@ function normalizeState(state) {
   if (!Array.isArray(state.incomeSources)) state.incomeSources = defaults.incomeSources;
   if (!Array.isArray(state.archivedDebts)) state.archivedDebts = [];
   if (!Array.isArray(state.celebrations)) state.celebrations = [];
+  state.receiptReview = sanitizeReceiptReview(state.receiptReview);
   if (typeof state.notes !== 'string') state.notes = '';
   if (state.notesUpdatedAt !== null && typeof state.notesUpdatedAt !== 'string') state.notesUpdatedAt = null;
   if (!Array.isArray(state.noteBoards)) state.noteBoards = [];
@@ -866,6 +877,119 @@ class Store {
     let res = { ok: false };
     this.update(s => { res = unlinkNoteInState(s, linkId); });
     return res;
+  }
+
+  // --- Receipts to review (receipt → split on an existing bank row) ---
+
+  /**
+   * Write a receipt split onto an existing transaction. Splits only: the
+   * amount (and so checking) never changes. Memo is set only when empty so
+   * linked-note memo text is never rewritten.
+   * @param {{tx, splits}} plan from planSplitForTx / planReceiptSplit
+   */
+  applyReceiptSplit(plan, { receiptId, memo = '' } = {}, opts = {}) {
+    const tx = this.state.transactions.find(t => t.id === plan?.tx?.id);
+    if (!tx) return { ok: false, code: 'no_match' };
+    const updates = {
+      splits: plan.splits,
+      receiptId,
+      receiptFingerprint: plan.fingerprint || receiptFingerprint(tx.id, plan.splits),
+      categorySource: 'receipt',
+    };
+    if (memo && !String(tx.memo || '').trim()) updates.memo = memo;
+    this.updateTransaction(tx.id, updates, opts);
+    const after = this.state.transactions.find(t => t.id === tx.id);
+    if (!this.isSplitTransaction(after)) return { ok: false, code: 'invalid_splits' };
+    this.update(s => {
+      closeReviewItem(s, receiptId, 'applied', { appliedTxId: tx.id });
+    }, opts.persist === false ? { persist: false } : {});
+    return { ok: true, tx: after, memoSet: updates.memo !== undefined };
+  }
+
+  /**
+   * Candidate rows for one review item: live fuzzy matches (±3¢, ±3 days,
+   * merchant) plus rows FigPig stored when it was queued, unsplit expenses only.
+   * This is the ONLY set Approve accepts.
+   */
+  receiptReviewCandidates(item, s = this.state) {
+    const live = reviewCandidates(s, { ...item, totalCents: Math.round((Number(item.total) || 0) * 100) });
+    const ids = new Set(live.map(t => t.id));
+    (item.candidates || []).forEach(id => {
+      const t = s.transactions.find(x => x.id === id);
+      if (t && !this.isSplitTransaction(t) && t.type === 'expense' && !ids.has(t.id) && ids.size < 5) {
+        live.push(t);
+        ids.add(t.id);
+      }
+    });
+    return live;
+  }
+
+  /** Pending review items with live candidate transactions (newest first). */
+  getReceiptReview() {
+    if (isNotesOnlyRole()) return [];
+    const s = this.state;
+    return (s.receiptReview || [])
+      .filter(r => r.status === 'pending' && !findReceiptTx(s, r.receiptId))
+      .map(r => ({ item: r, candidates: this.receiptReviewCandidates(r, s) }))
+      .sort((a, b) => String(b.item.date).localeCompare(String(a.item.date)));
+  }
+
+  /**
+   * Dry-run Approve (no write): the plan for this item on this candidate, incl.
+   * the ≤3¢ adjustment that makes the split equal the bank amount.
+   * @returns {{ok:true, plan, adjustedCents, adjustedCategoryId} | {ok:false, code}}
+   */
+  previewReceiptReview(receiptId, txId, splits = null) {
+    const item = (this.state.receiptReview || []).find(r => r.receiptId === receiptId && r.status === 'pending');
+    if (!item) return { ok: false, code: 'review_not_found' };
+    if (findReceiptTx(this.state, receiptId)) return { ok: false, code: 'already_split' };
+    const allowed = this.receiptReviewCandidates(item);
+    const tx = allowed.find(t => t.id === txId);
+    if (!tx) return { ok: false, code: 'not_a_candidate' };
+    const lines = splits || (item.proposedSplits || []).map(p => ({
+      categoryId: p.categoryId,
+      cents: Math.round((Number(p.amount) || 0) * 100),
+    }));
+    const resolved = resolveSplitEnvelopes(lines, this.state.categories);
+    if (!resolved.ok) return resolved;
+    const plan = planSplitForTx(this.state, tx, resolved.value);
+    if (!plan.ok) return plan;
+    return { ok: true, plan, item, adjustedCents: plan.adjustedCents, adjustedCategoryId: plan.adjustedCategoryId };
+  }
+
+  getReceiptReviewCount() {
+    try {
+      return this.getReceiptReview().length;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Approve a review item onto one candidate. splits: optional
+   * [{categoryId, cents}] from the Edit view; default = proposedSplits.
+   * txId must be one of the item's candidates (receiptReviewCandidates).
+   * Same checks as the API (bank amount within 3¢ with the gap on the largest
+   * split, not already split, envelope guard).
+   */
+  approveReceiptReview(receiptId, txId, splits = null, opts = {}) {
+    const pre = this.previewReceiptReview(receiptId, txId, splits);
+    if (!pre.ok) return pre;
+    const memo = `Receipt: ${pre.item.store}`.slice(0, 200);
+    const res = this.applyReceiptSplit(pre.plan, { receiptId, memo }, opts);
+    return res.ok ? { ...res, adjustedCents: pre.adjustedCents, adjustedCategoryId: pre.adjustedCategoryId } : res;
+  }
+
+  /** Edit view helper: bucket totals for an item assignment. */
+  receiptSplitsFromBuckets(item, buckets) {
+    return splitsFromItemBuckets(item, buckets);
+  }
+
+  dismissReceiptReview(receiptId, opts = {}) {
+    let ok = false;
+    this.update(s => { ok = closeReviewItem(s, receiptId, 'dismissed'); },
+      opts.persist === false ? { persist: false } : {});
+    return { ok };
   }
 
   syncLegacyNotesFromStickies() {
@@ -2860,6 +2984,7 @@ class Store {
             splits: copy.splits,
             importCategory: copy.importCategory,
           });
+          if (copy.categorySource) tx.categorySource = copy.categorySource;
           if (copy.categoryId || copy.splits) count++;
         }
       });
@@ -2875,6 +3000,7 @@ class Store {
         tx.categoryId = categoryId || null;
         tx.importCategory = null;
         delete tx.splits;
+        delete tx.categorySource;
       });
     });
   }
@@ -3709,7 +3835,10 @@ class Store {
 
       s.categories = s.categories.filter(c => c.id !== id);
       s.transactions.forEach(t => {
-        if (t.categoryId === id) t.categoryId = null;
+        if (t.categoryId === id) {
+          t.categoryId = null;
+          delete t.categorySource;
+        }
         if (t.splits) {
           t.splits.forEach(sp => { if (sp.categoryId === id) sp.categoryId = null; });
         }
@@ -3824,10 +3953,19 @@ class Store {
     });
   }
 
-  updateTransaction(id, updates) {
+  /**
+   * @param {object} updates
+   * @param {{ persist?: boolean }} [opts] persist:false = Netlify apply (no localStorage / cloud push)
+   */
+  updateTransaction(id, updates, opts = {}) {
     this.update(s => {
       const tx = s.transactions.find(x => x.id === id);
       if (!tx) return;
+      const envelopeKey = t => JSON.stringify([
+        t.categoryId || null,
+        this.normalizeSplits(t.splits).map(sp => [sp.categoryId, Math.round(sp.amount * 100)]),
+      ]);
+      const envelopeBefore = envelopeKey(tx);
 
       const oldType = tx.type;
       const oldAmount = Math.abs(Number(tx.amount)) || 0;
@@ -3877,6 +4015,23 @@ class Store {
           delete tx.splits;
         }
       }
+      // Who set the envelope: 'rule' (merchant rule) / 'receipt' (receipt split).
+      // A manual edit clears it only when the envelope or splits actually change
+      // (the Log form always resends categoryId/splits, even for a memo-only edit).
+      if (updates.categorySource !== undefined) {
+        if (updates.categorySource) tx.categorySource = String(updates.categorySource);
+        else delete tx.categorySource;
+      } else if (envelopeKey(tx) !== envelopeBefore) {
+        delete tx.categorySource;
+      }
+      if (updates.receiptId !== undefined) {
+        if (updates.receiptId) tx.receiptId = String(updates.receiptId);
+        else delete tx.receiptId;
+      }
+      if (updates.receiptFingerprint !== undefined) {
+        if (updates.receiptFingerprint) tx.receiptFingerprint = String(updates.receiptFingerprint).slice(0, 2000);
+        else delete tx.receiptFingerprint;
+      }
       if (updates.debtId !== undefined) tx.debtId = updates.debtId || null;
       if (updates.incomeSourceId !== undefined) {
         tx.incomeSourceId = updates.incomeSourceId || null;
@@ -3922,7 +4077,7 @@ class Store {
           src.amount = monthlyAmount;
         }
       }
-    });
+    }, opts.persist === false ? { persist: false } : {});
   }
 
   /**

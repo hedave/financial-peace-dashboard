@@ -905,6 +905,35 @@ p.field-error { margin: var(--sp-1) 0 0; }
 .note-review-linked > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: var(--fw-semi); color: var(--primary); }
 .note-review-linked .list-row__title { white-space: normal; }
 
+/* ---- Receipts to review (20261009a/b): receipt splits on Log, in-flow card -- */
+.receipt-review .receipt-review-intro { margin: 0 0 var(--sp-3); }
+.receipt-review-item { padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
+.receipt-review-item:first-of-type { border-top: 0; }
+.receipt-review-head { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.receipt-review-store { flex: 1 1 auto; min-width: 0; margin: 0; font-weight: var(--fw-semi); overflow-wrap: anywhere; }
+.receipt-review-total {
+  flex: 0 0 auto; min-width: 0; max-width: 60%; display: block; overflow: hidden;
+  text-align: right; font-weight: var(--fw-bold); font-size: var(--fs-title);
+}
+.receipt-review-meta { margin: var(--sp-1) 0 var(--sp-2); font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-muted); }
+.receipt-review-splits { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: grid; gap: var(--sp-1); }
+.receipt-review-split { display: flex; justify-content: space-between; gap: var(--sp-2); min-width: 0; }
+.receipt-review-split__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.receipt-review-split__amount { flex: 0 0 auto; font-weight: var(--fw-semi); }
+.receipt-review-warn { margin: 0 0 var(--sp-2); color: var(--danger); font-size: var(--fs-footnote); }
+.receipt-review-candidates .list-row { min-height: 52px; }
+.receipt-review-candidates .list-row__title { overflow-wrap: anywhere; }
+.receipt-review-wait { margin: 0; }
+.receipt-review-adjust { display: block; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.receipt-review-adjust--blocked { color: var(--danger); }
+.receipt-review-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.receipt-review-editor { margin-top: var(--sp-2); }
+.receipt-review-editor[hidden] { display: none; }
+.receipt-review-line { gap: var(--sp-2); }
+.receipt-review-line .list-row__title { white-space: normal; overflow-wrap: anywhere; }
+.receipt-review-bucket { flex: 0 1 46%; min-width: 0; min-height: 44px; max-width: 46%; }
+.receipt-review-note { margin: var(--sp-2) 0 0; }
+
 /* ---- Sticky archive + month stacks (20261008b, stack redesign 20261008c) ----------------------------- */
 .sticky-archive-tab { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .sticky-archive-tab .ico-wrap { display: inline-flex; }

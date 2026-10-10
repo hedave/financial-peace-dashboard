@@ -49,11 +49,22 @@ When CoS (or David) sends bank screenshots or a list of transactions:
 6. Per-row envelope: if a new row includes envelope or category (name or id) and that envelope exists, FigPig assigns it to that row only. Do not send one envelope for the whole batch. Duplicates and already-enveloped rows stay untouched. Keep merchant text as shown so later rules can match (CURSOR USAGE AUG still identifies as cursor usage).
 7. Split one purchase: if David says he spent $X of a charge on envelope A and the rest on envelope B, send ONE row for the bank total with splits: [{ envelope: "A", amount: X }, { envelope: "B" }]. The line without amount takes the leftover. Do not POST two smaller rows for the same Walmart (etc.) — that double-hits checking and misses the posted $100 twin. Use the envelope name as shown (Household / Misc, not just household). Splits apply to new uncategorized rows only; already-split or enveloped duplicates stay put.
 8. Never dump the secret. Never store the screenshots in Drive or email.
+9. Receipts (Sam's Club, Walmart…) for a charge that is ALREADY in FigPig: do not re-ingest the row. POST to FIGPIG_SPLIT_URL with header Authorization: Bearer FIGPIG_TX_SPLIT_TOKEN
+{
+  "match": { "date": "YYYY-MM-DD", "amount": -120.00, "merchant": "Sams Club" },
+  "splits": [ { "envelope": "Groceries", "amount": 80.00 }, { "envelope": "Household / Misc", "amount": 40.00 } ],
+  "receiptId": "store-date-last4-of-receipt-number",
+  "memo": "Sam's Club receipt"
+}
+   Splits must add up to the BANK amount (FigPig fixes up to 3 cents on the largest split and tells you in "adjustment"). Use the same receiptId only to retry the SAME split on the SAME charge (a repeat is a safe no-op); a new receipt needs a new receiptId, otherwise you get receipt_conflict. If the answer is removed_by_user or changed_by_user, David edited it: stop, do not resend. Try "dryRun": true first if unsure.
+10. If it answers no_match, multiple_matches, sum_mismatch, already_split or category_conflict, or you are unsure how to sort items: send the receipt to review instead with {"review": true, "receipt": {receiptId, store, date, total, proposedSplits, items, reason}}. David approves it on Log → Receipts to review. Never guess a transaction.
 
 If the API returns 409 (no cloud budget yet), tell CoS: David must open FigPig once and Sync Now. Then retry the same payload. Do not open the site for him.
 ```
 
-Replace `FIGPIG_INGEST_URL` with `https://YOUR-SITE.netlify.app/api/ingest-bank`.
+Replace `FIGPIG_INGEST_URL` with `https://YOUR-SITE.netlify.app/api/ingest-bank` and `FIGPIG_SPLIT_URL` with `https://YOUR-SITE.netlify.app/api/transactions/split`.
+
+Receipt splits use their **own** token, `FIGPIG_TX_SPLIT_TOKEN` (Netlify env + `/home/box/.secrets/figpig/tx_split_token` on the box). Full contract, error codes and the review payload: `docs/TRANSACTIONS-API.md` → *Receipt split*.
 
 ## Manual test (from a terminal, not CoS)
 

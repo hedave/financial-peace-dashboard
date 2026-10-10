@@ -150,3 +150,15 @@ Netlify env (add; do not reuse ingest or bills-read secrets):
 | `FIGPIG_TX_WRITE_TOKEN` | Long random string; store also at `/home/box/.secrets/figpig/tx_write_token` |
 
 Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Merchant category rules run (uncategorized only when no rule matches). No bill auto-match, auto-pay, or envelope assignment. Optional `checkingBalance` overwrites `state.balances.checking` after import; omit it and import math updates checking.
+
+## Receipt split API (build 20261009b)
+
+Splits an existing bank row from a receipt and feeds Log → Receipts to review. See `docs/TRANSACTIONS-API.md` → *Receipt split*.
+
+Netlify env (add; do not reuse any other FigPig secret). Until it is set the endpoint answers `503` (fails closed):
+
+| Variable | Notes |
+| --- | --- |
+| `FIGPIG_TX_SPLIT_TOKEN` | Long random string (≥ 24 chars); store also at `/home/box/.secrets/figpig/tx_split_token` |
+
+Function: `netlify/functions/transactions-split.mjs` → `POST /api/transactions/split`. No SQL needed: review items live in the budget JSON (`state.receiptReview`).

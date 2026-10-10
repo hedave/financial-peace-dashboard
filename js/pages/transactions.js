@@ -11,6 +11,7 @@ import { parseBankPdfFile, rowsToImportObjects } from '../pdf-import.js';
 import { guessMerchantPattern } from '../category-rules.js';
 import { parseBankCsvText } from '../csv-import.js';
 import { renderNoteReviewCard } from '../components/note-review.js';
+import { renderReceiptReviewCard } from '../components/receipt-review.js';
 
 let openMode = null;
 
@@ -241,6 +242,9 @@ export function renderTransactions(container, arg) {
       }, 'Show Duplicates'),
     ));
   }
+
+  const receiptReview = renderReceiptReviewCard();
+  if (receiptReview) container.appendChild(receiptReview);
 
   const noteReview = renderNoteReviewCard();
   if (noteReview) container.appendChild(noteReview);
