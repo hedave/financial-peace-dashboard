@@ -18,6 +18,7 @@ export const FIT_SELECTOR = [
   '.bills-summary .card-value',
   '.grid .card > .card-value',
   '.envelope-stat > span:not(.envelope-stat__label):not(.envelope-tx-hint)',
+  '.receipt-review-total',
 ].join(', ');
 
 const MONEY_RE = /^\s*([−-]\u2060?)?\$([\d,]+(?:\.\d+)?)\s*$/;

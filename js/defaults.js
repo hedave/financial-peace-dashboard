@@ -165,6 +165,13 @@ export function createDefaultState() {
     noteLinks: [],
     /** Never auto-link again: [{ noteId, txId|null, at }] (txId null = whole note dismissed) */
     noteLinkDismissals: [],
+    /**
+     * Receipts to review (bot couldn't place a receipt split on its own):
+     * [{ receiptId, store, date, total, proposedSplits:[{categoryId, amount}],
+     *    items:[{desc, amount, bucket, confidence}], candidates:[txId], reason,
+     *    status:'pending'|'applied'|'dismissed', createdAt, closedAt?, appliedTxId? }]
+     */
+    receiptReview: [],
     removedDefaultCategories: [],
     categoryRules: [],
     monthBudgetSnapshots: {},

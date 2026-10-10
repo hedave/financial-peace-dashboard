@@ -91,6 +91,7 @@ export function applyRuleToTransaction(tx, rule) {
     });
     tx.categoryId = null;
     tx.importCategory = null;
+    tx.categorySource = 'rule';
     return true;
   }
 
@@ -98,6 +99,8 @@ export function applyRuleToTransaction(tx, rule) {
     tx.categoryId = rule.categoryId;
     tx.importCategory = null;
     delete tx.splits;
+    // Lets a receipt split replace a rule-picked envelope (manual edits clear this).
+    tx.categorySource = 'rule';
     return true;
   }
 

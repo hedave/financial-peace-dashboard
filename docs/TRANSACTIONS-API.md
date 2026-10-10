@@ -120,3 +120,130 @@ Counts only. No transaction bodies.
 If a saved merchant rule matches, the row gets that rule’s category. Otherwise it stays uncategorized (no bill/debt link, no envelope from bank labels). A matching auto-pay bill stays unpaid until David marks it.
 
 `409` if there is no cloud budget yet (open FigPig once and Sync Now), or if the cloud row changed during apply (retry the same payload).
+
+---
+
+# Receipt split `/api/transactions/split` (existing bank rows)
+
+Puts a receipt split (e.g. Sam's Club → Groceries + Household / Misc) onto a bank transaction that **already exists** (the 3×/day bank sync usually got there first). `/api/ingest-bank` drops splits on duplicates and `/api/transactions` is bank-sync only, so this is the only API path that splits an existing row.
+
+**Splits only.** It never changes the amount, date, description, pay status, bill link or checking. It sets `splits`, `receiptId`, `categorySource: "receipt"`, and `memo` (only if the memo was empty, so linked-note memo text is never rewritten).
+
+## Endpoint and auth
+
+`POST https://hernandez-finops.netlify.app/api/transactions/split` (after the env is set and this is deployed)
+
+```http
+Authorization: Bearer <FIGPIG_TX_SPLIT_TOKEN>
+Content-Type: application/json
+```
+
+Alternate header: `x-figpig-tx-split-token`. Its own secret: never reuse `FIGPIG_TX_WRITE_TOKEN`, `FIGPIG_INGEST_SECRET` or `FIGPIG_BILLS_READ_TOKEN`.
+
+| Status | When |
+| --- | --- |
+| `503 not_configured` | `FIGPIG_TX_SPLIT_TOKEN` (min 24 chars), `SUPABASE_URL` (https), `SUPABASE_SERVICE_ROLE_KEY` or `FIGPIG_OWNER_USER_ID` unset: fails closed |
+| `401 unauthorized` | Missing / wrong token (constant-time compare) |
+| `429 rate_limited` | > 20 calls/min per client IP, counted **before** auth (best effort per function instance) |
+| `415` / `413` / `400 invalid_body` | Not JSON, body > 64 KB, or strict validation failed (unknown keys rejected everywhere) |
+
+### Netlify env (site settings — never commit)
+
+| Variable | Purpose |
+| --- | --- |
+| `FIGPIG_TX_SPLIT_TOKEN` | **New.** Long random secret (≥ 24 chars) for receipt splits only |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `FIGPIG_OWNER_USER_ID` | Already set for ingest / transactions |
+
+Box copy for CoS: `/home/box/.secrets/figpig/tx_split_token` (`chmod 600`, never commit).
+
+## Apply a split
+
+```json
+{
+  "match": { "externalId": "plaid-txn-id" },
+  "splits": [
+    { "envelope": "Groceries", "amount": 80.00 },
+    { "envelope": "Household / Misc", "amount": 40.00 }
+  ],
+  "receiptId": "sams-2026-10-05-0001",
+  "memo": "Sam's Club receipt",
+  "dryRun": false
+}
+```
+
+or match by `{ "date": "YYYY-MM-DD", "amount": -120.00, "merchant": "Sams Club" }` (all three together). `externalId` wins when it is found.
+
+| Field | Rules |
+| --- | --- |
+| `match` | `externalId` (≤128) and/or `date` + `amount` (sign ignored) + `merchant` (≤120) |
+| `splits` | 1–12 lines `{envelope, amount}`; envelope = name or id; amount > 0, ≤ 2 decimals. Repeated envelopes are merged; at least **2** different envelopes after merging |
+| `receiptId` | Required, `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`. Idempotency key |
+| `memo` | Optional, ≤ 200 chars. Written only when the memo is empty |
+| `dryRun` | Optional boolean. Returns the candidate + proposal, writes nothing |
+
+FigPig finds exactly one candidate: an **expense**, `|amount|` within **$0.03**, date within **±3 days**, merchant similarity **≥ 0.6**, and **not already split**.
+
+Then:
+
+- Splits must equal the **bank** amount within **$0.01**. A 1¢ rounding gap goes on the largest split so the stored splits add up exactly.
+- An existing single envelope is replaced only if it is **Groceries**, **Household / Misc**, missing, or was set by a merchant rule (`categorySource: "rule"`; any manual edit in the Log clears that tag).
+- Same `receiptId` already on a transaction → `200 {"status":"unchanged"}` and no write (even if the splits differ).
+- Saved with the `budget_states.updated_at` optimistic-concurrency check. On conflict FigPig reloads, re-plans and retries **once**; a second conflict → `409 conflict` (retry the same payload).
+
+### Responses (trimmed: nothing else from the budget)
+
+```json
+{
+  "ok": true,
+  "status": "applied",
+  "receiptId": "sams-2026-10-05-0001",
+  "candidate": { "id": "tx-id", "date": "2026-10-05", "amount": 120, "description": "SAMS CLUB #0000" },
+  "splits": [ { "envelope": "Groceries", "amount": 80 }, { "envelope": "Household / Misc", "amount": 40 } ],
+  "memoSet": true
+}
+```
+
+`status`: `applied`, `unchanged` (idempotent), or `dry_run`.
+
+| Error (`{"ok":false,"error":…}`) | HTTP | Meaning |
+| --- | --- | --- |
+| `no_match` | 404 | No bank row fits |
+| `multiple_matches` | 409 | More than one fits (`count` only). Send it to review |
+| `sum_mismatch` | 422 | Splits ≠ bank amount (`bankAmount`, `splitsTotal`) |
+| `already_split` | 409 | Row already split by something else |
+| `category_conflict` | 409 | Row has another envelope set by hand |
+| `not_expense` | 409 | `externalId` points at a non-expense |
+| `unknown_envelope` / `invalid_splits` | 422 | Envelope not found / fewer than 2 envelopes |
+| `conflict` | 409 | Cloud changed twice while saving |
+| `no_budget` | 409 | No cloud budget yet |
+
+## Send a receipt to "Receipts to review"
+
+When FigPig refuses (or the bot isn't sure), queue the receipt for David instead. Same endpoint, same token:
+
+```json
+{
+  "review": true,
+  "receipt": {
+    "receiptId": "sams-2026-10-05-0001",
+    "store": "Sam's Club",
+    "date": "2026-10-05",
+    "total": 120.00,
+    "proposedSplits": [
+      { "envelope": "Groceries", "amount": 80.00 },
+      { "envelope": "Household / Misc", "amount": 40.00 }
+    ],
+    "items": [
+      { "desc": "Bananas", "amount": 1.48, "bucket": "Groceries", "confidence": 0.95 }
+    ],
+    "reason": "multiple_matches"
+  }
+}
+```
+
+- `proposedSplits` must add up to `total` (±$0.01). `items` optional (≤ 100; `bucket` = envelope name/id; `confidence` 0–1). `reason`: `no_match`, `multiple_matches`, `sum_mismatch`, `already_split`, `category_conflict`, `low_confidence` (default).
+- `candidates` and `status` are computed by FigPig, never accepted (unknown key → 400).
+- Idempotent by `receiptId`: a pending item is refreshed (`updated`); an applied/dismissed one, or a receipt already on a transaction, stays put (`unchanged`). Max 50 pending (`review_full`).
+- Response: `{"ok":true,"status":"queued"|"updated"|"unchanged"|"dry_run","receiptId":"…","candidates":2,"pending":3}`.
+
+David sees it on **Log → Receipts to review** (Log tab badge counts it): **Approve** on the right bank row applies the same checks as the API, **Edit** moves receipt items between envelopes (tax/coupons shared by each envelope's share), **Dismiss** drops it.

@@ -242,6 +242,8 @@ export function updateNavBadges() {
   } catch {
     count = 0;
   }
+  // Receipts to review also wait on the Log tab
+  count += store.getReceiptReviewCount?.() || 0;
   const label = count > 99 ? '99+' : String(count);
 
   document.querySelectorAll('.nav-link[data-page="transactions"] .nav-badge').forEach(badge => {
