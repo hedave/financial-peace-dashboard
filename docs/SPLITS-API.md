@@ -24,8 +24,8 @@ curl -s https://hernandez-finops.netlify.app/api/envelopes \
 ```
 
 Since the envelope reset API this also returns current-month balances (`allocated`, `spent`,
-`remaining`, `bill_id` per envelope, plus `checking_balance`, `total_allocated`, `unallocated`,
-`newest_transaction_date`, `state_hash`). Shape and rules: **`docs/ENVELOPES-API.md`**.
+`remaining`, `bill_id`, top-level `kind` per envelope, plus `checking_balance`, `total_allocated`, `unallocated`,
+`bonus_available`, `newest_transaction_date`, `state_hash`). Shape and rules: **`docs/ENVELOPES-API.md`**.
 Still no notes or plan internals. Alt header: `x-figpig-bills-token`. 30 req/min per IP.
 
 ## PATCH /api/transactions/:id/split

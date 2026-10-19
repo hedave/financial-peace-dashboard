@@ -321,10 +321,10 @@ await test('envelopes: trimmed list (id, name, group?, sinkingFund?, balances), 
   remote.state.categories.push({ ...remote.state.categories[0], id: 'fake-sub', name: 'Fake Sub', parentId: GROC, monthlyBudget: 99, note: 'secret note' });
   const r = await getEnv();
   assert.equal(r.status, 200, r.text);
-  // Balances added by the envelope reset API (see scripts/test-envelope-reset.mjs).
-  assert.deepEqual(Object.keys(r.json).sort(), ['checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
+  // Balances added by the envelope reset API, bonus_available/kind by the overage API (see scripts/test-envelope-reset.mjs).
+  assert.deepEqual(Object.keys(r.json).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
   for (const e of r.json.envelopes) {
-    for (const k of Object.keys(e)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'allocated', 'spent', 'remaining', 'bill_id'].includes(k), k);
+    for (const k of Object.keys(e)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'remaining', 'bill_id'].includes(k), k);
   }
   assert.ok(r.json.envelopes.some(e => e.name === 'Groceries' && e.id === GROC));
   const sub = r.json.envelopes.find(e => e.id === 'fake-sub');

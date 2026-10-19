@@ -5,14 +5,19 @@ import {
   validateResetBody, validateRestoreBody, validateSnapshotBody,
   computeBalances, planReset, planRestore, writeAllocations, diffTable,
   addSnapshot, findSnapshot, captureEnvelopeState, appendEnvelopeAudit,
-  withStoreLock, SNAPSHOT_ID_RE,
+  withStoreLock, SNAPSHOT_ID_RE, ACTOR, AUDIT_MAX,
 } from '../../js/envelope-reset.js';
+import {
+  validateOverageBody, planOverage, applyOverageInMemory, verifyOverage, appendOverageRows, overageResponse,
+} from '../../js/envelope-overage.js';
 
 /**
  * Envelope writes (all POST, JSON):
  *   /api/envelopes/snapshot                 {note?}                → stores a snapshot
  *   /api/envelopes/snapshots/:id/restore    {expected_state_hash, dry_run?=true, note?}
  *   /api/envelopes/reset                    {expected_state_hash, dry_run?=true, targets?, default_amount?, note?}
+ *   /api/envelopes/overage                  {expected_state_hash, targets:"all"|[names], dry_run?=true,
+ *                                            envelopes?, include_sinking_funds?, negative_rule?, note?}
  *
  * Auth: Authorization: Bearer <FIGPIG_ENVELOPE_WRITE_TOKEN> (alt x-figpig-envelope-write-token).
  * Own token (>= 24 chars, must differ from every other FigPig token); 503 when unset/short/
@@ -24,6 +29,10 @@ import {
  * path (monthlyBudget, like the Edit Envelope modal) and appends to state.envelopeResetAudit.
  * Only those envelope fields + envelopeSnapshots/envelopeResetAudit are written back.
  * Never creates/deletes envelopes; never touches transactions, checking, debts or snowball.
+ * Overage: same auth / dry-run / hash CAS / pre-snapshot; covers overspent envelopes from the
+ * free bonus pot first, then a forced equal split (js/envelope-overage.js). It appends
+ * month-only rows (monthBonusAllocations, monthEnvelopeMoves, overspendCoverIous) — the same
+ * records the Budget page writes — and never changes monthlyBudget or carryOver.
  * Supabase failures → 502.
  */
 
@@ -144,6 +153,7 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   if (before.hash !== input.expectedHash) {
     return { error: 'stale_state', status: 409, extra: { state_hash: before.hash } };
   }
+  if (kind === 'overage') return planOverageOnState(before, input);
   let budgets; let carry = null; let snap = null;
   if (kind === 'reset') {
     const plan = planReset(state, input);
@@ -172,6 +182,25 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   const after = balancesNow();
   const table = diffTable(before.body, after.body);
   return { ok: true, before, after, table, beforeRaw, afterRaw: captureEnvelopeState(store.getState()), budgets, carry };
+}
+
+const newRowId = () => randomBytes(8).toString('hex');
+
+function planOverageOnState(before, input) {
+  const plan = planOverage(store, input);
+  if (!plan.ok) {
+    const { ok, code, status, ...extra } = plan;
+    return { error: code, status: status || 400, extra };
+  }
+  const nCats = store.getState().categories.length;
+  const batchId = `ovr_${randomBytes(8).toString('hex')}`;
+  const rows = applyOverageInMemory(store, plan, { at: new Date().toISOString(), batchId, newId: newRowId, note: input.note });
+  if (store.getState().categories.length !== nCats) return { fatal: 'envelope count changed' };
+  if (!verifyOverage(store, plan)) return { fatal: 'overage not applied' };
+  const after = balancesNow();
+  const table = diffTable(before.body, after.body);
+  const bonusAfter = Math.round(after.body.bonus_available * 100);
+  return { ok: true, before, after, table, overage: plan, rows, batchId, bonusAfter };
 }
 
 /**
@@ -210,16 +239,32 @@ async function writeSnapshot(cfg, remote, reason, note, keepId = null) {
   return { snap, raw, updatedAt: saved.updatedAt };
 }
 
+/** Audit entry for an overage cover (state.envelopeResetAudit, shared list, capped). */
+function appendOverageAudit(state, plan, snap, note) {
+  const p = plan.overage;
+  const list = Array.isArray(state.envelopeResetAudit) ? state.envelopeResetAudit : [];
+  list.push({
+    at: snap.at, actor: ACTOR, action: 'overage', snapshot_id: snap.id, batch_id: plan.batchId, month: p.month,
+    total: p.total / 100, from_bonus: p.fromBonus / 100, split_total: p.rest / 100, negative_rule: p.negativeRule,
+    bonus: plan.rows.bonus.map(b => ({ allocationId: b.id, categoryId: b.categoryId, amount: b.amount })),
+    moves: plan.rows.moves.map(m => ({ moveId: m.id, fromId: m.fromId, toId: m.toId, amount: m.amount })),
+    ...(note ? { note } : {}),
+  });
+  state.envelopeResetAudit = list.slice(-AUDIT_MAX);
+}
+
 async function runWrite(cfg, kind, input, snapshotId) {
   const { url, key, ownerId } = cfg;
   const remote = await loadBudget(url, key, ownerId);
   if (!remote?.state || typeof remote.state !== 'object') return { error: 'no_budget', status: 409 };
   let plan = planOnState(structuredClone(remote.state), kind, input, snapshotId);
   if (!plan.ok || input.dryRun) return { plan };
-  if (!patchedRaw(remote.state, { budgets: plan.budgets, carry: plan.carry })) return NOT_NORMALIZED;
+  if (kind === 'overage') {
+    if (!appendOverageRows(structuredClone(remote.state), plan.overage.month, plan.rows)) return NOT_NORMALIZED;
+  } else if (!patchedRaw(remote.state, { budgets: plan.budgets, carry: plan.carry })) return NOT_NORMALIZED;
 
   // 1) Automatic snapshot first, as its own write (state as loaded, before any change).
-  const first = await writeSnapshot(cfg, remote, kind === 'reset' ? 'pre_reset' : 'pre_restore', input.note, snapshotId);
+  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage' })[kind], input.note, snapshotId);
   if (first.error) return first;
   const snap = first.snap;
 
@@ -233,10 +278,17 @@ async function runWrite(cfg, kind, input, snapshotId) {
     }
     plan = planOnState(structuredClone(base.state), kind, input, snapshotId);
     if (!plan.ok) return { plan, snapshot: snap };
-    appendEnvelopeAudit(store.getState(), {
-      at: snap.at, action: kind, snapshotId: snap.id, beforeRaw: plan.beforeRaw, afterRaw: plan.afterRaw, note: input.note,
-    });
-    const raw = patchedRaw(base.state, { budgets: plan.budgets, carry: plan.carry, audit: store.getState().envelopeResetAudit });
+    let raw;
+    if (kind === 'overage') {
+      appendOverageAudit(store.getState(), plan, snap, input.note);
+      raw = patchedRaw(base.state, { audit: store.getState().envelopeResetAudit });
+      if (raw) raw = appendOverageRows(raw, plan.overage.month, plan.rows);
+    } else {
+      appendEnvelopeAudit(store.getState(), {
+        at: snap.at, action: kind, snapshotId: snap.id, beforeRaw: plan.beforeRaw, afterRaw: plan.afterRaw, note: input.note,
+      });
+      raw = patchedRaw(base.state, { budgets: plan.budgets, carry: plan.carry, audit: store.getState().envelopeResetAudit });
+    }
     if (!raw) return { ...NOT_NORMALIZED, snapshot: snap };
     const s2 = await saveBudget(url, key, ownerId, raw, base.updated_at);
     if (s2.ok) return { plan, snapshot: snap, written: true };
@@ -248,6 +300,7 @@ function routeOf(req, context) {
   const p = new URL(req.url).pathname.replace(/\/+$/, '');
   if (p === '/api/envelopes/snapshot') return { kind: 'snapshot' };
   if (p === '/api/envelopes/reset') return { kind: 'reset' };
+  if (p === '/api/envelopes/overage') return { kind: 'overage' };
   const m = p.match(/^\/api\/envelopes\/snapshots\/([^/]+)\/restore$/);
   if (m) {
     const id = String(context?.params?.id || decodeURIComponent(m[1]));
@@ -298,6 +351,7 @@ export default async (req, context) => {
     return json(400, { ok: false, error: 'invalid_body', message: 'JSON body required' });
   }
   const checked = route.kind === 'reset' ? validateResetBody(body)
+    : route.kind === 'overage' ? validateOverageBody(body)
     : route.kind === 'restore' ? validateRestoreBody(body)
       : validateSnapshotBody(body);
   if (!checked.ok) return json(400, { ok: false, error: 'invalid_body', message: checked.message });
@@ -331,6 +385,18 @@ export default async (req, context) => {
     return json(fail.status || 400, out);
   }
   const p = result.plan;
+  if (route.kind === 'overage') {
+    return json(200, {
+      ok: true,
+      status: input.dryRun ? 'dry_run' : 'applied',
+      dry_run: !!input.dryRun,
+      ...(result.snapshot ? { snapshot: result.snapshot, batch_id: p.batchId } : {}),
+      state_hash_before: p.before.hash,
+      state_hash_after: p.after.hash,
+      ...overageResponse(p.overage, p.bonusAfter),
+      totals: p.table.totals,
+    });
+  }
   const out = {
     ok: true,
     status: input.dryRun ? 'dry_run' : 'applied',
@@ -346,5 +412,5 @@ export default async (req, context) => {
 };
 
 export const config = {
-  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset'],
+  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage'],
 };

@@ -225,7 +225,7 @@ await test('GET balances: store numbers, bill link, checking, unallocated, newes
   const r = await getBal();
   assert.equal(r.status, 200, r.text);
   const j = r.json;
-  assert.deepEqual(Object.keys(j).sort(), ['checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
+  assert.deepEqual(Object.keys(j).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
   assert.equal(j.month, YM);
   assert.equal(j.checking_balance, 4000);
   assert.equal(j.total_allocated, 5979.49, 'top-level budgets only (sub excluded)');
@@ -233,14 +233,17 @@ await test('GET balances: store numbers, bill link, checking, unallocated, newes
   assert.equal(j.newest_transaction_date, `${YM}-04`);
   assert.match(j.state_hash, /^[a-f0-9]{64}$/);
   const e = n => j.envelopes.find(x => x.name === n);
-  assert.deepEqual(e('Groceries'), { id: GROC, name: 'Groceries', allocated: 1400, spent: 212.44, remaining: 1187.56, bill_id: null });
-  assert.deepEqual(e('Mortgage'), { id: MORT, name: 'Mortgage', allocated: 3219.49, spent: 0, remaining: 3219.49, bill_id: 'fake-bill-mort' });
+  assert.equal(j.bonus_available, 2600, 'unmatched income lands in the free bonus pot (app rule), same as Budget "Bonus available"');
+  assert.deepEqual(e('Groceries'), { id: GROC, name: 'Groceries', kind: 'spend', allocated: 1400, spent: 212.44, remaining: 1187.56, bill_id: null });
+  assert.deepEqual(e('Mortgage'), { id: MORT, name: 'Mortgage', kind: 'bill', allocated: 3219.49, spent: 0, remaining: 3219.49, bill_id: 'fake-bill-mort' });
+  assert.equal(e('Christmas').kind, 'sinking');
+  assert.equal(e('Fake Sub').kind, undefined, 'kind on top-level envelopes only');
   assert.equal(e('Eating Out / Fast Food').remaining, 474.5, 'carry-over included in remaining');
   assert.equal(e('Utilities').bill_id, 'fake-bill-power');
   assert.equal(e('Christmas').sinkingFund, true);
   assert.equal(e('Fake Sub').group, 'Groceries');
   for (const x of j.envelopes) {
-    for (const k of Object.keys(x)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'allocated', 'spent', 'remaining', 'bill_id'].includes(k), k);
+    for (const k of Object.keys(x)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'remaining', 'bill_id'].includes(k), k);
   }
   assert.ok(!/secret fake envelope note|monthlyBudget|carryOver|FAKE GROCER|Fake Mortgage Co|fake-debt|envelopeSnapshots/i.test(r.text), 'trimmed');
   assert.equal(await hashNow(), j.state_hash, 'hash is stable');

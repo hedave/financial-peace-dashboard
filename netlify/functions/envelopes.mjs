@@ -5,10 +5,12 @@ import { computeBalances, listSnapshots, withStoreLock } from '../../js/envelope
 
 /**
  * GET /api/envelopes — envelopes with current-month balances:
- *   {ok, month, checking_balance, total_allocated, unallocated, newest_transaction_date,
- *    state_hash, envelopes:[{id, name, group?, sinkingFund?, allocated, spent, remaining, bill_id}]}
+ *   {ok, month, checking_balance, total_allocated, unallocated, bonus_available,
+ *    newest_transaction_date, state_hash,
+ *    envelopes:[{id, name, group?, sinkingFund?, kind?, allocated, spent, remaining, bill_id}]}
+ * kind (top-level only): bill | debt | sinking | spend (store.getEnvelopeKind).
  * Numbers come from the store's own getters (same as the Budget page). No notes, plan
- * internals, transactions or bill details. `state_hash` feeds the CAS on reset/restore.
+ * internals, transactions or bill details. `state_hash` feeds the CAS on reset/restore/overage.
  * GET /api/envelopes/snapshots — trimmed snapshot list (no per-envelope amounts).
  *
  * Auth: the existing read token FIGPIG_BILLS_READ_TOKEN (Bearer, or x-figpig-bills-token).

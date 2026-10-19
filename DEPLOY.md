@@ -161,6 +161,6 @@ Netlify env (add; do not reuse any other FigPig secret). Until it is set the end
 | --- | --- |
 | `FIGPIG_TX_SPLIT_TOKEN` | Long random string (≥ 24 chars); store also at `/home/box/.secrets/figpig/tx_split_token` |
 | `FIGPIG_SPLIT_WRITE_TOKEN` | Long random string (≥ 24 chars) for `PATCH /api/transactions/:id/split` only; store also at `/home/box/.secrets/figpig/split_write_token`. See `docs/SPLITS-API.md` |
-| `FIGPIG_ENVELOPE_WRITE_TOKEN` | Long random string (≥ 24 chars, different from every other FigPig token) for `POST /api/envelopes/snapshot`, `/api/envelopes/snapshots/:id/restore`, `/api/envelopes/reset` only; store also at `/home/box/.secrets/figpig/envelope_write_token`. Unset → 503. See `docs/ENVELOPES-API.md` |
+| `FIGPIG_ENVELOPE_WRITE_TOKEN` | Long random string (≥ 24 chars, different from every other FigPig token) for `POST /api/envelopes/snapshot`, `/api/envelopes/snapshots/:id/restore`, `/api/envelopes/reset`, `/api/envelopes/overage` only; store also at `/home/box/.secrets/figpig/envelope_write_token`. Unset → 503. See `docs/ENVELOPES-API.md` |
 
 Function: `netlify/functions/transactions-split.mjs` → `POST /api/transactions/split`. No SQL needed: review items live in the budget JSON (`state.receiptReview`).

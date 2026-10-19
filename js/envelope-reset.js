@@ -130,6 +130,8 @@ function newestTxDate(state) {
  * allocated = getCategoryBudgeted, spent = getCategorySpent, remaining = getCategoryRemaining.
  * total_allocated = getTotalBudgeted (top-level, what Budget "To Allocate" uses).
  * unallocated = checking − total_allocated (negative = over-allocated).
+ * bonus_available = getBonusAvailable (free bonus pot the overage cover draws from first).
+ * kind (top-level only) = getEnvelopeKind: bill | debt | sinking | spend.
  * `hashInput` is the canonical string the caller hashes into state_hash.
  */
 export function computeBalances(store) {
@@ -141,6 +143,7 @@ export function computeBalances(store) {
     const out = { id: String(c.id), name: cleanText(c.name, 80) };
     if (c.parentId && byId.get(c.parentId)) out.group = cleanText(byId.get(c.parentId).name, 80);
     if (c.isSinkingFund) out.sinkingFund = true;
+    if (!c.parentId) out.kind = store.getEnvelopeKind(c.id);
     out.allocated = r2(store.getCategoryBudgeted(c.id, month));
     out.spent = r2(store.getCategorySpent(c.id, month));
     out.remaining = r2(store.getCategoryRemaining(c.id, month));
@@ -154,12 +157,13 @@ export function computeBalances(store) {
     checking_balance: checking,
     total_allocated: total,
     unallocated: r2(checking - total),
+    bonus_available: r2(store.getBonusAvailable(month)),
     newest_transaction_date: newestTxDate(state),
     envelopes,
   };
   // Hash covers what a caller acts on plus the raw plan/carry fields behind it.
   const hashInput = JSON.stringify({
-    v: 1,
+    v: 2,
     ...body,
     raw: cats.map(c => [String(c.id), c.parentId || null, r2(c.monthlyBudget), r2(c.carryOver)]),
   });
