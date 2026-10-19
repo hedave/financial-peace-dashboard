@@ -1,12 +1,19 @@
 import { timingSafeEqual, createHash } from 'node:crypto';
 import './polyfill-storage.mjs';
-import { listEnvelopes } from '../../js/split-edit.js';
+import { store } from '../../js/store.js';
+import { computeBalances, listSnapshots, withStoreLock } from '../../js/envelope-reset.js';
 
 /**
- * GET /api/envelopes — read-only list of envelopes: [{id, name, group?, sinkingFund?}].
- * No balances, budgets or notes. Auth: the existing read token FIGPIG_BILLS_READ_TOKEN
- * (Bearer, or x-figpig-bills-token). 503 when unset/short or Supabase env missing.
- * 30 req/min per client IP, counted before auth. Supabase failure → 502.
+ * GET /api/envelopes — envelopes with current-month balances:
+ *   {ok, month, checking_balance, total_allocated, unallocated, newest_transaction_date,
+ *    state_hash, envelopes:[{id, name, group?, sinkingFund?, allocated, spent, remaining, bill_id}]}
+ * Numbers come from the store's own getters (same as the Budget page). No notes, plan
+ * internals, transactions or bill details. `state_hash` feeds the CAS on reset/restore.
+ * GET /api/envelopes/snapshots — trimmed snapshot list (no per-envelope amounts).
+ *
+ * Auth: the existing read token FIGPIG_BILLS_READ_TOKEN (Bearer, or x-figpig-bills-token).
+ * 503 when unset/short or Supabase env missing. 30 req/min per client IP, counted before
+ * auth. Supabase failure → 502. Writes live in envelopes-write.mjs (own token).
  */
 
 const WINDOW_MS = 60_000;
@@ -82,8 +89,15 @@ export default async (req) => {
     if (!res.ok) throw new Error(`Load failed (${res.status})`);
     const rows = await res.json();
     const state = Array.isArray(rows) ? rows[0]?.state : null;
-    if (!state) return json(409, { ok: false, error: 'no_budget' });
-    return json(200, { ok: true, envelopes: listEnvelopes(state.categories) });
+    if (!state || typeof state !== 'object') return json(409, { ok: false, error: 'no_budget' });
+    const isList = /^\/api\/envelopes\/snapshots\/?$/.test(new URL(req.url).pathname);
+    const out = await withStoreLock(() => {
+      store.hydrateFromObject(state);
+      if (isList) return { ok: true, snapshots: listSnapshots(store.getState()) };
+      const { body, hashInput } = computeBalances(store);
+      return { ok: true, ...body, state_hash: createHash('sha256').update(hashInput).digest('hex') };
+    });
+    return json(200, out);
   } catch (err) {
     console.error('envelopes failed', err?.message);
     return json(502, { ok: false, error: 'upstream_error' });
@@ -91,5 +105,5 @@ export default async (req) => {
 };
 
 export const config = {
-  path: '/api/envelopes',
+  path: ['/api/envelopes', '/api/envelopes/snapshots'],
 };
