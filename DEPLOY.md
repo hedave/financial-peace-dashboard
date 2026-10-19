@@ -151,6 +151,12 @@ Netlify env (add; do not reuse ingest or bills-read secrets):
 
 Function: `netlify/functions/transactions.mjs` → `POST /api/transactions`. Merchant category rules run (uncategorized only when no rule matches). No bill auto-match, auto-pay, or envelope assignment. Optional `checkingBalance` overwrites `state.balances.checking` after import; omit it and import math updates checking.
 
+## Cover overage button (build 20261019a)
+
+Budget page → overspent banner → **Cover overage**: bonus pot first, then an equal split across all
+envelopes (minus bills/debts) or picked ones. Client-side through the store like **Cover overspend**; no
+new env var and no token in the browser. API twin for bots: `POST /api/envelopes/overage` (`docs/ENVELOPES-API.md`).
+
 ## Receipt split API (build 20261009b)
 
 Splits an existing bank row from a receipt and feeds Log → Receipts to review. See `docs/TRANSACTIONS-API.md` → *Receipt split*.

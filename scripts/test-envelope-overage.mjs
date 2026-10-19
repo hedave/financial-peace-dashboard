@@ -9,7 +9,9 @@ import readHandler, { _resetRateLimit as _resetReadRL } from '../netlify/functio
 import { createDefaultState } from '../js/defaults.js';
 import { getCurrentMonth } from '../js/utils.js';
 import { store } from '../js/store.js';
-import { validateOverageBody, equalSplit, cascadeSplit } from '../js/envelope-overage.js';
+import { validateOverageBody, equalSplit, cascadeSplit, overageOptions, planOverage, planSignature, coverOverageInStore } from '../js/envelope-overage.js';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 const TOKEN = 'fake-envelope-write-token-0123456789';
 const READ = 'fake-read-token-0123456789abcdef';
@@ -453,6 +455,70 @@ await test('response is trimmed: no notes, transactions, bill names or raw rows'
   assert.ok(!/FAKE REFUND|FAKE SPEND|Fake Mortgage Co|Fake Student Loan|monthlyBudget|carryOver|overspendCoverIous|envelopeSnapshots/.test(r.text));
   for (const k of Object.keys(r.json)) assert.ok(['ok', 'status', 'dry_run', 'state_hash_before', 'state_hash_after', 'overage', 'overspent', 'debits', 'excluded', 'moves', 'warnings', 'totals'].includes(k), k);
   assert.equal(r.json.totals.total_allocated_change, 0, 'plan unchanged');
+});
+
+// --- Budget-page path: same planner, store's own write path, no server/token ---
+const UI_IN = (targets = 'all', extra = {}) => ({ targets, envelopes: null, includeSinking: true, negativeRule: 'cascade', note: '', ...extra });
+let uiSeq = 0;
+const uiIds = () => `fake-ui-${uiSeq++}`;
+await test('UI options: overspent list, bonus pot, eligible vs protected targets', async () => {
+  seed({ bonus: 40, extra: [spend(UTIL, 250)] });
+  store.hydrateFromObject(structuredClone(remote.state));
+  const o = overageOptions(store);
+  assert.equal(o.month, YM);
+  assert.equal(o.bonusAvailable, 4000);
+  assert.equal(o.total, 10000, 'bill overage (Utilities) is not part of it');
+  assert.deepEqual(o.overspent.map(x => x.name), ['Groceries']);
+  const c = Object.fromEntries(o.candidates.map(x => [x.name, x]));
+  assert.equal(c.Groceries.eligible, false); assert.equal(c.Groceries.reason, 'overspent');
+  assert.equal(c.Mortgage.reason, 'bill'); assert.equal(c.Utilities.reason, 'bill');
+  assert.equal(c.Education.reason, 'debt'); assert.equal(c['Work travel'].reason, 'pass_through');
+  assert.equal(c.Clothing.eligible, true); assert.equal(c.Clothing.remaining, 5000);
+  assert.equal(c.Christmas.isSinking, true); assert.equal(c.Christmas.eligible, true);
+  assert.ok(o.candidates.every(x => !x.id.includes('/')));
+});
+await test('UI apply: coverOverageInStore writes through the store, ends at 0, persists locally', async () => {
+  seed({ bonus: 40 });
+  store.hydrateFromObject(structuredClone(remote.state));
+  const inp = UI_IN(['Eating Out / Fast Food', 'Entertainment', 'Clothing']);
+  const plan = planOverage(store, inp);
+  const res = coverOverageInStore(store, inp, { signature: planSignature(plan), newId: uiIds, batchId: 'ovr_fakeui000000001' });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(store.getCategoryRemaining(GROC, YM), 0);
+  assert.equal(store.getCategoryRemaining(CLO, YM), 30);
+  assert.equal(store.getBonusAvailable(YM), 0);
+  const saved = JSON.parse(globalThis.localStorage.getItem('financial-peace-dashboard'));
+  assert.equal(saved.monthEnvelopeMoves[YM].filter(m => m.overageBatchId === 'ovr_fakeui000000001').length, 3);
+  assert.equal(saved.monthBonusAllocations[YM].filter(m => m.overageBatchId === 'ovr_fakeui000000001').length, 1);
+  assert.equal(patches, 0, 'browser path makes no server call');
+});
+await test('UI apply: stale preview (budget changed) → stale_state, nothing written; all-mode + sinking off', async () => {
+  seed();
+  store.hydrateFromObject(structuredClone(remote.state));
+  const inp = UI_IN('all', { includeSinking: false });
+  const sig = planSignature(planOverage(store, inp));
+  store.update(s => { s.transactions.push(spend(CLO, 5)); }, { persist: false });
+  const before = JSON.stringify(store.getState().monthEnvelopeMoves);
+  const r = coverOverageInStore(store, inp, { signature: sig, newId: uiIds, batchId: 'ovr_fakeui000000002' });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'stale_state');
+  assert.equal(JSON.stringify(store.getState().monthEnvelopeMoves), before);
+  const ok = coverOverageInStore(store, inp, { signature: planSignature(planOverage(store, inp)), newId: uiIds, batchId: 'ovr_fakeui000000003' });
+  assert.equal(ok.ok, true);
+  assert.equal(store.getCategoryRemaining(XMAS, YM), 200, 'sinking untouched when toggled off');
+  assert.equal(store.getCategoryRemaining(MORT, YM), 1500, 'bill untouched');
+  assert.equal(store.getCategoryRemaining(GROC, YM), 0);
+});
+await test('client code: no write token or secret, no innerHTML in the overage panel', async () => {
+  const walk = d => readdirSync(d).flatMap(f => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : [p]; });
+  const root = new URL('..', import.meta.url).pathname;
+  for (const f of walk(join(root, 'js')).filter(f => f.endsWith('.js') && !/config(\.example)?\.js$/.test(f))) {
+    const src = readFileSync(f, 'utf8');
+    assert.ok(!/FIGPIG_ENVELOPE_WRITE_TOKEN|envelope_write_token|SERVICE_ROLE/.test(src), `secret name in ${f}`);
+    assert.ok(!/\/api\/envelopes\/overage/.test(src) || f.endsWith('envelope-overage.js'), `browser must not call the write API: ${f}`);
+  }
+  const panel = readFileSync(join(root, 'js/components/overage-cover.js'), 'utf8');
+  assert.ok(!/innerHTML/.test(panel), 'panel renders text nodes only');
 });
 
 assert.deepEqual(stray, [], 'no network calls outside the fake Supabase');

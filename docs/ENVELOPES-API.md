@@ -168,6 +168,23 @@ A real run saves a `pre_overage` snapshot first (own write), like reset. **Note:
 `monthlyBudget`/`carryOver` only, so restoring `pre_overage` does **not** undo an overage; undo it with the
 per-row Undo buttons in the app (or reverse the rows listed in the audit entry).
 
+### Budget page: "Cover overage" button (build 20261019a)
+
+Shown in the "overspent" banner (and under **More budget actions**) when any non-bill, non-debt,
+non-pass-through envelope is below $0 this month, for logins that can write the budget.
+The panel shows what the bonus pot covers, a target picker (**All envelopes (minus bills)** or
+**Pick envelopes** — a checklist where the overspent envelope and bill/debt/pass-through envelopes
+are disabled), an **Include sinking funds** toggle (default on), a live preview of each debit with
+before → after and a "goes below $0" flag, and **Confirm**, which applies and refreshes the page.
+
+**Auth / write path:** the browser does **not** call this endpoint and holds **no token**. Like
+**Cover overspend** and **Assign bonus**, it runs the same planner (`js/envelope-overage.js`:
+`overageOptions`, `planOverage`, `coverOverageInStore`) on the live store and saves through the store's
+own path (`store.update`/`save` → localStorage + the signed-in household's cloud sync). Confirm re-plans
+and refuses if the plan differs from the preview (client-side compare-and-swap; the preview refreshes),
+then reads the result back through the store getters and only saves if every number landed (fails closed).
+The panel uses the default `cascade` rule. `FIGPIG_ENVELOPE_WRITE_TOKEN` stays server-side for bots (CoS).
+
 ```bash
 # Dry run (default): writes nothing
 curl -s -X POST https://hernandez-finops.netlify.app/api/envelopes/overage \

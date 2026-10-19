@@ -271,7 +271,7 @@ export function planOverage(store, input) {
   if (neg.length) {
     warnings.push(input.negativeRule === 'allow'
       ? `Equal share pushes ${neg.length} envelope(s) below $0: ${neg.map(d => d.envelope).join(', ')}`
-      : `Targets ran out of leftover; ${fromCents(forced).toFixed(2)} was forced across all targets, ${neg.length} now below $0`);
+      : `Targets ran out of leftover; $${fromCents(forced).toFixed(2)} was forced across all targets, ${neg.length} now below $0`);
   }
   return {
     ok: true,
@@ -290,7 +290,7 @@ export function planOverage(store, input) {
  * as the app's allocateBonusToEnvelope / applyCoverOverspend. Returns the rows written so the
  * caller can append the identical rows to the raw cloud row.
  */
-export function applyOverageInMemory(store, plan, { at, batchId, newId, note = '' }) {
+export function applyOverageInMemory(store, plan, { at, batchId, newId, note = '', persist = false }) {
   const label = note ? ` — ${note}` : '';
   const bonus = plan.bonusRows.map(b => ({
     id: newId(), categoryId: b.categoryId, amount: fromCents(b.cents),
@@ -315,7 +315,7 @@ export function applyOverageInMemory(store, plan, { at, batchId, newId, note = '
     for (const b of bonus) s.monthBonusAllocations[plan.month].push({ ...b });
     for (const m of moves) s.monthEnvelopeMoves[plan.month].push({ ...m });
     for (const i of ious) s.overspendCoverIous.push({ ...i });
-  }, { persist: false });
+  }, { persist });
   return { bonus, moves, ious };
 }
 
@@ -369,4 +369,64 @@ export function overageResponse(plan, bonusAfterCents) {
     moves: plan.moves.map(m => ({ from: m.fromName, to: m.toName, amount: d(m.cents) })),
     warnings: plan.warnings,
   };
+}
+
+/**
+ * What the Budget-page "Cover overage" panel needs (current month): the overspent envelopes,
+ * the free bonus pot, and every top-level envelope with whether it can be a target and why not.
+ * Same eligibility rules as planOverage.
+ */
+export function overageOptions(store) {
+  const state = store.getState();
+  const month = getCurrentMonth();
+  const tops = (state.categories || []).filter(c => c && c.id && !c.parentId).map(c => envelopeInfo(store, c, month));
+  const overspent = tops.filter(e => e.remaining < 0 && !protectedReason(e))
+    .map(e => ({ id: e.id, name: e.name, over: -e.remaining }))
+    .sort((a, b) => b.over - a.over || byName(a, b));
+  const candidates = tops.map(e => {
+    const reason = protectedReason(e) || (e.remaining < 0 ? 'overspent' : null);
+    return { id: e.id, name: e.name, kind: e.kind, isSinking: e.isSinking, remaining: e.remaining, eligible: !reason, reason };
+  }).sort(byName);
+  return {
+    month,
+    bonusAvailable: cents(store.getBonusAvailable(month)),
+    total: overspent.reduce((s, o) => s + o.over, 0),
+    overspent,
+    candidates,
+  };
+}
+
+/** Stable fingerprint of what a plan will do; the panel re-checks it at Confirm (client-side CAS). */
+export function planSignature(plan) {
+  return JSON.stringify({
+    m: plan.month, t: plan.total, b: plan.fromBonus, bb: plan.bonusBefore,
+    o: plan.overs.map(o => [o.id, o.over, o.fromBonus]),
+    d: plan.debitRows.map(r => [r.id, r.remaining_before, r.debit]),
+  });
+}
+
+/**
+ * Browser path (Budget page): re-plan on the live store, refuse if the plan no longer matches
+ * the previewed `signature` (something changed since the preview), apply in memory, read back
+ * through the store getters, then persist through the store's normal save (localStorage +
+ * the app's own cloud sync). No server call, no token. Fails closed: on a read-back mismatch
+ * the rows are removed again and nothing is saved.
+ */
+export function coverOverageInStore(store, input, { signature, newId, batchId, at = new Date().toISOString() }) {
+  if (typeof store.canWriteBudget === 'function' && !store.canWriteBudget()) return { ok: false, code: 'read_only' };
+  const plan = planOverage(store, input);
+  if (!plan.ok) return plan;
+  if (signature && planSignature(plan) !== signature) return { ok: false, code: 'stale_state' };
+  const rows = applyOverageInMemory(store, plan, { at, batchId, newId, note: input.note || '' });
+  if (!verifyOverage(store, plan)) {
+    store.update(s => {
+      const m = plan.month;
+      if (Array.isArray(s.monthBonusAllocations?.[m])) s.monthBonusAllocations[m] = s.monthBonusAllocations[m].filter(r => r.overageBatchId !== batchId);
+      if (Array.isArray(s.monthEnvelopeMoves?.[m])) s.monthEnvelopeMoves[m] = s.monthEnvelopeMoves[m].filter(r => r.overageBatchId !== batchId);
+      if (Array.isArray(s.overspendCoverIous)) s.overspendCoverIous = s.overspendCoverIous.filter(r => r.batchId !== batchId);
+    }, { persist: false });
+    return { ok: false, code: 'write_refused' };
+  }
+  store.save();
+  return { ok: true, plan, rows };
 }
