@@ -322,7 +322,7 @@ await test('envelopes: trimmed list (id, name, group?, sinkingFund?, balances), 
   const r = await getEnv();
   assert.equal(r.status, 200, r.text);
   // Balances added by the envelope reset API, bonus_available/kind by the overage API (see scripts/test-envelope-reset.mjs).
-  assert.deepEqual(Object.keys(r.json).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
+  assert.deepEqual(Object.keys(r.json).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated', 'uncategorized']);
   for (const e of r.json.envelopes) {
     for (const k of Object.keys(e)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'carry', 'remaining', 'bill_id'].includes(k), k);
   }

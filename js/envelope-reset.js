@@ -173,6 +173,17 @@ function linkedBillId(state, catId) {
   return pick ? cleanText(pick.id, 128) : null;
 }
 
+/** Month expenses with no envelope and no split (money spent but unassigned). */
+function uncategorizedFor(state, month) {
+  let count = 0; let total = 0;
+  for (const t of state.transactions || []) {
+    if (!t || t.type !== 'expense' || typeof t.date !== 'string' || !t.date.startsWith(`${month}-`)) continue;
+    if (t.categoryId || (Array.isArray(t.splits) && t.splits.length)) continue;
+    count++; total += Math.abs(Number(t.amount) || 0);
+  }
+  return { count, total: r2(total) };
+}
+
 function newestTxDate(state) {
   let best = null;
   for (const t of state.transactions || []) {
@@ -191,9 +202,8 @@ function newestTxDate(state) {
  * kind (top-level only) = getEnvelopeKind: bill | debt | sinking | spend.
  * `hashInput` is the canonical string the caller hashes into state_hash.
  */
-export function computeBalances(store) {
+export function computeBalances(store, month = getCurrentMonth()) {
   const state = store.getState();
-  const month = getCurrentMonth();
   const cats = (state.categories || []).filter(c => c && c.id);
   const byId = new Map(cats.map(c => [c.id, c]));
   const envelopes = cats.map(c => {
@@ -217,6 +227,7 @@ export function computeBalances(store) {
     unallocated: r2(checking - total),
     bonus_available: r2(store.getBonusAvailable(month)),
     newest_transaction_date: newestTxDate(state),
+    uncategorized: uncategorizedFor(state, month),
     envelopes,
   };
   // Hash covers what a caller acts on plus the raw plan/carry fields behind it.

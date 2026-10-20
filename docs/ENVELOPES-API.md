@@ -314,3 +314,13 @@ Sets `carryOver = 0` for named top-level envelopes. Never touches allocation or 
 - Real run: snapshot first (`reason: "pre_carry_reset"`), audit `action: "reset_carry"`; undo via restore.
 
 GET /api/envelopes now also returns `carry` (opening carry for the current month) per envelope.
+
+## GET /api/envelopes — per-month figures (budget-fix API)
+
+Each envelope: `allocated`, `spent`, `carry` (opening carry for the month), `remaining`.
+Top level: `checking_balance`, `total_allocated`, `unallocated` (= checking − total_allocated, the
+unassigned total; negative = over-allocated), `bonus_available`, and `uncategorized: {count, total}`
+(expenses that month with no envelope and no split).
+
+Optional `?month=YYYY-MM` returns those figures for another month. `state_hash` always describes
+the **current** month (the one reset / start-fresh / reset-carry / overage act on). Other query params → 400.

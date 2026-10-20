@@ -176,3 +176,17 @@ Function: `netlify/functions/transactions-split.mjs` → `POST /api/transactions
 `POST /api/envelopes/start-fresh` (zero allocation **and** carry-over, snapshot first, dry run default) and
 `POST /api/envelopes/reset-carry` (carry-over only, `expected_carry` check). No new env var: both use
 `FIGPIG_ENVELOPE_WRITE_TOKEN`. Undo either with `/api/envelopes/snapshots/:id/restore`. See `docs/ENVELOPES-API.md`.
+
+## Budget-fix API (transactions read + void)
+
+Netlify env (add; never reuse another FigPig secret). Unset, short (< 24) or reused → that endpoint answers `503`:
+
+| Variable | Notes |
+| --- | --- |
+| `FIGPIG_TX_READ_TOKEN` | Long random string for `GET /api/transactions` only |
+| `FIGPIG_TX_VOID_TOKEN` | Long random string for `POST /api/transactions/:id/void` and `/api/transactions/voids/:voidId/restore` only |
+
+Functions: `netlify/functions/transactions-read.mjs` (config `method: GET`) and `transactions-void.mjs`.
+`transactions.mjs` (bank import) is now `method: ['POST','OPTIONS']` so the two share `/api/transactions`.
+After deploy, check `GET /api/transactions?month=…` reaches the read function and `POST /api/transactions` still imports.
+See `docs/TRANSACTIONS-API.md` → *Budget-fix API*. `GET /api/envelopes` gains `carry`, `uncategorized` and `?month=`.

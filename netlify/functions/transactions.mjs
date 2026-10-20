@@ -335,4 +335,6 @@ export default async (req) => {
 
 export const config = {
   path: '/api/transactions',
+  // GET /api/transactions is transactions-read.mjs (FIGPIG_TX_READ_TOKEN).
+  method: ['POST', 'OPTIONS'],
 };

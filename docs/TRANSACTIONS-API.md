@@ -254,3 +254,52 @@ When FigPig refuses (or the bot isn't sure), queue the receipt for David instead
 - Response: `{"ok":true,"status":"queued"|"updated"|"unchanged"|"dry_run","receiptId":"…","candidates":2,"pending":3}`.
 
 David sees it on **Log → Receipts to review** (Log tab badge counts it): **Approve** on one of the listed bank rows (only those rows are accepted) applies the same checks as the API, including the ≤3¢ adjustment shown on the row, **Edit** moves receipt items between envelopes (tax/coupons shared by each envelope's share), **Dismiss** drops it.
+
+## Budget-fix API (FigPig Bot, no browser)
+
+Two new scoped tokens. Neither reuses an existing token; each function fails closed (503) if its
+token is unset, shorter than 24 chars, or equal to any other FigPig token.
+
+| Token | Scope |
+| --- | --- |
+| `FIGPIG_TX_READ_TOKEN` | `GET /api/transactions` only (30 req/min/IP) |
+| `FIGPIG_TX_VOID_TOKEN` | `POST /api/transactions/:id/void` and `POST /api/transactions/voids/:voidId/restore` only (10 writes/min/IP) |
+
+Why not `FIGPIG_TX_WRITE_TOKEN`: that token already belongs to the add-only bank import
+(`POST /api/transactions`), held by the finance connector. Reusing it would let the importer
+delete rows. The void token is a separate, narrower write scope. Envelope writes stay on
+`FIGPIG_ENVELOPE_WRITE_TOKEN`.
+
+Wrong/missing token → 401. Rate limit counted before auth → 429. Supabase error → 502.
+
+### `GET /api/transactions?month=YYYY-MM&envelope=<name>&limit=<1..500>`
+
+At least one of `month` / `envelope`. Unknown or repeated params → 400 `invalid_query`.
+Envelope matches by name (case-insensitive), including split lines; unknown → 400 `unknown_envelope` + `validEnvelopes`.
+
+```json
+{ "ok": true, "month": "2026-10", "envelope": null, "total": 5, "truncated": false,
+  "transactions": [ { "id": "fake-bank-1", "date": "2026-10-02", "amount": 212.44, "type": "expense",
+    "payee": "FAKE GROCER #12", "envelope": "Groceries", "source": "bank" } ] }
+```
+
+`amount` is absolute (see `type`). Split rows have `envelope: null` and `splits: [{envelope, amount}]`.
+`pending: true` on uncleared rows. `source`: `bank` if the row came through import/bank sync
+(`externalId`, `bankPending`, or the import's `importCategory` field), else `manual` (heuristic).
+
+### `POST /api/transactions/:id/void`
+
+```json
+{ "expected_amount": 80, "expected_date": "2026-10-04", "dry_run": true, "note": "optional" }
+```
+
+- `expected_amount` (absolute) and `expected_date` are required; if they differ from the stored row → **409 `expected_mismatch`** with `actual`.
+- `dry_run` defaults to `true` (preview, writes nothing).
+- Same effects as the app's Delete: checking reversed (cleared rows), debt payment added back to the debt, earmarked-income carry reversed, refund link cleared.
+- Real run writes an undo record (`state.transactionVoids`, full copy of the row, capped at 100) and returns `void_id`.
+- Applied to the raw cloud row with the `updated_at` compare-and-swap (re-checked, one retry, then 409 `conflict`).
+
+### `POST /api/transactions/voids/:voidId/restore`
+
+`{ "dry_run": true, "note": "optional" }`. Re-inserts the row and re-applies checking/debt/carry/refund link.
+409 `already_restored` or `transaction_exists`; 404 unknown id.
