@@ -808,8 +808,11 @@ function envelopeMoreMenu(cat, { isFav = false, isCurrentMonth = true, carry = 0
     const anchorBottom = Math.max(t.bottom, hb.bottom);
     const nav = document.querySelector('.bottom-nav');
     const navTop = nav && nav.getBoundingClientRect().height > 0 ? nav.getBoundingClientRect().top : vh;
-    const hdr = document.querySelector('.mobile-header');
-    const hdrBottom = hdr && hdr.getBoundingClientRect().height > 0 ? hdr.getBoundingClientRect().bottom : 0;
+    const hdrBottom = [...document.querySelectorAll('.mobile-header, .page-header')].reduce((m, node) => {
+      if (getComputedStyle(node).position !== 'sticky' && getComputedStyle(node).position !== 'fixed') return m;
+      const r = node.getBoundingClientRect();
+      return r.height > 0 ? Math.max(m, r.bottom) : m;
+    }, 0);
     const limitTop = Math.max(gap, hdrBottom + gap);
     const limitBottom = Math.min(vh, navTop) - gap;
     panel.style.maxHeight = '';
@@ -929,6 +932,17 @@ function envelopeMoreMenu(cat, { isFav = false, isCurrentMonth = true, carry = 0
   return wrap;
 }
 
+/** Text nodes only (escaped by the DOM); <wbr> after "/" lets "A/B" names wrap at the slash. */
+function nameWithBreaks(name) {
+  const parts = String(name).split('/');
+  const nodes = [];
+  parts.forEach((part, i) => {
+    nodes.push(document.createTextNode(i < parts.length - 1 ? `${part}/` : part));
+    if (i < parts.length - 1) nodes.push(document.createElement('wbr'));
+  });
+  return nodes;
+}
+
 function envelopeCard(cat, focusId = null, opts = {}) {
   const month = opts.month || getCurrentMonth();
   const isCurrentMonth = opts.isCurrentMonth !== false && month === getCurrentMonth();
@@ -975,9 +989,9 @@ function envelopeCard(cat, focusId = null, opts = {}) {
       el('div', { className: 'envelope-header' },
         el('div', { className: 'envelope-title' },
           el('span', { className: 'envelope-icon' }, cat.icon || '✉️'),
-          el('span', { className: 'envelope-name' }, cat.name),
+          el('span', { className: 'envelope-name', title: cat.name }, ...nameWithBreaks(cat.name)),
           isFav ? el('span', { className: 'envelope-fav-star', title: 'Favorite', 'aria-label': 'Favorite' }, '★') : null,
-          cat.isSinkingFund ? el('span', { className: 'sinking-tag' }, 'Sinking Fund') : null,
+          cat.isSinkingFund ? el('span', { className: 'sinking-tag', title: 'Sinking Fund' }, 'Sinking Fund') : null,
           healthLabel ? el('span', { className: `envelope-health-badge health-${health}` }, healthLabel) : null,
           overCap ? el('span', { className: 'envelope-health-badge health-over' }, cat.isSinkingFund ? 'Over goal' : 'Over cap') : null,
           hasNote ? el('span', { className: 'envelope-badge-mini', title: cat.note, 'aria-label': 'Has a note' }, icon('note', 14)) : null,
