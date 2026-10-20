@@ -1,0 +1,183 @@
+/* ==========================================================================
+   FigPig polish — presentation only. Joins the existing `refresh` layer (so it
+   wins over base/themes the same way redesign.css does) and loads last.
+   No behavior, data, or markup depends on anything in here except the
+   envelope ⋯ popover (.env-menu*), which budget.js positions with
+   `position: fixed` so no ancestor can clip it.
+   ========================================================================== */
+@layer refresh {
+
+/* ---- One menu style: envelope popover + page/row dropdowns -------------- */
+.env-menu { position: relative; flex-shrink: 0; }
+.env-menu-trigger.btn {
+  width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0;
+  border-radius: var(--r-pill); background: transparent; border-color: transparent;
+  color: var(--text-muted); font-size: 1.25rem; line-height: 1;
+}
+.env-menu-trigger.btn:hover { background: var(--bg-sunken); color: var(--text); }
+.env-menu-trigger.btn[aria-expanded="true"] { background: var(--primary-tint); color: var(--primary); }
+.env-menu-trigger.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+.env-menu-panel {
+  position: fixed; z-index: 120; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 13rem; max-width: calc(100vw - 16px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-1);
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+  transform-origin: top right; animation: env-menu-in 140ms var(--ease);
+}
+.env-menu-panel[hidden] { display: none; }
+.env-menu-panel[data-placement="top"] { transform-origin: bottom right; }
+
+.env-menu-item,
+.tx-more-item,
+.page-tools-item {
+  display: flex; align-items: center; width: 100%; min-height: 44px;
+  padding: 0 var(--sp-3); border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--text);
+  font: var(--fw-med) .9375rem/1.25 var(--font); text-align: left; cursor: pointer;
+}
+.env-menu-item:hover, .env-menu-item:focus-visible,
+.tx-more-item:hover, .tx-more-item:focus-visible,
+.page-tools-item:hover, .page-tools-item:focus-visible { background: var(--primary-tint); outline: none; }
+.env-menu-item:focus-visible, .tx-more-item:focus-visible, .page-tools-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+.env-menu-item:active, .tx-more-item:active, .page-tools-item:active { background: var(--primary-line); }
+.env-menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--border); flex: none; }
+.env-menu-item-danger, .tx-more-item-danger { color: var(--negative); font-weight: var(--fw-semi); }
+.env-menu-item-danger:hover, .env-menu-item-danger:focus-visible,
+.tx-more-item-danger:hover, .tx-more-item-danger:focus-visible { background: var(--negative-tint); }
+.env-menu-item-danger:focus-visible, .tx-more-item-danger:focus-visible { box-shadow: inset 0 0 0 2px var(--negative); }
+.tx-more-item-danger { margin-top: var(--sp-1); position: relative; }
+.tx-more-item-danger::before {
+  content: ""; position: absolute; left: var(--sp-2); right: var(--sp-2); top: calc(-1 * var(--sp-1) / 2 - 1px);
+  height: 1px; background: var(--border);
+}
+
+.tx-more-dropdown, .page-tools-dropdown {
+  gap: 2px; padding: var(--sp-1); min-width: 12.5rem;
+  border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+}
+.tx-more-dropdown { animation: env-menu-in 140ms var(--ease); transform-origin: top right; }
+.page-tools-dropdown { animation: env-menu-in 140ms var(--ease); transform-origin: top left; }
+
+@keyframes env-menu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .env-menu-panel, .tx-more-dropdown, .page-tools-dropdown { animation: none; }
+}
+html[data-reduce-motion="true"] .env-menu-panel,
+html[data-reduce-motion="true"] .tx-more-dropdown,
+html[data-reduce-motion="true"] .page-tools-dropdown { animation: none; }
+
+/* ---- Cards and tiles: one border, calmer shadow -------------------------- */
+.card, .envelope-card { border: 1px solid var(--border); }
+.card:not(.stat-hero) { box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+
+/* ---- Buttons: same height and type everywhere --------------------------- */
+.tx-filters-toggle { min-height: 44px; font-size: .9375rem; }
+button, [role="button"], summary, a { -webkit-tap-highlight-color: transparent; }
+
+/* ---- Chips: slightly roomier ---------------------------------------------- */
+.chip { min-height: 38px; padding-inline: var(--sp-4); }
+
+/* ---- Envelope cards: aligned headers, stats and footers ------------------ */
+.envelope-header { min-height: 44px; align-items: flex-start; gap: var(--sp-2); }
+.envelope-title { flex-wrap: nowrap; align-items: center; min-height: 44px; gap: var(--sp-2); }
+.envelope-icon { flex: none; width: 36px; height: 36px; font-size: 1.1rem; line-height: 1; }
+.envelope-name {
+  flex: 0 1 auto; min-width: 3rem;
+  font-size: 1rem; line-height: 1.3;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.envelope-title > .envelope-fav-star, .envelope-title > .sinking-tag,
+.envelope-title > .envelope-health-badge, .envelope-title > .envelope-badge-mini {
+  flex: 0 0 auto; margin: 0; white-space: nowrap;
+}
+.envelope-title > .sinking-tag, .envelope-title > .envelope-health-badge { padding: 2px var(--sp-2); font-size: var(--fs-caption); line-height: 1.25; }
+/* Header height must not depend on badges: the long "Sinking Fund" label is shortened on the card (full text stays in the DOM and title). */
+.envelope-title > .sinking-tag { font-size: 0; }
+.envelope-title > .sinking-tag::before { content: "Fund"; font-size: var(--fs-caption); }
+.envelope-stats { align-items: start; }
+.envelope-stat-spent .envelope-tx-hint { display: none; }
+.envelope-card-top { padding-bottom: var(--sp-3); }
+.envelope-card-footer { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+
+/* One icon treatment: neutral tile, muted glyph (emoji colors no longer clash) */
+.envelope-icon, .empty-icon {
+  display: inline-grid; place-items: center; border-radius: var(--r-sm);
+  background: var(--bg-sunken);
+}
+.envelope-icon, .empty-icon:not(:has(svg)) { filter: grayscale(.9) contrast(1.05); }
+
+/* ---- Empty states: one centered pattern ----------------------------------- */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--sp-2); max-width: 28rem; margin: var(--sp-6) auto 0; padding: var(--sp-10) var(--sp-6);
+}
+.empty-icon { width: 64px; height: 64px; margin: 0 0 var(--sp-2); border-radius: var(--r-lg); font-size: 1.75rem; color: var(--primary); background: var(--primary-tint); }
+.empty-state h3 { margin: 0; font-size: var(--fs-headline); line-height: var(--lh-headline); }
+.empty-state p { margin: 0; color: var(--text-muted); font-size: var(--fs-body); }
+.empty-state .btn { margin-top: var(--sp-3); }
+
+/* ---- Summary tiles: one label style ---------------------------------------- */
+.card-title { color: var(--text-muted); font-weight: var(--fw-semi); }
+
+/* ---- Phone: compact sticky page header with scroll shadow ------------------- */
+@media (max-width: 768px) {
+  :root { --header-h: 48px; }
+  .page-header {
+    padding: calc(var(--safe-t) + var(--sp-2)) var(--sp-4) var(--sp-2);
+    transition: box-shadow var(--dur) var(--ease);
+  }
+  .page-header h2, .dash-page-header h2 { font-size: var(--fs-title); line-height: var(--lh-title); }
+  html.is-scrolled .page-header { box-shadow: 0 1px 0 var(--hairline), 0 8px 14px -10px rgba(16, 24, 40, .35); }
+}
+
+/* ---- Log rows: amount and ⋯ sit closer so rows are not 2x taller than their text ---- */
+@media (max-width: 768px) {
+  .tx-card-side { gap: 0; }
+  .tx-card-side .tx-more-menu { margin: -2px -6px -10px 0; }
+  .budget-month-bar label select { text-overflow: ellipsis; padding-inline: var(--sp-2); }
+}
+
+/* ---- Reports: month-compare rows share one grid so numbers line up ---------- */
+.month-compare-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-4); }
+.month-compare-vals { display: grid; grid-template-columns: 5.25rem 1rem 5.25rem 5rem; gap: 0 var(--sp-1); font-variant-numeric: tabular-nums; }
+.month-compare-vals > span { text-align: right; }
+.month-compare-vals > .month-compare-arrow { text-align: center; }
+.month-compare-delta { min-width: 0; }
+@media (max-width: 520px) {
+  .month-compare-row { grid-template-columns: minmax(0, 1fr); }
+  .month-compare-vals { grid-template-columns: 1fr 1rem 1fr 1fr; }
+  .month-compare-vals > span:first-child { text-align: left; }
+}
+
+/* ---- Summary tiles: notes are plain captions, not nested boxes ------------- */
+.budget-summary .card .tx-form-hint, .debt-summary .card .tx-form-hint, .bills-summary .card .tx-form-hint {
+  padding: 0; background: transparent; border-radius: 0; margin-top: var(--sp-1);
+}
+
+/* ---- Grouped list rows: long names ellipsize instead of colliding with amounts ---- */
+.list-row__body { min-width: 0; }
+.list-row__title { min-width: 0; overflow-wrap: break-word; }
+.list-row__amount { flex: none; white-space: nowrap; }
+.list-row__meta { max-width: 100%; }
+@media (max-width: 768px) {
+  .list-row__title, .list-row__meta { white-space: normal; }
+}
+@media (max-width: 360px) {
+  .list-row:has(> .list-row__amount) {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--sp-3); row-gap: 2px;
+    grid-template-areas: "icon body chev" "icon amount chev"; align-items: center;
+  }
+  .list-row:has(> .list-row__amount) > .list-row__icon { grid-area: icon; }
+  .list-row:has(> .list-row__amount) > .list-row__body { grid-area: body; }
+  .list-row:has(> .list-row__amount) > .list-row__amount { grid-area: amount; justify-self: start; font-weight: var(--fw-semi); }
+  .list-row:has(> .list-row__amount) > .list-row__chev { grid-area: chev; }
+}
+
+} /* end @layer refresh */

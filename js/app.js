@@ -98,6 +98,13 @@ function bindScrollTracking() {
   const opts = { passive: true, capture: true };
   window.addEventListener('scroll', trackScrollPos, opts);
   document.addEventListener('scroll', trackScrollPos, opts);
+  // Presentation only: lets CSS add a shadow under the sticky page header once content scrolls beneath it.
+  const markScrolled = () => {
+    const y = window.scrollY || document.documentElement.scrollTop || 0;
+    document.documentElement.classList.toggle('is-scrolled', y > 4);
+  };
+  window.addEventListener('scroll', markScrolled, { passive: true });
+  markScrolled();
 }
 
 function clearRestoreTimers() {
@@ -494,7 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Build stamp — change this (and index.html ?v=) on every mobile-visible ship
-const APP_BUILD = '20261009b';
+const APP_BUILD = '20261020b';
 
 installFigPigApi();
 
