@@ -772,39 +772,144 @@ function overspendShareLine(cat, remaining, opts = {}) {
   return null;
 }
 
+let envelopeMenuSeq = 0;
+
 function envelopeMoreMenu(cat, { isFav = false, isCurrentMonth = true, carry = 0 } = {}) {
-  const menu = el('details', { className: 'tx-more-menu' });
-  const summary = el('summary', {
-    className: 'btn btn-sm btn-tertiary tx-more-trigger',
+  const uid = `env-menu-${++envelopeMenuSeq}`;
+  const wrap = el('div', { className: 'env-menu' });
+  const trigger = el('button', {
+    type: 'button',
+    className: 'btn btn-sm btn-tertiary env-menu-trigger',
     title: 'More envelope actions',
     'aria-label': `More actions for ${cat.name}`,
-  }, '⋯');
-  summary.addEventListener('click', e => e.stopPropagation());
+    'aria-haspopup': 'menu',
+    'aria-expanded': 'false',
+    'aria-controls': uid,
+  }, el('span', { 'aria-hidden': 'true' }, '⋯'));
+  const panel = el('div', {
+    className: 'env-menu-panel',
+    id: uid,
+    role: 'menu',
+    'aria-label': `Actions for ${cat.name}`,
+    hidden: true,
+  });
 
-  const items = el('div', { className: 'tx-more-dropdown' });
-  items.appendChild(el('button', {
-    type: 'button',
-    className: 'tx-more-item',
-    onClick: (e) => {
-      e.stopPropagation();
-      menu.removeAttribute('open');
-      toggleFavorite(cat.id);
-    },
-  }, isFav ? 'Unpin favorite' : 'Pin to favorites'));
-  // S10: secondary money actions live here instead of 4 stacked footer buttons
+  const itemEls = () => [...panel.querySelectorAll('[role="menuitem"]')];
+  let isOpen = false;
+
+  const place = () => {
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    const gap = 8;
+    const t = trigger.getBoundingClientRect();
+    const header = trigger.closest('.envelope-header');
+    const hb = header ? header.getBoundingClientRect() : t;
+    const anchorTop = Math.min(t.top, hb.top);
+    const anchorBottom = Math.max(t.bottom, hb.bottom);
+    const nav = document.querySelector('.bottom-nav');
+    const navTop = nav && nav.getBoundingClientRect().height > 0 ? nav.getBoundingClientRect().top : vh;
+    const hdr = document.querySelector('.mobile-header');
+    const hdrBottom = hdr && hdr.getBoundingClientRect().height > 0 ? hdr.getBoundingClientRect().bottom : 0;
+    const limitTop = Math.max(gap, hdrBottom + gap);
+    const limitBottom = Math.min(vh, navTop) - gap;
+    panel.style.maxHeight = '';
+    panel.style.width = '';
+    const w = Math.min(panel.offsetWidth || 240, vw - gap * 2);
+    const h = panel.offsetHeight;
+    const below = limitBottom - (anchorBottom + 4);
+    const above = (anchorTop - 4) - limitTop;
+    const openUp = h > below && above > below;
+    const room = Math.max(120, openUp ? above : below);
+    const usedH = Math.min(h, room);
+    let left = t.right - w;
+    left = Math.max(gap, Math.min(left, vw - gap - w));
+    const top = openUp ? anchorTop - 4 - usedH : anchorBottom + 4;
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.maxHeight = `${Math.floor(room)}px`;
+    panel.dataset.placement = openUp ? 'top' : 'bottom';
+  };
+
+  const onOutside = e => {
+    if (!wrap.isConnected || !wrap.contains(e.target)) close();
+  };
+  const onReposition = () => {
+    if (!isOpen) return;
+    if (!wrap.isConnected) close();
+    else place();
+  };
+  const onDocKey = e => {
+    if (e.key !== 'Escape') return;
+    if (!wrap.isConnected) { close(); return; }
+    close({ restoreFocus: true });
+  };
+
+  function open(focusAt = 'first') {
+    if (isOpen) return;
+    isOpen = true;
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    place();
+    const items = itemEls();
+    const target = focusAt === 'last' ? items[items.length - 1] : items[0];
+    if (target) target.focus({ preventScroll: true });
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onDocKey, true);
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+  }
+
+  function close({ restoreFocus = false } = {}) {
+    if (!isOpen) return;
+    isOpen = false;
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onOutside, true);
+    document.removeEventListener('keydown', onDocKey, true);
+    window.removeEventListener('resize', onReposition);
+    window.removeEventListener('scroll', onReposition, true);
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+  }
+
+  trigger.addEventListener('click', e => {
+    e.stopPropagation();
+    if (isOpen) close({ restoreFocus: true });
+    else open();
+  });
+  trigger.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); open('first'); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); open('last'); }
+  });
+
+  panel.addEventListener('keydown', e => {
+    const items = itemEls();
+    const i = items.indexOf(document.activeElement);
+    let next = null;
+    if (e.key === 'ArrowDown') next = items[(i + 1) % items.length];
+    else if (e.key === 'ArrowUp') next = items[(i - 1 + items.length) % items.length];
+    else if (e.key === 'Home') next = items[0];
+    else if (e.key === 'End') next = items[items.length - 1];
+    else if (e.key === 'Tab') { close(); return; }
+    if (next) { e.preventDefault(); next.focus({ preventScroll: true }); }
+  });
+
   const menuItem = (label, fn, extra = {}) => el('button', {
     type: 'button',
-    className: 'tx-more-item',
+    role: 'menuitem',
+    tabindex: '-1',
+    className: 'env-menu-item',
     ...extra,
-    onClick: (e) => { e.stopPropagation(); menu.removeAttribute('open'); fn(); },
+    onClick: (e) => { e.stopPropagation(); close(); fn(); },
   }, label);
+
+  panel.appendChild(menuItem(isFav ? 'Unpin favorite' : 'Pin to favorites', () => toggleFavorite(cat.id)));
   if (isCurrentMonth) {
-    items.appendChild(menuItem('Move money', () => openMoveBetweenEnvelopes({ fromId: cat.id })));
-    items.appendChild(menuItem('Assign bonus', () => openAssignBonusToEnvelope(cat), {
+    panel.appendChild(menuItem('Move money', () => openMoveBetweenEnvelopes({ fromId: cat.id })));
+    panel.appendChild(menuItem('Assign bonus', () => openAssignBonusToEnvelope(cat), {
       title: 'Put unmatched bonus or leftover from other envelopes on this one',
     }));
     if (Math.abs(carry) > 0.005) {
-      items.appendChild(menuItem(
+      panel.appendChild(menuItem(
         carry < 0 ? `Clear overspend (${formatCurrency(carry)})` : `Reset carry (${formatCurrency(carry)})`,
         () => resetEnvelopeCarry(cat),
         { title: carry < 0
@@ -812,41 +917,16 @@ function envelopeMoreMenu(cat, { isFav = false, isCurrentMonth = true, carry = 0
           : 'Drop leftover carry-over from prior months (budget plan unchanged)' },
       ));
     }
+    panel.appendChild(menuItem('Edit', () => editCategory(cat)));
+    panel.appendChild(el('div', { className: 'env-menu-sep', role: 'separator' }));
+    panel.appendChild(menuItem('Delete', () => deleteCategory(cat.id), {
+      className: 'env-menu-item env-menu-item-danger',
+    }));
   }
-  if (isCurrentMonth) items.appendChild(el('button', {
-    type: 'button',
-    className: 'tx-more-item',
-    onClick: (e) => {
-      e.stopPropagation();
-      menu.removeAttribute('open');
-      editCategory(cat);
-    },
-  }, 'Edit'));
-  if (isCurrentMonth) items.appendChild(el('button', {
-    type: 'button',
-    className: 'tx-more-item tx-more-item-danger',
-    onClick: (e) => {
-      e.stopPropagation();
-      menu.removeAttribute('open');
-      deleteCategory(cat.id);
-    },
-  }, 'Delete'));
 
-  menu.appendChild(summary);
-  menu.appendChild(items);
-
-  menu.addEventListener('toggle', () => {
-    if (!menu.open) return;
-    const close = e => {
-      if (!menu.contains(e.target)) {
-        menu.removeAttribute('open');
-        document.removeEventListener('click', close, true);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', close, true), 0);
-  });
-
-  return menu;
+  wrap.appendChild(trigger);
+  wrap.appendChild(panel);
+  return wrap;
 }
 
 function envelopeCard(cat, focusId = null, opts = {}) {

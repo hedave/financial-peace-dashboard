@@ -1,0 +1,86 @@
+/* ==========================================================================
+   FigPig polish — presentation only. Joins the existing `refresh` layer (so it
+   wins over base/themes the same way redesign.css does) and loads last.
+   No behavior, data, or markup depends on anything in here except the
+   envelope ⋯ popover (.env-menu*), which budget.js positions with
+   `position: fixed` so no ancestor can clip it.
+   ========================================================================== */
+@layer refresh {
+
+/* ---- One menu style: envelope popover + page/row dropdowns -------------- */
+.env-menu { position: relative; flex-shrink: 0; }
+.env-menu-trigger.btn {
+  width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0;
+  border-radius: var(--r-pill); background: transparent; border-color: transparent;
+  color: var(--text-muted); font-size: 1.25rem; line-height: 1;
+}
+.env-menu-trigger.btn:hover { background: var(--bg-sunken); color: var(--text); }
+.env-menu-trigger.btn[aria-expanded="true"] { background: var(--primary-tint); color: var(--primary); }
+.env-menu-trigger.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+.env-menu-panel {
+  position: fixed; z-index: 120; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 13rem; max-width: calc(100vw - 16px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-1);
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+  transform-origin: top right; animation: env-menu-in 140ms var(--ease);
+}
+.env-menu-panel[hidden] { display: none; }
+.env-menu-panel[data-placement="top"] { transform-origin: bottom right; }
+
+.env-menu-item,
+.tx-more-item,
+.page-tools-item {
+  display: flex; align-items: center; width: 100%; min-height: 44px;
+  padding: 0 var(--sp-3); border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--text);
+  font: var(--fw-med) .9375rem/1.25 var(--font); text-align: left; cursor: pointer;
+}
+.env-menu-item:hover, .env-menu-item:focus-visible,
+.tx-more-item:hover, .tx-more-item:focus-visible,
+.page-tools-item:hover, .page-tools-item:focus-visible { background: var(--primary-tint); outline: none; }
+.env-menu-item:focus-visible, .tx-more-item:focus-visible, .page-tools-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+.env-menu-item:active, .tx-more-item:active, .page-tools-item:active { background: var(--primary-line); }
+.env-menu-sep { height: 1px; margin: var(--sp-1) var(--sp-2); background: var(--border); flex: none; }
+.env-menu-item-danger, .tx-more-item-danger { color: var(--negative); font-weight: var(--fw-semi); }
+.env-menu-item-danger:hover, .env-menu-item-danger:focus-visible,
+.tx-more-item-danger:hover, .tx-more-item-danger:focus-visible { background: var(--negative-tint); }
+.env-menu-item-danger:focus-visible, .tx-more-item-danger:focus-visible { box-shadow: inset 0 0 0 2px var(--negative); }
+.tx-more-item-danger { margin-top: var(--sp-1); position: relative; }
+.tx-more-item-danger::before {
+  content: ""; position: absolute; left: var(--sp-2); right: var(--sp-2); top: calc(-1 * var(--sp-1) / 2 - 1px);
+  height: 1px; background: var(--border);
+}
+
+.tx-more-dropdown, .page-tools-dropdown {
+  gap: 2px; padding: var(--sp-1); min-width: 12.5rem;
+  border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+}
+.tx-more-dropdown { animation: env-menu-in 140ms var(--ease); transform-origin: top right; }
+.page-tools-dropdown { animation: env-menu-in 140ms var(--ease); transform-origin: top left; }
+
+@keyframes env-menu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .env-menu-panel, .tx-more-dropdown, .page-tools-dropdown { animation: none; }
+}
+html[data-reduce-motion="true"] .env-menu-panel,
+html[data-reduce-motion="true"] .tx-more-dropdown,
+html[data-reduce-motion="true"] .page-tools-dropdown { animation: none; }
+
+/* ---- Cards and tiles: one border, calmer shadow -------------------------- */
+.card, .envelope-card { border: 1px solid var(--border); }
+.card:not(.stat-hero) { box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+
+/* ---- Buttons: same height and type everywhere --------------------------- */
+.tx-filters-toggle { min-height: 44px; font-size: .9375rem; }
+button, [role="button"], summary, a { -webkit-tap-highlight-color: transparent; }
+
+/* ---- Chips: slightly roomier ---------------------------------------------- */
+.chip { min-height: 38px; padding-inline: var(--sp-4); }
+
+} /* end @layer refresh */
