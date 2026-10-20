@@ -17,7 +17,7 @@ import { computeBalances, listSnapshots, withStoreLock } from '../../js/envelope
  * internals, transactions or bill details. `state_hash` feeds the CAS on reset/restore/overage.
  * GET /api/envelopes/snapshots — trimmed snapshot list (no per-envelope amounts).
  *
- * Auth: the existing read token FIGPIG_BILLS_READ_TOKEN (Bearer, or x-figpig-bills-token).
+ * Auth: FIGPIG_BILLS_READ_TOKEN or FIGPIG_ENVELOPE_WRITE_TOKEN (Bearer, or x-figpig-bills-token).
  * 503 when unset/short or Supabase env missing. 30 req/min per client IP, counted before
  * auth. Supabase failure → 502. Writes live in envelopes-write.mjs (own token).
  */
@@ -79,14 +79,24 @@ export function _resetRateLimit() { hits.clear(); }
 export default async (req) => {
   if (req.method !== 'GET') return json(405, { ok: false, error: 'method_not_allowed' });
   if (!rateLimitOk(req)) return json(429, { ok: false, error: 'rate_limited' });
-  const expected = env('FIGPIG_BILLS_READ_TOKEN');
+  // Accepted read tokens: the bills read token, and the envelope write token (so a bot holding
+  // only the write token can read the state_hash it must send). Each must be >= 24 chars; the
+  // write token is ignored if it equals another FigPig token (same fail-closed rule as writes).
+  const readTok = env('FIGPIG_BILLS_READ_TOKEN');
+  const writeTok = env('FIGPIG_ENVELOPE_WRITE_TOKEN');
+  const writeReused = ['FIGPIG_BILLS_READ_TOKEN', 'FIGPIG_SPLIT_WRITE_TOKEN', 'FIGPIG_TX_SPLIT_TOKEN', 'FIGPIG_TX_WRITE_TOKEN',
+    'FIGPIG_INGEST_SECRET', 'FIGPIG_TX_READ_TOKEN', 'FIGPIG_TX_VOID_TOKEN'].some(n => { const v = env(n); return v && v === writeTok; });
+  const accepted = [readTok && readTok.length >= 24 ? readTok : null, writeTok && writeTok.length >= 24 && !writeReused ? writeTok : null].filter(Boolean);
   const supabaseUrl = env('SUPABASE_URL')?.replace(/\/$/, '');
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
   const ownerId = env('FIGPIG_OWNER_USER_ID');
-  if (!expected || expected.length < 24 || !supabaseUrl || !serviceKey || !ownerId || !/^https:\/\//i.test(supabaseUrl)) {
+  if (!accepted.length || !supabaseUrl || !serviceKey || !ownerId || !/^https:\/\//i.test(supabaseUrl)) {
     return json(503, { ok: false, error: 'not_configured' });
   }
-  if (!secretsMatch(providedToken(req), expected)) return json(401, { ok: false, error: 'unauthorized' });
+  const given = providedToken(req);
+  // Compare against every accepted token (no short-circuit) so timing does not reveal which matched.
+  const hitsTok = accepted.map(t => secretsMatch(given, t));
+  if (!hitsTok.some(Boolean)) return json(401, { ok: false, error: 'unauthorized' });
   try {
     const res = await fetch(
       `${supabaseUrl}/rest/v1/budget_states?user_id=eq.${encodeURIComponent(ownerId)}&select=state`,

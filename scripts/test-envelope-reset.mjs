@@ -143,13 +143,20 @@ await test('401 on missing / wrong / read / split token for every write route; a
   const alt = await snapshot({}, { token: '', headers: { 'x-figpig-envelope-write-token': TOKEN } });
   assert.equal(alt.status, 200, alt.text);
 });
-await test('GET: read token only (write token → 401), 503 unset, 405 non-GET', async () => {
+await test('GET: read token or envelope write token; split token 401; 503 when neither set; 405 non-GET', async () => {
   seed();
-  assert.equal((await getBal(TOKEN)).status, 401);
-  assert.equal((await getSnaps(TOKEN)).status, 401);
+  assert.equal((await getBal(TOKEN)).status, 200, 'write token reads');
+  assert.equal((await getSnaps(TOKEN)).status, 200);
+  assert.equal((await getBal(SPLIT)).status, 401);
   assert.equal((await getBal('')).status, 401);
   delete process.env.FIGPIG_BILLS_READ_TOKEN;
+  assert.equal((await getBal(TOKEN)).status, 200, 'write token alone is enough');
+  assert.equal((await getBal(READ)).status, 401);
+  delete process.env.FIGPIG_ENVELOPE_WRITE_TOKEN;
   assert.equal((await getBal()).status, 503);
+  process.env.FIGPIG_ENVELOPE_WRITE_TOKEN = SPLIT; // reused → ignored → nothing valid
+  assert.equal((await getBal(SPLIT)).status, 503);
+  process.env.FIGPIG_ENVELOPE_WRITE_TOKEN = TOKEN;
   process.env.FIGPIG_BILLS_READ_TOKEN = READ;
   assert.equal((await req(readHandler, '/api/envelopes', { method: 'POST', token: READ })).status, 405);
 });

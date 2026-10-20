@@ -190,3 +190,8 @@ Functions: `netlify/functions/transactions-read.mjs` (config `method: GET`) and 
 `transactions.mjs` (bank import) is now `method: ['POST','OPTIONS']` so the two share `/api/transactions`.
 After deploy, check `GET /api/transactions?month=…` reaches the read function and `POST /api/transactions` still imports.
 See `docs/TRANSACTIONS-API.md` → *Budget-fix API*. `GET /api/envelopes` gains `carry`, `uncategorized` and `?month=`.
+
+## Forgive overspend API (build 20261020d)
+
+`POST /api/envelopes/forgive-overspend` — no new env var (`FIGPIG_ENVELOPE_WRITE_TOKEN`). `GET /api/envelopes`
+now also accepts that write token. Budget page labels forgiven offsets. See `docs/ENVELOPES-API.md`.
