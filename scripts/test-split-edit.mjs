@@ -316,18 +316,20 @@ await test('envelopes: 503 unset, 401 bad token, 405 non-GET', async () => {
   const res = await envHandler(new Request('http://localhost/api/envelopes', { method: 'POST', headers: { authorization: `Bearer ${READ}` } }));
   assert.equal(res.status, 405);
 });
-await test('envelopes: trimmed list (id, name, group?, sinkingFund?), no balances', async () => {
+await test('envelopes: trimmed list (id, name, group?, sinkingFund?, balances), no notes/plan internals', async () => {
   seed();
   remote.state.categories.push({ ...remote.state.categories[0], id: 'fake-sub', name: 'Fake Sub', parentId: GROC, monthlyBudget: 99, note: 'secret note' });
   const r = await getEnv();
   assert.equal(r.status, 200, r.text);
-  assert.deepEqual(Object.keys(r.json).sort(), ['envelopes', 'ok']);
+  // Balances added by the envelope reset API, bonus_available/kind by the overage API (see scripts/test-envelope-reset.mjs).
+  assert.deepEqual(Object.keys(r.json).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
   for (const e of r.json.envelopes) {
-    for (const k of Object.keys(e)) assert.ok(['id', 'name', 'group', 'sinkingFund'].includes(k), k);
+    for (const k of Object.keys(e)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'carry', 'remaining', 'bill_id'].includes(k), k);
   }
   assert.ok(r.json.envelopes.some(e => e.name === 'Groceries' && e.id === GROC));
-  assert.deepEqual(r.json.envelopes.find(e => e.id === 'fake-sub'), { id: 'fake-sub', name: 'Fake Sub', group: 'Groceries' });
-  assert.ok(!/monthlyBudget|carryOver|note|balance|checking/i.test(r.text));
+  const sub = r.json.envelopes.find(e => e.id === 'fake-sub');
+  assert.deepEqual({ id: sub.id, name: sub.name, group: sub.group }, { id: 'fake-sub', name: 'Fake Sub', group: 'Groceries' });
+  assert.ok(!/monthlyBudget|carryOver|secret note|SAMS CLUB|FAKE CAFE/i.test(r.text));
   assert.equal(patches, 0);
   assert.equal(listEnvelopes(null).length, 0);
 });

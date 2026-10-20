@@ -6,6 +6,7 @@ import { store } from '../store.js';
 import { showModal, showToast, confirmDialog } from '../components/modal.js';
 import { createEnvelopePicker } from '../components/envelope-picker.js';
 import { openTransactionForm } from './transactions.js';
+import { openCoverOverage, hasCoverableOverage } from '../components/overage-cover.js';
 
 const SORT_OPTIONS = [
   { key: 'budgeted', dir: 'desc', label: 'Budgeted (high to low)' },
@@ -299,6 +300,14 @@ export function renderBudget(container, arg) {
             window.appRefresh();
           },
         }, shareOn ? 'Hide share' : 'Show share'),
+        store.canWriteBudget() && hasCoverableOverage()
+          ? el('button', {
+            type: 'button',
+            className: 'btn btn-sm btn-primary overage-cover-btn',
+            title: 'Bonus pot first, then an equal split across envelopes (bills and debts never touched)',
+            onClick: () => openCoverOverage(),
+          }, 'Cover overage')
+          : null,
         store.canWriteBudget()
           ? el('button', {
             type: 'button',
@@ -399,6 +408,13 @@ export function renderBudget(container, arg) {
       className: 'page-tools-item',
       onClick: () => { toolsMenu.removeAttribute('open'); openCoverOverspend(month); },
     }, 'Cover overspend'));
+  }
+  if (isCurrentMonth && store.canWriteBudget() && hasCoverableOverage()) {
+    toolsList.appendChild(el('button', {
+      type: 'button',
+      className: 'page-tools-item',
+      onClick: () => { toolsMenu.removeAttribute('open'); openCoverOverage(); },
+    }, 'Cover overage (bonus first, equal split)'));
   }
   if (isCurrentMonth && coverIouSummary.total > 0.005 && store.canWriteBudget()) {
     toolsList.appendChild(el('button', {

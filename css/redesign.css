@@ -1100,3 +1100,19 @@ html[data-reduce-motion="true"] .note-stack, html[data-reduce-motion="true"] .no
 }
 
 } /* end @layer refresh */
+
+/* Cover overage panel (build 20261019a) */
+.overage-cover { display: flex; flex-direction: column; gap: 0.9rem; }
+.overage-bonus-line { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: baseline; font-size: 0.95rem; }
+.overage-bonus-line .positive { color: var(--positive); }
+.overage-picker { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.overage-picker legend { padding: 0; margin-bottom: 0.25rem; }
+.overage-mode { justify-content: flex-start; gap: 0.6rem; padding: 0.6rem 0.8rem; cursor: pointer; }
+.overage-target-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 16rem; overflow-y: auto; padding: 0.15rem 0; }
+.overage-target { display: flex; align-items: center; gap: 0.55rem; padding: 0.45rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font-size: 0.9rem; cursor: pointer; }
+.overage-target.is-disabled { opacity: 0.6; cursor: not-allowed; }
+.overage-target-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.overage-target-meta { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+.overage-preview-title { margin: 0 0 0.45rem; font-size: 0.95rem; }
+.overage-after { font-size: 0.82rem; color: var(--text-muted); white-space: nowrap; }
+.overage-row-negative { border-color: var(--negative); }

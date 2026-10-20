@@ -23,12 +23,10 @@ curl -s https://hernandez-finops.netlify.app/api/envelopes \
   -H "Authorization: Bearer $(cat /home/box/.secrets/figpig/bills_read_token)"
 ```
 
-```json
-{ "ok": true, "envelopes": [ {"id":"…","name":"Groceries"}, {"id":"…","name":"Car Maintenance","sinkingFund":true}, {"id":"…","name":"Sub","group":"Parent"} ] }
-```
-
-Only `id`, `name`, `group` (parent envelope name, when nested) and `sinkingFund`. No balances,
-budgets or notes. Alt header: `x-figpig-bills-token`. 30 req/min per IP.
+Since the envelope reset API this also returns current-month balances (`allocated`, `spent`,
+`remaining`, `bill_id`, top-level `kind` per envelope, plus `checking_balance`, `total_allocated`, `unallocated`,
+`bonus_available`, `newest_transaction_date`, `state_hash`). Shape and rules: **`docs/ENVELOPES-API.md`**.
+Still no notes or plan internals. Alt header: `x-figpig-bills-token`. 30 req/min per IP.
 
 ## PATCH /api/transactions/:id/split
 
