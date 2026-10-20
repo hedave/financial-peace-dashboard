@@ -225,7 +225,7 @@ await test('GET balances: store numbers, bill link, checking, unallocated, newes
   const r = await getBal();
   assert.equal(r.status, 200, r.text);
   const j = r.json;
-  assert.deepEqual(Object.keys(j).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated']);
+  assert.deepEqual(Object.keys(j).sort(), ['bonus_available', 'checking_balance', 'envelopes', 'month', 'newest_transaction_date', 'ok', 'state_hash', 'total_allocated', 'unallocated', 'uncategorized']);
   assert.equal(j.month, YM);
   assert.equal(j.checking_balance, 4000);
   assert.equal(j.total_allocated, 5979.49, 'top-level budgets only (sub excluded)');

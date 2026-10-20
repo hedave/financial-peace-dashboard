@@ -7,7 +7,11 @@ import { computeBalances, listSnapshots, withStoreLock } from '../../js/envelope
  * GET /api/envelopes — envelopes with current-month balances:
  *   {ok, month, checking_balance, total_allocated, unallocated, bonus_available,
  *    newest_transaction_date, state_hash,
- *    envelopes:[{id, name, group?, sinkingFund?, kind?, allocated, spent, remaining, bill_id}]}
+ *    uncategorized:{count,total},
+ *    envelopes:[{id, name, group?, sinkingFund?, kind?, allocated, spent, carry, remaining, bill_id}]}
+ * Optional ?month=YYYY-MM: per-month figures (carry = that month's opening carry, from the
+ * store's getOpeningCarryForMonth). unallocated = checking − total_allocated (the "unassigned" total).
+ * state_hash always describes the current month.
  * kind (top-level only): bill | debt | sinking | spend (store.getEnvelopeKind).
  * Numbers come from the store's own getters (same as the Budget page). No notes, plan
  * internals, transactions or bill details. `state_hash` feeds the CAS on reset/restore/overage.
@@ -92,11 +96,19 @@ export default async (req) => {
     const rows = await res.json();
     const state = Array.isArray(rows) ? rows[0]?.state : null;
     if (!state || typeof state !== 'object') return json(409, { ok: false, error: 'no_budget' });
-    const isList = /^\/api\/envelopes\/snapshots\/?$/.test(new URL(req.url).pathname);
+    const u = new URL(req.url);
+    const isList = /^\/api\/envelopes\/snapshots\/?$/.test(u.pathname);
+    const qKeys = [...u.searchParams.keys()];
+    const month = u.searchParams.get('month');
+    if (qKeys.some(k => k !== 'month') || qKeys.length > 1 || (month != null && (isList || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)))) {
+      return json(400, { ok: false, error: 'invalid_query', message: 'Only ?month=YYYY-MM is accepted (balances only)' });
+    }
     const out = await withStoreLock(() => {
       store.hydrateFromObject(state);
       if (isList) return { ok: true, snapshots: listSnapshots(store.getState()) };
-      const { body, hashInput } = computeBalances(store);
+      // state_hash always covers the CURRENT month (what reset/restore/overage CAS on).
+      const { body: cur, hashInput } = computeBalances(store);
+      const body = month && month !== cur.month ? computeBalances(store, month).body : cur;
       return { ok: true, ...body, state_hash: createHash('sha256').update(hashInput).digest('hex') };
     });
     return json(200, out);
