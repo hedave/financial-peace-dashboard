@@ -87,6 +87,63 @@ export function validateResetBody(body) {
   return { ok: true, value: { dryRun: dry.value, expectedHash: hash.value, targets, defaultCents, note: note.value } };
 }
 
+function envelopeName(v, label) {
+  if (typeof v !== 'string' || v.length > 80 || !cleanText(v, 80)) return bad(`${label} must be a short non-empty string`);
+  return { ok: true, value: cleanText(v, 80) };
+}
+
+/**
+ * Start fresh: {dry_run?, expected_state_hash, envelopes: "all" | [names], note?}.
+ * `envelopes` is required (no implicit "all") so a typo can never zero everything.
+ */
+export function validateStartFreshBody(body) {
+  if (!isObj(body)) return bad('JSON object body required');
+  const extra = unknownKey(body, ['dry_run', 'expected_state_hash', 'envelopes', 'note']);
+  if (extra) return bad(`Unknown field: ${extra}`);
+  const dry = dryRunOf(body); if (!dry.ok) return dry;
+  const hash = hashOf(body); if (!hash.ok) return hash;
+  let envelopes;
+  if (body.envelopes === 'all') envelopes = 'all';
+  else if (Array.isArray(body.envelopes)) {
+    if (!body.envelopes.length) return bad('envelopes must be "all" or a non-empty array of names');
+    if (body.envelopes.length > RESET_MAX_TARGETS) return bad(`envelopes: max ${RESET_MAX_TARGETS}`);
+    envelopes = [];
+    for (let i = 0; i < body.envelopes.length; i++) {
+      const n = envelopeName(body.envelopes[i], `envelopes[${i}]`); if (!n.ok) return n;
+      envelopes.push(n.value);
+    }
+  } else return bad('envelopes must be "all" or a non-empty array of names');
+  const note = noteOf(body); if (!note.ok) return note;
+  return { ok: true, value: { dryRun: dry.value, expectedHash: hash.value, envelopes, note: note.value } };
+}
+
+/**
+ * Carry-only reset: {dry_run?, expected_state_hash, targets:[{envelope, expected_carry}], note?}.
+ * Sets carry-over to 0 for each named envelope; never touches allocation.
+ */
+export function validateCarryResetBody(body) {
+  if (!isObj(body)) return bad('JSON object body required');
+  const extra = unknownKey(body, ['dry_run', 'expected_state_hash', 'targets', 'note']);
+  if (extra) return bad(`Unknown field: ${extra}`);
+  const dry = dryRunOf(body); if (!dry.ok) return dry;
+  const hash = hashOf(body); if (!hash.ok) return hash;
+  if (!Array.isArray(body.targets) || !body.targets.length) return bad('targets must be a non-empty array');
+  if (body.targets.length > RESET_MAX_TARGETS) return bad(`targets: max ${RESET_MAX_TARGETS}`);
+  const targets = [];
+  for (let i = 0; i < body.targets.length; i++) {
+    const t = body.targets[i];
+    if (!isObj(t)) return bad(`targets[${i}] must be an object`);
+    const ex = unknownKey(t, ['envelope', 'expected_carry']);
+    if (ex) return bad(`Unknown field: targets[${i}].${ex}`);
+    const n = envelopeName(t.envelope, `targets[${i}].envelope`); if (!n.ok) return n;
+    const c = toCents(t.expected_carry);
+    if (c == null || Math.abs(c) > RESET_MAX_AMOUNT * 100) return bad(`targets[${i}].expected_carry must be a number (may be negative) with at most 2 decimals`);
+    targets.push({ envelope: n.value, expectedCents: c });
+  }
+  const note = noteOf(body); if (!note.ok) return note;
+  return { ok: true, value: { dryRun: dry.value, expectedHash: hash.value, targets, note: note.value } };
+}
+
 /** {dry_run?, expected_state_hash, note?} */
 export function validateRestoreBody(body) {
   if (!isObj(body)) return bad('JSON object body required');
@@ -146,6 +203,7 @@ export function computeBalances(store) {
     if (!c.parentId) out.kind = store.getEnvelopeKind(c.id);
     out.allocated = r2(store.getCategoryBudgeted(c.id, month));
     out.spent = r2(store.getCategorySpent(c.id, month));
+    out.carry = r2(store.getOpeningCarryForMonth(c.id, month));
     out.remaining = r2(store.getCategoryRemaining(c.id, month));
     out.bill_id = linkedBillId(state, c.id);
     return out;
@@ -189,6 +247,51 @@ export function planReset(state, input) {
   return { ok: true, set };
 }
 
+function resolveTop(state, name) {
+  const key = String(name).trim().toLowerCase();
+  return topLevel(state).find(c => String(c.name || '').trim().toLowerCase() === key) || null;
+}
+
+/**
+ * Start fresh plan: monthlyBudget = 0 and carryOver = 0 for the chosen top-level
+ * envelopes AND their sub-envelopes ("all" = every envelope). Never creates.
+ */
+export function planStartFresh(state, input) {
+  const all = (state.categories || []).filter(c => c && c.id);
+  let tops;
+  if (input.envelopes === 'all') tops = topLevel(state);
+  else {
+    tops = [];
+    for (const n of input.envelopes) {
+      const c = resolveTop(state, n);
+      if (!c) return { ok: false, code: 'unknown_envelope', envelope: n, validEnvelopes: envelopeNames(state) };
+      if (tops.includes(c)) return { ok: false, code: 'invalid_body', message: `Envelope listed twice: ${cleanText(c.name, 80)}` };
+      tops.push(c);
+    }
+  }
+  const topIds = new Set(tops.map(c => c.id));
+  const budgets = new Map(); const carry = new Map();
+  for (const c of all) {
+    if (topIds.has(c.id) || (c.parentId && topIds.has(c.parentId))) { budgets.set(c.id, 0); carry.set(c.id, 0); }
+  }
+  return { ok: true, budgets, carry };
+}
+
+/** Carry-only plan: carryOver = 0 for named top-level envelopes; 409 when expected_carry differs. */
+export function planCarryReset(state, input) {
+  const carry = new Map(); const mismatches = [];
+  for (const t of input.targets) {
+    const c = resolveTop(state, t.envelope);
+    if (!c) return { ok: false, code: 'unknown_envelope', envelope: t.envelope, validEnvelopes: envelopeNames(state) };
+    if (carry.has(c.id)) return { ok: false, code: 'invalid_body', message: `Envelope listed twice: ${cleanText(c.name, 80)}` };
+    const cur = Math.round((Number(c.carryOver) || 0) * 100);
+    if (cur !== t.expectedCents) mismatches.push({ envelope: cleanText(c.name, 80), expected_carry: t.expectedCents / 100, actual_carry: cur / 100 });
+    carry.set(c.id, 0);
+  }
+  if (mismatches.length) return { ok: false, code: 'carry_mismatch', mismatches };
+  return { ok: true, budgets: new Map(), carry };
+}
+
 /** Raw envelope plan/carry for every envelope (sub-envelopes included). */
 export function captureEnvelopeState(state) {
   return (state.categories || []).filter(c => c && c.id).map(c => ({
@@ -227,9 +330,11 @@ export function diffTable(before, after) {
       envelope: b.name,
       allocated_before: b.allocated,
       allocated_after: x.allocated,
+      carry_before: b.carry,
+      carry_after: x.carry,
       remaining_before: b.remaining,
       remaining_after: x.remaining,
-      changed: Math.abs(b.allocated - x.allocated) > 0.004 || Math.abs(b.remaining - x.remaining) > 0.004,
+      changed: Math.abs(b.allocated - x.allocated) > 0.004 || Math.abs(b.carry - x.carry) > 0.004 || Math.abs(b.remaining - x.remaining) > 0.004,
     });
   }
   return {

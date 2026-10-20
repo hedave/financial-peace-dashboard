@@ -275,3 +275,42 @@ curl -s -X POST https://hernandez-finops.netlify.app/api/envelopes/snapshots/sna
 | 503 | `not_configured` |
 
 Tests: `npm run test:envelopes` and `npm run test:overage` (fake data, Supabase mocked, no network). Both are part of `npm run test:import`.
+
+## Start fresh — `POST /api/envelopes/start-fresh` (build 20261020c)
+
+Plain reset only sets `monthlyBudget`; last month's carry-over stays, so "zeroed" envelopes
+still show leftovers. Start fresh zeroes **both** allocation (`monthlyBudget`) and carry-over
+(`carryOver`).
+
+Same auth as reset (`FIGPIG_ENVELOPE_WRITE_TOKEN`), same 10 writes/min limit, same hash CAS.
+
+```json
+{ "expected_state_hash": "<64 hex from GET /api/envelopes>",
+  "envelopes": "all",            // or ["Groceries", "Utilities"] — REQUIRED, no implicit all
+  "dry_run": true,                // default true
+  "note": "optional, <=200" }
+```
+
+- `"all"`: every envelope including sub-envelopes. Named: those top-level envelopes and their sub-envelopes.
+- Real run: automatic snapshot first (`reason: "pre_start_fresh"`, own write), then apply; audit `action: "start_fresh"`.
+- Response rows now include `carry_before` / `carry_after`.
+- Undo: `POST /api/envelopes/snapshots/<snapshot.id>/restore` restores both `monthlyBudget` and `carryOver`
+  for every envelope (round-trips to the exact pre-start-fresh `state_hash`).
+- Not touched: transactions, checking, bills, debts, month bonus rows / envelope moves / overspend IOUs.
+  Month moves and bonus allocations still count toward `remaining` after start fresh.
+
+## Carry-only reset — `POST /api/envelopes/reset-carry`
+
+Sets `carryOver = 0` for named top-level envelopes. Never touches allocation or sub-envelopes.
+
+```json
+{ "expected_state_hash": "<64 hex>",
+  "targets": [{ "envelope": "Groceries", "expected_carry": 123.45 }],
+  "dry_run": true, "note": "optional" }
+```
+
+- `expected_carry` must equal the envelope's current carry (`carry` in GET /api/envelopes), else
+  **409 `carry_mismatch`** with `mismatches: [{envelope, expected_carry, actual_carry}]`, nothing written.
+- Real run: snapshot first (`reason: "pre_carry_reset"`), audit `action: "reset_carry"`; undo via restore.
+
+GET /api/envelopes now also returns `carry` (opening carry for the current month) per envelope.

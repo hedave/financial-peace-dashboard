@@ -2,8 +2,8 @@ import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import './polyfill-storage.mjs';
 import { store } from '../../js/store.js';
 import {
-  validateResetBody, validateRestoreBody, validateSnapshotBody,
-  computeBalances, planReset, planRestore, writeAllocations, diffTable,
+  validateResetBody, validateRestoreBody, validateSnapshotBody, validateStartFreshBody, validateCarryResetBody,
+  computeBalances, planReset, planStartFresh, planCarryReset, planRestore, writeAllocations, diffTable,
   addSnapshot, findSnapshot, captureEnvelopeState, appendEnvelopeAudit,
   withStoreLock, SNAPSHOT_ID_RE, ACTOR, AUDIT_MAX,
 } from '../../js/envelope-reset.js';
@@ -16,6 +16,10 @@ import {
  *   /api/envelopes/snapshot                 {note?}                → stores a snapshot
  *   /api/envelopes/snapshots/:id/restore    {expected_state_hash, dry_run?=true, note?}
  *   /api/envelopes/reset                    {expected_state_hash, dry_run?=true, targets?, default_amount?, note?}
+ *   /api/envelopes/start-fresh             {expected_state_hash, envelopes:"all"|[names], dry_run?=true, note?}
+ *                                            → monthlyBudget = 0 AND carryOver = 0 (named envelopes + their subs)
+ *   /api/envelopes/reset-carry             {expected_state_hash, targets:[{envelope, expected_carry}], dry_run?=true, note?}
+ *                                            → carryOver = 0 only (409 carry_mismatch if expected_carry differs)
  *   /api/envelopes/overage                  {expected_state_hash, targets:"all"|[names], dry_run?=true,
  *                                            envelopes?, include_sinking_funds?, negative_rule?, note?}
  *
@@ -155,13 +159,16 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   }
   if (kind === 'overage') return planOverageOnState(before, input);
   let budgets; let carry = null; let snap = null;
-  if (kind === 'reset') {
-    const plan = planReset(state, input);
+  if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry') {
+    const plan = kind === 'reset' ? planReset(state, input)
+      : kind === 'start_fresh' ? planStartFresh(state, input) : planCarryReset(state, input);
     if (!plan.ok) {
       if (plan.code === 'unknown_envelope') return { error: 'unknown_envelope', status: 400, extra: { envelope: plan.envelope, validEnvelopes: plan.validEnvelopes } };
+      if (plan.code === 'carry_mismatch') return { error: 'carry_mismatch', status: 409, extra: { mismatches: plan.mismatches } };
       return { error: 'invalid_body', status: 400, extra: { message: plan.message } };
     }
-    budgets = plan.set;
+    if (kind === 'reset') budgets = plan.set;
+    else { budgets = plan.budgets; carry = plan.carry; }
   } else {
     snap = findSnapshot(state, snapshotId);
     if (!snap) return { error: 'not_found', status: 404 };
@@ -264,7 +271,7 @@ async function runWrite(cfg, kind, input, snapshotId) {
   } else if (!patchedRaw(remote.state, { budgets: plan.budgets, carry: plan.carry })) return NOT_NORMALIZED;
 
   // 1) Automatic snapshot first, as its own write (state as loaded, before any change).
-  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage' })[kind], input.note, snapshotId);
+  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage', start_fresh: 'pre_start_fresh', reset_carry: 'pre_carry_reset' })[kind], input.note, snapshotId);
   if (first.error) return first;
   const snap = first.snap;
 
@@ -301,6 +308,8 @@ function routeOf(req, context) {
   if (p === '/api/envelopes/snapshot') return { kind: 'snapshot' };
   if (p === '/api/envelopes/reset') return { kind: 'reset' };
   if (p === '/api/envelopes/overage') return { kind: 'overage' };
+  if (p === '/api/envelopes/start-fresh') return { kind: 'start_fresh' };
+  if (p === '/api/envelopes/reset-carry') return { kind: 'reset_carry' };
   const m = p.match(/^\/api\/envelopes\/snapshots\/([^/]+)\/restore$/);
   if (m) {
     const id = String(context?.params?.id || decodeURIComponent(m[1]));
@@ -352,6 +361,8 @@ export default async (req, context) => {
   }
   const checked = route.kind === 'reset' ? validateResetBody(body)
     : route.kind === 'overage' ? validateOverageBody(body)
+    : route.kind === 'start_fresh' ? validateStartFreshBody(body)
+    : route.kind === 'reset_carry' ? validateCarryResetBody(body)
     : route.kind === 'restore' ? validateRestoreBody(body)
       : validateSnapshotBody(body);
   if (!checked.ok) return json(400, { ok: false, error: 'invalid_body', message: checked.message });
@@ -412,5 +423,5 @@ export default async (req, context) => {
 };
 
 export const config = {
-  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage'],
+  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage', '/api/envelopes/start-fresh', '/api/envelopes/reset-carry'],
 };

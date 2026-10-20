@@ -234,16 +234,17 @@ await test('GET balances: store numbers, bill link, checking, unallocated, newes
   assert.match(j.state_hash, /^[a-f0-9]{64}$/);
   const e = n => j.envelopes.find(x => x.name === n);
   assert.equal(j.bonus_available, 2600, 'unmatched income lands in the free bonus pot (app rule), same as Budget "Bonus available"');
-  assert.deepEqual(e('Groceries'), { id: GROC, name: 'Groceries', kind: 'spend', allocated: 1400, spent: 212.44, remaining: 1187.56, bill_id: null });
-  assert.deepEqual(e('Mortgage'), { id: MORT, name: 'Mortgage', kind: 'bill', allocated: 3219.49, spent: 0, remaining: 3219.49, bill_id: 'fake-bill-mort' });
+  assert.deepEqual(e('Groceries'), { id: GROC, name: 'Groceries', kind: 'spend', allocated: 1400, spent: 212.44, carry: 0, remaining: 1187.56, bill_id: null });
+  assert.deepEqual(e('Mortgage'), { id: MORT, name: 'Mortgage', kind: 'bill', allocated: 3219.49, spent: 0, carry: 0, remaining: 3219.49, bill_id: 'fake-bill-mort' });
   assert.equal(e('Christmas').kind, 'sinking');
   assert.equal(e('Fake Sub').kind, undefined, 'kind on top-level envelopes only');
   assert.equal(e('Eating Out / Fast Food').remaining, 474.5, 'carry-over included in remaining');
+  assert.equal(e('Eating Out / Fast Food').carry, -45.5, 'opening carry exposed');
   assert.equal(e('Utilities').bill_id, 'fake-bill-power');
   assert.equal(e('Christmas').sinkingFund, true);
   assert.equal(e('Fake Sub').group, 'Groceries');
   for (const x of j.envelopes) {
-    for (const k of Object.keys(x)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'remaining', 'bill_id'].includes(k), k);
+    for (const k of Object.keys(x)) assert.ok(['id', 'name', 'group', 'sinkingFund', 'kind', 'allocated', 'spent', 'carry', 'remaining', 'bill_id'].includes(k), k);
   }
   assert.ok(!/secret fake envelope note|monthlyBudget|carryOver|FAKE GROCER|Fake Mortgage Co|fake-debt|envelopeSnapshots/i.test(r.text), 'trimmed');
   assert.equal(await hashNow(), j.state_hash, 'hash is stable');
@@ -308,7 +309,7 @@ await test('reset dry run (default): before/after table + totals, writes nothing
     unallocated_before: -1979.49, unallocated_after: -359.49, unallocated_change: 1620,
   });
   const row = n => r.json.changes.find(x => x.envelope === n);
-  assert.deepEqual(row('Groceries'), { id: GROC, envelope: 'Groceries', allocated_before: 1400, allocated_after: 1000, remaining_before: 1187.56, remaining_after: 787.56, changed: true });
+  assert.deepEqual(row('Groceries'), { id: GROC, envelope: 'Groceries', allocated_before: 1400, allocated_after: 1000, carry_before: 0, carry_after: 0, remaining_before: 1187.56, remaining_after: 787.56, changed: true });
   assert.equal(row('Mortgage').changed, false);
   assert.equal(row('Christmas').allocated_after, 0);
   assert.equal(row('Fake Sub'), undefined, 'sub-envelopes are not reset');
