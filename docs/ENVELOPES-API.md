@@ -324,3 +324,43 @@ unassigned total; negative = over-allocated), `bonus_available`, and `uncategori
 
 Optional `?month=YYYY-MM` returns those figures for another month. `state_hash` always describes
 the **current** month (the one reset / start-fresh / reset-carry / overage act on). Other query params → 400.
+
+## Forgive overspend — `POST /api/envelopes/forgive-overspend` (build 20261020d)
+
+Brings overspent envelopes to exactly $0 remaining for one month **without** taking money from another
+envelope, changing the plan, or deleting transactions.
+
+```json
+{ "expected_state_hash": "<64 hex from GET /api/envelopes>",
+  "month": "2026-10",                 // optional, default current; not in the future
+  "targets": "all_negative",           // or [{ "envelope": "Groceries", "expected_remaining": -112.44 }]
+  "dry_run": true,                     // default true
+  "note": "optional, <=200" }
+```
+
+**Representation (why):** each offset is a month-only envelope move in `state.monthEnvelopeMoves[month]`
+with no source envelope: `{id, fromId: null, toId, amount, source: "forgiven", forgiveBatchId, note, at}`.
+`store.getEnvelopeMoveDelta` already credits `toId` and debits only a matching `fromId` (null never matches),
+so `getCategoryRemaining`, the pool bar, the Budget page and month rollover already honor it. It does not touch
+`monthlyBudget`, `carryOver`, checking, bills, transactions or the bonus pot, so `total_allocated` and
+`unallocated` are unchanged. A bonus allocation was rejected because it would shrink `bonus_available`; a normal
+move would debit another envelope. Budget page shows "+$X overspend forgiven" on the card and
+"Forgiven overspend → Envelope" in the Move history (whose Undo also works on it).
+
+Rules:
+- Same auth / 10 writes/min / fail-closed rules as reset (`FIGPIG_ENVELOPE_WRITE_TOKEN`); `state_hash` CAS (409 `stale_state`).
+- Named targets: `expected_remaining` must equal the live remaining for that month, else **409 `remaining_mismatch`**
+  with `mismatches: [{envelope, expected_remaining, actual_remaining}]`; nothing written. A named envelope that is not
+  negative → **400 `not_overspent`**. Unknown name → 400 `unknown_envelope`. `all_negative` with none → 400 `nothing_to_forgive`.
+- Read-back: every target must land at exactly 0 and every other envelope, checking, `total_allocated` and the
+  transaction count must be unchanged, else 500 `write_refused` (nothing saved).
+- Real run: `pre_forgive` snapshot first (own write), then offsets + audit `action: "forgive_overspend"` with `batch_id`.
+- **Undo:** `POST /api/envelopes/snapshots/<snapshot.id>/restore`. Snapshots now store `forgiven_moves`; restore
+  sets the forgiven offsets back to exactly that set (other moves untouched), returning the exact original
+  `state_hash`. Restoring a snapshot taken before this feature removes all forgiven offsets.
+- Carry interplay: at month rollover the forgiven month's remaining (now 0) becomes next month's carry, so the
+  overspend does not follow into the next month.
+- Past months: allowed, but if the month's opening carry is derived (no stored opening snapshot) the read-back can
+  fail; then the API refuses (500 `write_refused`) rather than writing an ineffective offset.
+
+`GET /api/envelopes` (and `/snapshots`) now also accepts `FIGPIG_ENVELOPE_WRITE_TOKEN` as a read token.

@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node scripts/generate-config.js",
     "start": "node scripts/start.mjs",
-    "test:import": "node scripts/test-import-reconcile.mjs && node scripts/test-ingest-normalize.mjs && node scripts/test-bills-api.mjs && node scripts/test-review-fixes.mjs && node scripts/test-transactions-api.mjs && node scripts/test-note-matcher.mjs && node scripts/test-note-archive.mjs && node scripts/test-receipt-split.mjs && node scripts/test-split-edit.mjs && node scripts/test-envelope-reset.mjs && node scripts/test-envelope-overage.mjs && node scripts/test-envelope-start-fresh.mjs && node scripts/test-budget-fix-api.mjs",
+    "test:import": "node scripts/test-import-reconcile.mjs && node scripts/test-ingest-normalize.mjs && node scripts/test-bills-api.mjs && node scripts/test-review-fixes.mjs && node scripts/test-transactions-api.mjs && node scripts/test-note-matcher.mjs && node scripts/test-note-archive.mjs && node scripts/test-receipt-split.mjs && node scripts/test-split-edit.mjs && node scripts/test-envelope-reset.mjs && node scripts/test-envelope-overage.mjs && node scripts/test-envelope-start-fresh.mjs && node scripts/test-budget-fix-api.mjs && node scripts/test-envelope-forgive.mjs",
     "test:ingest": "node scripts/test-ingest-normalize.mjs",
     "test:bills": "node scripts/test-bills-api.mjs",
     "test:transactions": "node scripts/test-transactions-api.mjs",
@@ -16,6 +16,7 @@
     "test:envelopes": "node scripts/test-envelope-reset.mjs",
     "test:overage": "node scripts/test-envelope-overage.mjs",
     "test:start-fresh": "node scripts/test-envelope-start-fresh.mjs",
-    "test:budget-fix": "node scripts/test-budget-fix-api.mjs"
+    "test:budget-fix": "node scripts/test-budget-fix-api.mjs",
+    "test:forgive": "node scripts/test-envelope-forgive.mjs"
   }
 }

@@ -967,7 +967,11 @@ function envelopeCard(cat, focusId = null, opts = {}) {
   const budgeted = store.getCategoryBudgeted(cat.id, month);
   // Opening carry for the viewed month (live for current; snapshot/derived for past).
   const carry = store.getOpeningCarryForMonth(cat.id, month);
-  const moveDelta = store.getEnvelopeMoveDelta(cat.id, month);
+  // Forgiven-overspend offsets are month-only moves with no source envelope (API forgive-overspend).
+  const forgivenAmt = Math.round(store.getEnvelopeMoves(month)
+    .filter(m => m && m.source === 'forgiven' && !m.fromId && m.toId === cat.id)
+    .reduce((s, m) => s + Math.abs(Number(m.amount) || 0), 0) * 100) / 100;
+  const moveDelta = Math.round((store.getEnvelopeMoveDelta(cat.id, month) - forgivenAmt) * 100) / 100;
   const health = store.getEnvelopeHealth(cat.id, month);
   const isOver = remaining < 0 && health === 'over';
   const healthLabel = store.getEnvelopeHealthLabel(health);
@@ -1059,6 +1063,12 @@ function envelopeCard(cat, focusId = null, opts = {}) {
         }, moveDelta > 0
           ? `+${formatCurrency(moveDelta)} moved in this month`
           : `${formatCurrency(moveDelta)} moved out this month`)
+        : null,
+      forgivenAmt > 0.005
+        ? el('div', {
+          className: 'envelope-move-delta envelope-forgiven',
+          title: 'Overspend forgiven for this month (no other envelope was debited; plan budget unchanged)',
+        }, `+${formatCurrency(forgivenAmt)} overspend forgiven`)
         : null,
       store.getBonusAllocationDelta(cat.id, month) > 0.005
         ? el('div', {
@@ -1570,7 +1580,9 @@ export function openMoveBetweenEnvelopes({ fromId = '', toId = '' } = {}) {
       list.appendChild(el('div', { className: 'envelope-move-row' },
         el('div', { className: 'envelope-move-row-main' },
           el('strong', {}, formatCurrency(m.amount)),
-          el('span', {}, ` ${from?.name || '?'} → ${to?.name || '?'}`),
+          el('span', {}, m.source === 'forgiven' && !m.fromId
+            ? ` Forgiven overspend → ${to?.name || '?'}`
+            : ` ${from?.name || '?'} → ${to?.name || '?'}`),
           m.note ? el('div', { className: 'tx-form-hint mx-0 mt-1 mb-0' }, m.note) : null,
         ),
         el('button', {

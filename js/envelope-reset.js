@@ -9,6 +9,7 @@
  */
 import { toCents, fromCents, cleanText } from './receipt-split.js';
 import { getCurrentMonth } from './utils.js';
+import { collectForgiven } from './envelope-forgive.js';
 
 export const RESET_MAX_TARGETS = 100;
 export const RESET_MAX_AMOUNT = 1e6;
@@ -368,6 +369,8 @@ export function addSnapshot(state, { id, at, reason, note, stateHash, totalAlloc
     id, at, actor: ACTOR, reason, month: getCurrentMonth(),
     state_hash: stateHash, total_allocated: totalAllocated,
     categories: captureEnvelopeState(state),
+    // Forgiven-overspend offsets at snapshot time; restore sets them back exactly.
+    forgiven_moves: collectForgiven(state),
     ...(note ? { note } : {}),
   };
   list.push(snap);
@@ -419,7 +422,9 @@ export function planRestore(state, snap) {
     budgets.set(c.id, b);
     carry.set(c.id, k);
   }
-  return { ok: true, budgets, carry };
+  // Older snapshots predate forgive-overspend, so no forgiven offsets existed then.
+  const forgiven = snap.forgiven_moves && typeof snap.forgiven_moves === 'object' ? snap.forgiven_moves : {};
+  return { ok: true, budgets, carry, forgiven };
 }
 
 /** Audit entry (state.envelopeResetAudit, newest last, capped). before/after = changed envelopes only. */

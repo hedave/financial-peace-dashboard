@@ -10,6 +10,9 @@ import {
 import {
   validateOverageBody, planOverage, applyOverageInMemory, verifyOverage, appendOverageRows, overageResponse,
 } from '../../js/envelope-overage.js';
+import {
+  validateForgiveBody, planForgive, applyForgiveInMemory, verifyForgive, appendForgiveRows, setForgiven,
+} from '../../js/envelope-forgive.js';
 
 /**
  * Envelope writes (all POST, JSON):
@@ -20,6 +23,9 @@ import {
  *                                            → monthlyBudget = 0 AND carryOver = 0 (named envelopes + their subs)
  *   /api/envelopes/reset-carry             {expected_state_hash, targets:[{envelope, expected_carry}], dry_run?=true, note?}
  *                                            → carryOver = 0 only (409 carry_mismatch if expected_carry differs)
+ *   /api/envelopes/forgive-overspend       {expected_state_hash, month?, targets:"all_negative"|[{envelope, expected_remaining}],
+ *                                            dry_run?=true, note?} → month-only offset moves (fromId null, source
+ *                                            'forgiven') so each target's remaining is exactly 0 (js/envelope-forgive.js)
  *   /api/envelopes/overage                  {expected_state_hash, targets:"all"|[names], dry_run?=true,
  *                                            envelopes?, include_sinking_funds?, negative_rule?, note?}
  *
@@ -158,7 +164,8 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
     return { error: 'stale_state', status: 409, extra: { state_hash: before.hash } };
   }
   if (kind === 'overage') return planOverageOnState(before, input);
-  let budgets; let carry = null; let snap = null;
+  if (kind === 'forgive') return planForgiveOnState(before, input);
+  let budgets; let carry = null; let snap = null; let forgiven;
   if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry') {
     const plan = kind === 'reset' ? planReset(state, input)
       : kind === 'start_fresh' ? planStartFresh(state, input) : planCarryReset(state, input);
@@ -174,11 +181,12 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
     if (!snap) return { error: 'not_found', status: 404 };
     const plan = planRestore(state, snap);
     if (!plan.ok) return { error: plan.code, status: 409, extra: plan.snapshotMonth ? { snapshot_month: plan.snapshotMonth } : {} };
-    budgets = plan.budgets; carry = plan.carry;
+    budgets = plan.budgets; carry = plan.carry; forgiven = plan.forgiven;
   }
   const beforeRaw = captureEnvelopeState(state);
   const nCats = state.categories.length;
   writeAllocations(store, budgets, carry);
+  if (forgiven) setForgiven(store.getState(), forgiven);
   const cats = store.getState().categories;
   if (cats.length !== nCats) return { fatal: 'envelope count changed' };
   // Read back: every planned value must have landed exactly (fail closed otherwise).
@@ -188,7 +196,28 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   }
   const after = balancesNow();
   const table = diffTable(before.body, after.body);
-  return { ok: true, before, after, table, beforeRaw, afterRaw: captureEnvelopeState(store.getState()), budgets, carry };
+  return { ok: true, before, after, table, beforeRaw, afterRaw: captureEnvelopeState(store.getState()), budgets, carry, forgiven };
+}
+
+function planForgiveOnState(before, input) {
+  const plan = planForgive(store, input);
+  if (!plan.ok) {
+    const { ok, code, status, ...extra } = plan;
+    return { error: code, status: status || 400, extra };
+  }
+  const st = store.getState();
+  const nCats = st.categories.length;
+  const nTx = (st.transactions || []).length;
+  const checking = st.balances?.checking;
+  const batchId = `fgv_${randomBytes(8).toString('hex')}`;
+  const moves = applyForgiveInMemory(store, plan, { at: new Date().toISOString(), batchId, newId: newRowId, note: input.note });
+  const st2 = store.getState();
+  if (st2.categories.length !== nCats || (st2.transactions || []).length !== nTx || st2.balances?.checking !== checking) return { fatal: 'forgive touched more than offsets' };
+  if (!verifyForgive(store, plan)) return { fatal: 'forgive not effective' };
+  const after = balancesNow();
+  if (after.body.total_allocated !== before.body.total_allocated || after.body.unallocated !== before.body.unallocated) return { fatal: 'forgive changed allocation' };
+  const table = diffTable(before.body, after.body);
+  return { ok: true, before, after, table, forgive: plan, moves, batchId };
 }
 
 const newRowId = () => randomBytes(8).toString('hex');
@@ -216,8 +245,9 @@ function planOverageOnState(before, input) {
  * used for reading numbers but never persisted, so transactions, bills, debts, checking
  * and snowball data stay byte-for-byte as loaded.
  */
-function patchedRaw(raw, { budgets = null, carry = null, snapshots, audit } = {}) {
+function patchedRaw(raw, { budgets = null, carry = null, snapshots, audit, forgiven } = {}) {
   const out = structuredClone(raw);
+  if (forgiven) setForgiven(out, forgiven);
   if (budgets || carry) {
     const ids = new Set((out.categories || []).filter(c => c && c.id).map(c => c.id));
     for (const k of [...(budgets?.keys() || []), ...(carry?.keys() || [])]) {
@@ -260,6 +290,17 @@ function appendOverageAudit(state, plan, snap, note) {
   state.envelopeResetAudit = list.slice(-AUDIT_MAX);
 }
 
+function appendForgiveAudit(state, plan, snap, note) {
+  const list = Array.isArray(state.envelopeResetAudit) ? state.envelopeResetAudit : [];
+  list.push({
+    at: snap.at, actor: ACTOR, action: 'forgive_overspend', snapshot_id: snap.id, batch_id: plan.batchId,
+    month: plan.forgive.month, total: plan.forgive.totalCents / 100,
+    offsets: plan.moves.map(m => ({ moveId: m.id, categoryId: m.toId, amount: m.amount })),
+    ...(note ? { note } : {}),
+  });
+  state.envelopeResetAudit = list.slice(-AUDIT_MAX);
+}
+
 async function runWrite(cfg, kind, input, snapshotId) {
   const { url, key, ownerId } = cfg;
   const remote = await loadBudget(url, key, ownerId);
@@ -268,10 +309,12 @@ async function runWrite(cfg, kind, input, snapshotId) {
   if (!plan.ok || input.dryRun) return { plan };
   if (kind === 'overage') {
     if (!appendOverageRows(structuredClone(remote.state), plan.overage.month, plan.rows)) return NOT_NORMALIZED;
+  } else if (kind === 'forgive') {
+    if (!appendForgiveRows(structuredClone(remote.state), plan.forgive.month, plan.moves)) return NOT_NORMALIZED;
   } else if (!patchedRaw(remote.state, { budgets: plan.budgets, carry: plan.carry })) return NOT_NORMALIZED;
 
   // 1) Automatic snapshot first, as its own write (state as loaded, before any change).
-  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage', start_fresh: 'pre_start_fresh', reset_carry: 'pre_carry_reset' })[kind], input.note, snapshotId);
+  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage', forgive: 'pre_forgive', start_fresh: 'pre_start_fresh', reset_carry: 'pre_carry_reset' })[kind], input.note, snapshotId);
   if (first.error) return first;
   const snap = first.snap;
 
@@ -290,11 +333,15 @@ async function runWrite(cfg, kind, input, snapshotId) {
       appendOverageAudit(store.getState(), plan, snap, input.note);
       raw = patchedRaw(base.state, { audit: store.getState().envelopeResetAudit });
       if (raw) raw = appendOverageRows(raw, plan.overage.month, plan.rows);
+    } else if (kind === 'forgive') {
+      appendForgiveAudit(store.getState(), plan, snap, input.note);
+      raw = patchedRaw(base.state, { audit: store.getState().envelopeResetAudit });
+      if (raw) raw = appendForgiveRows(raw, plan.forgive.month, plan.moves);
     } else {
       appendEnvelopeAudit(store.getState(), {
         at: snap.at, action: kind, snapshotId: snap.id, beforeRaw: plan.beforeRaw, afterRaw: plan.afterRaw, note: input.note,
       });
-      raw = patchedRaw(base.state, { budgets: plan.budgets, carry: plan.carry, audit: store.getState().envelopeResetAudit });
+      raw = patchedRaw(base.state, { budgets: plan.budgets, carry: plan.carry, forgiven: plan.forgiven, audit: store.getState().envelopeResetAudit });
     }
     if (!raw) return { ...NOT_NORMALIZED, snapshot: snap };
     const s2 = await saveBudget(url, key, ownerId, raw, base.updated_at);
@@ -308,6 +355,7 @@ function routeOf(req, context) {
   if (p === '/api/envelopes/snapshot') return { kind: 'snapshot' };
   if (p === '/api/envelopes/reset') return { kind: 'reset' };
   if (p === '/api/envelopes/overage') return { kind: 'overage' };
+  if (p === '/api/envelopes/forgive-overspend') return { kind: 'forgive' };
   if (p === '/api/envelopes/start-fresh') return { kind: 'start_fresh' };
   if (p === '/api/envelopes/reset-carry') return { kind: 'reset_carry' };
   const m = p.match(/^\/api\/envelopes\/snapshots\/([^/]+)\/restore$/);
@@ -361,6 +409,7 @@ export default async (req, context) => {
   }
   const checked = route.kind === 'reset' ? validateResetBody(body)
     : route.kind === 'overage' ? validateOverageBody(body)
+    : route.kind === 'forgive' ? validateForgiveBody(body)
     : route.kind === 'start_fresh' ? validateStartFreshBody(body)
     : route.kind === 'reset_carry' ? validateCarryResetBody(body)
     : route.kind === 'restore' ? validateRestoreBody(body)
@@ -408,6 +457,22 @@ export default async (req, context) => {
       totals: p.table.totals,
     });
   }
+  if (route.kind === 'forgive') {
+    const f = p.forgive;
+    const rows = new Map(p.table.changes.map(c => [c.id, c]));
+    return json(200, {
+      ok: true,
+      status: input.dryRun ? 'dry_run' : 'applied',
+      dry_run: !!input.dryRun,
+      ...(result.snapshot ? { snapshot: result.snapshot, batch_id: p.batchId } : {}),
+      month: f.month,
+      state_hash_before: p.before.hash,
+      state_hash_after: p.after.hash,
+      total_forgiven: f.totalCents / 100,
+      forgiven: f.rows.map(r => ({ envelope: r.name, amount: r.cents / 100, remaining_before: -r.cents / 100, remaining_after: 0 })),
+      totals: p.table.totals,
+    });
+  }
   const out = {
     ok: true,
     status: input.dryRun ? 'dry_run' : 'applied',
@@ -423,5 +488,5 @@ export default async (req, context) => {
 };
 
 export const config = {
-  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage', '/api/envelopes/start-fresh', '/api/envelopes/reset-carry'],
+  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage', '/api/envelopes/forgive-overspend', '/api/envelopes/start-fresh', '/api/envelopes/reset-carry'],
 };
