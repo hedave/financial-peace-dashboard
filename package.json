@@ -15,6 +15,7 @@
     "test:split-edit": "node scripts/test-split-edit.mjs",
     "test:envelopes": "node scripts/test-envelope-reset.mjs",
     "test:overage": "node scripts/test-envelope-overage.mjs",
-    "test:start-fresh": "node scripts/test-envelope-start-fresh.mjs && node scripts/test-budget-fix-api.mjs"
+    "test:start-fresh": "node scripts/test-envelope-start-fresh.mjs",
+    "test:budget-fix": "node scripts/test-budget-fix-api.mjs"
   }
 }
