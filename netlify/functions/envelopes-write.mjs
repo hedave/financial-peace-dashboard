@@ -1,8 +1,9 @@
 import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import './polyfill-storage.mjs';
 import { store } from '../../js/store.js';
+import { getCurrentMonth } from '../../js/utils.js';
 import {
-  validateResetBody, validateRestoreBody, validateSnapshotBody, validateStartFreshBody, validateCarryResetBody,
+  validateResetBody, validateRestoreBody, validateSnapshotBody, validateStartFreshBody, validateCarryResetBody, validateAllocationsBody, planAllocations,
   computeBalances, planReset, planStartFresh, planCarryReset, planRestore, writeAllocations, diffTable,
   addSnapshot, findSnapshot, captureEnvelopeState, appendEnvelopeAudit,
   withStoreLock, SNAPSHOT_ID_RE, ACTOR, AUDIT_MAX,
@@ -21,6 +22,9 @@ import {
  *   /api/envelopes/reset                    {expected_state_hash, dry_run?=true, targets?, default_amount?, note?}
  *   /api/envelopes/start-fresh             {expected_state_hash, envelopes:"all"|[names], dry_run?=true, note?}
  *                                            → monthlyBudget = 0 AND carryOver = 0 (named envelopes + their subs)
+ *   /api/envelopes/allocations             {month, expected_state_hash, dry_run?=true, mode:"replace"|"set", allocations:[{envelope (name|id), amount}], note?}
+ *                                            → monthlyBudget per listed top-level envelope (replace: unlisted → 0; set: listed only); 409 stale hash or
+ *                                              month ≠ server month; 422 unknown envelope or total_allocated > checking
  *   /api/envelopes/reset-carry             {expected_state_hash, targets:[{envelope, expected_carry}], dry_run?=true, note?}
  *                                            → carryOver = 0 only (409 carry_mismatch if expected_carry differs)
  *   /api/envelopes/forgive-overspend       {expected_state_hash, month?, targets:"all_negative"|[{envelope, expected_remaining}],
@@ -157,6 +161,16 @@ function snapshotInMemory(reason, note, nowIso, keepId = null) {
  * kind: 'reset' | 'restore'. Returns {error...} | {dry, table, ...} | {apply:{...}}.
  */
 export function planOnState(remoteState, kind, input, snapshotId = null) {
+  // Fail closed when the saved budget has not rolled into the server's current month yet.
+  // Writing zeroed budgets/carry onto a pre-rollover row lets the next client open roll the
+  // old month over with the NEW numbers (zero budget → negative carry), undoing the reset.
+  if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry' || kind === 'allocations') {
+    const cur = getCurrentMonth();
+    const last = remoteState && typeof remoteState.lastMonthProcessed === 'string' ? remoteState.lastMonthProcessed : null;
+    if (last !== cur) {
+      return { error: 'month_not_rolled_over', status: 409, extra: { server_month: cur, last_month_processed: last ? String(last).slice(0, 7) : null, message: 'Open FigPig once in the new month so it rolls over, then retry.' } };
+    }
+  }
   store.hydrateFromObject(remoteState);
   const state = store.getState();
   const before = balancesNow();
@@ -166,7 +180,13 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   if (kind === 'overage') return planOverageOnState(before, input);
   if (kind === 'forgive') return planForgiveOnState(before, input);
   let budgets; let carry = null; let snap = null; let forgiven;
-  if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry') {
+  if (kind === 'allocations') {
+    if (input.month !== getCurrentMonth()) return { error: 'month_mismatch', status: 409, extra: { server_month: getCurrentMonth() } };
+    const plan = planAllocations(state, input);
+    if (!plan.ok && plan.code === 'invalid_body') return { error: 'invalid_body', status: 400, extra: { message: plan.message } };
+    if (!plan.ok) return { error: 'unknown_envelope', status: 422, extra: { envelopes: plan.envelopes, validEnvelopes: plan.validEnvelopes } };
+    budgets = plan.set;
+  } else if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry') {
     const plan = kind === 'reset' ? planReset(state, input)
       : kind === 'start_fresh' ? planStartFresh(state, input) : planCarryReset(state, input);
     if (!plan.ok) {
@@ -195,6 +215,9 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
     if (carry && carry.has(c.id) && Math.round((Number(c.carryOver) || 0) * 100) !== carry.get(c.id)) return { fatal: 'carry not applied' };
   }
   const after = balancesNow();
+  if (kind === 'allocations' && Math.round(after.body.total_allocated * 100) > Math.round(after.body.checking_balance * 100)) {
+    return { error: 'over_checking', status: 422, extra: { total_allocated: after.body.total_allocated, checking_balance: after.body.checking_balance } };
+  }
   const table = diffTable(before.body, after.body);
   return { ok: true, before, after, table, beforeRaw, afterRaw: captureEnvelopeState(store.getState()), budgets, carry, forgiven };
 }
@@ -314,7 +337,7 @@ async function runWrite(cfg, kind, input, snapshotId) {
   } else if (!patchedRaw(remote.state, { budgets: plan.budgets, carry: plan.carry })) return NOT_NORMALIZED;
 
   // 1) Automatic snapshot first, as its own write (state as loaded, before any change).
-  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage', forgive: 'pre_forgive', start_fresh: 'pre_start_fresh', reset_carry: 'pre_carry_reset' })[kind], input.note, snapshotId);
+  const first = await writeSnapshot(cfg, remote, ({ reset: 'pre_reset', restore: 'pre_restore', overage: 'pre_overage', forgive: 'pre_forgive', start_fresh: 'pre_start_fresh', allocations: 'pre_allocations', reset_carry: 'pre_carry_reset' })[kind], input.note, snapshotId);
   if (first.error) return first;
   const snap = first.snap;
 
@@ -358,6 +381,7 @@ function routeOf(req, context) {
   if (p === '/api/envelopes/forgive-overspend') return { kind: 'forgive' };
   if (p === '/api/envelopes/start-fresh') return { kind: 'start_fresh' };
   if (p === '/api/envelopes/reset-carry') return { kind: 'reset_carry' };
+  if (p === '/api/envelopes/allocations') return { kind: 'allocations' };
   const m = p.match(/^\/api\/envelopes\/snapshots\/([^/]+)\/restore$/);
   if (m) {
     const id = String(context?.params?.id || decodeURIComponent(m[1]));
@@ -412,8 +436,10 @@ export default async (req, context) => {
     : route.kind === 'forgive' ? validateForgiveBody(body)
     : route.kind === 'start_fresh' ? validateStartFreshBody(body)
     : route.kind === 'reset_carry' ? validateCarryResetBody(body)
+    : route.kind === 'allocations' ? validateAllocationsBody(body)
     : route.kind === 'restore' ? validateRestoreBody(body)
       : validateSnapshotBody(body);
+  if (!checked.ok && checked.code === 'bad_amount') return json(422, { ok: false, error: 'bad_amount', message: checked.message });
   if (!checked.ok) return json(400, { ok: false, error: 'invalid_body', message: checked.message });
   const input = checked.value;
   const cfg = { url, key, ownerId };
@@ -488,5 +514,5 @@ export default async (req, context) => {
 };
 
 export const config = {
-  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage', '/api/envelopes/forgive-overspend', '/api/envelopes/start-fresh', '/api/envelopes/reset-carry'],
+  path: ['/api/envelopes/snapshot', '/api/envelopes/snapshots/:id/restore', '/api/envelopes/reset', '/api/envelopes/overage', '/api/envelopes/forgive-overspend', '/api/envelopes/start-fresh', '/api/envelopes/reset-carry', '/api/envelopes/allocations'],
 };
