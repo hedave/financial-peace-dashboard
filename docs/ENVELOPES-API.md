@@ -364,3 +364,47 @@ Rules:
   fail; then the API refuses (500 `write_refused`) rather than writing an ineffective offset.
 
 `GET /api/envelopes` (and `/snapshots`) now also accepts `FIGPIG_ENVELOPE_WRITE_TOKEN` as a read token.
+
+## Set allocations — `POST /api/envelopes/allocations` (branch figpig/nov1-reset-prep)
+
+Auth: `FIGPIG_ENVELOPE_WRITE_TOKEN` (Bearer). Same rate limit, CAS and snapshot-first pattern as reset.
+
+```json
+{"month":"2026-11","expected_state_hash":"<64 hex from GET /api/envelopes>","dry_run":true,
+ "mode":"replace","allocations":[{"envelope":"Mortgage","amount":3219.49},{"envelope":"<envelope id>","amount":600}]}
+```
+
+- `envelope`: top-level envelope **id** or **name** (case-insensitive). Sub-envelopes are never changed.
+- `mode: "replace"`: listed envelopes get `amount`; every unlisted top-level envelope gets 0.
+  `mode: "set"`: only listed envelopes change (list must be non-empty).
+- Changes `monthlyBudget` only. Never touches carry-over, transactions, checking, bills, debts or snowball.
+- `dry_run` defaults to `true`: returns `changes[]` (per envelope `allocated_before/after`, `carry_*`, `remaining_*`, `changed`) and `totals`; writes nothing.
+- Real run: saves a `pre_allocations` snapshot first, then applies; response has `snapshot.id`.
+  **Undo:** `POST /api/envelopes/snapshots/<snapshot.id>/restore` with the new `state_hash` (same month only).
+- Rerunning the same body is a no-op (`changed:false` everywhere).
+
+| Status | error | When |
+|---|---|---|
+| 400 | `invalid_body` | unknown field, bad month/mode/hash/dry_run, envelope listed twice |
+| 401 / 503 / 429 | | wrong token / not configured / rate limited |
+| 409 | `stale_state` | `expected_state_hash` differs (re-read GET) |
+| 409 | `month_mismatch` | `month` is not the server's current month |
+| 409 | `month_not_rolled_over` | saved budget has not rolled into the current month yet (open FigPig once, retry) |
+| 422 | `bad_amount` | amount not a number 0–1,000,000 with ≤ 2 decimals |
+| 422 | `unknown_envelope` | `envelopes[]` lists the names not found, plus `validEnvelopes` |
+| 422 | `over_checking` | resulting `total_allocated` > `checking_balance` (dry run too) |
+
+## Month rollover guard (reset, start-fresh, reset-carry, allocations)
+
+These writes return `409 month_not_rolled_over` when the stored `lastMonthProcessed` is not the
+server's current month. Without this, writing zeroed budgets/carry onto a not-yet-rolled row lets
+the next app open roll the OLD month over using the NEW (zeroed) numbers, turning last month's
+spending into large negative carry. Note the server clock is UTC: "current month" flips at
+8 pm Eastern on the last day (7 pm after DST ends). Run month-start resets after FigPig has been
+opened once in the new month on David's device.
+
+### Does last month's negative remaining carry into the new month?
+Yes. At rollover the client sets `carryOver = remaining` (budget + carry + moves + bonus − spent),
+negatives included (`processMonthRollover` in `js/store.js`). Clear it with
+`start-fresh` (`envelopes:"all"` zeroes budget **and** carry) or `reset-carry` (carry only),
+run after the rollover. Unallocated (`checking − total_allocated`) does not include carry.

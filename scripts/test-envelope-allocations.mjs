@@ -130,15 +130,19 @@ await test('validation: bad bodies → 400, nothing written', async () => {
     [], 'x', { ...good(h), extra: 1 }, { ...good(h), month: '2026-13' }, { ...good(h), month: 202611 },
     { ...good(h), mode: 'merge' }, { ...good(h), mode: undefined }, { ...good(h), expected_state_hash: 'abc' },
     { ...good(h), dry_run: 'false' }, { ...good(h), allocations: 'all' },
-    { ...good(h), allocations: [{ envelope: 'Mortgage', amount: -1 }] },
-    { ...good(h), allocations: [{ envelope: 'Mortgage', amount: 1.234 }] },
-    { ...good(h), allocations: [{ envelope: 'Mortgage', amount: '10' }] },
     { ...good(h), allocations: [{ envelope: '', amount: 1 }] },
     { ...good(h), allocations: [{ envelope: 'Mortgage', amount: 1, x: 1 }] },
     { ...good(h), allocations: [{ envelope: 'Mortgage', amount: 1 }, { envelope: 'MORTGAGE', amount: 2 }] },
     { ...good(h), allocations: Array.from({ length: 101 }, (_, i) => ({ envelope: `e${i}`, amount: 1 })) },
   ];
   for (const b of bads) { _resetRateLimit(); const r = await alloc(b); assert.equal(r.status, 400, JSON.stringify(b) + r.text); }
+  for (const amt of [-1, 1.234, '10', null, 1e7, NaN]) {
+    _resetRateLimit();
+    const r = await alloc({ ...good(h), allocations: [{ envelope: 'Mortgage', amount: amt }] });
+    assert.equal(r.status, 422, String(amt) + r.text); assert.equal(r.json.error, 'bad_amount');
+  }
+  _resetRateLimit();
+  assert.equal((await alloc({ ...good(h), mode: 'set', allocations: [] })).status, 400, 'set needs a list');
   assert.equal((await alloc(good(h), { raw: '{not json' })).status, 400);
   assert.equal((await alloc(good(h), { headers: { 'content-type': 'text/plain' } })).status, 415);
   assert.equal(patches, 0);
@@ -196,6 +200,33 @@ await test('real run: snapshot first, replace sets listed + zeroes unlisted top-
   assert.equal(patches, n);
   assert.equal((await restore(r.json.snapshot.id, { expected_state_hash: h1, dry_run: false })).status, 200);
   assert.equal(await hashNow(), h0);
+});
+
+await test('mode set: only listed envelopes change (by id or name); dry run before/after per envelope; undo via snapshot restore', async () => {
+  seed();
+  remote.state.balances.checking = 6000;
+  const h0 = await hashNow();
+  const body = { month: YM, expected_state_hash: h0, mode: 'set', allocations: [{ envelope: GROC, amount: 700 }, { envelope: 'Utilities', amount: 300 }] };
+  const d = await alloc(body);
+  assert.equal(d.status, 200, d.text); assert.equal(patches, 0);
+  const g = d.json.changes.find(c => c.id === GROC);
+  assert.equal(g.allocated_before, 1400); assert.equal(g.allocated_after, 700); assert.ok(g.changed);
+  assert.ok(!d.json.changes.find(c => c.id === EAT).changed, 'unlisted untouched in set mode');
+  const r = await alloc({ ...body, dry_run: false });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(rcat(GROC).monthlyBudget, 700); assert.equal(rcat(UTIL).monthlyBudget, 300);
+  assert.equal(rcat(EAT).monthlyBudget, 600); assert.equal(rcat(MORT).monthlyBudget, 3219.49); assert.equal(rcat(XMAS).monthlyBudget, 500);
+  assert.equal(rcat(EAT).carryOver, -45.5);
+  assert.equal(remote.state.balances.checking, 6000);
+  const h1 = await hashNow();
+  assert.equal((await restore(r.json.snapshot.id, { expected_state_hash: h1, dry_run: false })).status, 200);
+  assert.equal(await hashNow(), h0);
+});
+
+await test('same envelope by id and by name → 400', async () => {
+  seed();
+  const r = await alloc({ month: YM, expected_state_hash: await hashNow(), mode: 'set', allocations: [{ envelope: GROC, amount: 1 }, { envelope: 'Groceries', amount: 2 }] });
+  assert.equal(r.status, 400, r.text);
 });
 
 assert.deepEqual(stray, [], 'no network calls outside the fake Supabase');

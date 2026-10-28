@@ -22,8 +22,8 @@ import {
  *   /api/envelopes/reset                    {expected_state_hash, dry_run?=true, targets?, default_amount?, note?}
  *   /api/envelopes/start-fresh             {expected_state_hash, envelopes:"all"|[names], dry_run?=true, note?}
  *                                            → monthlyBudget = 0 AND carryOver = 0 (named envelopes + their subs)
- *   /api/envelopes/allocations             {month, expected_state_hash, dry_run?=true, mode:"replace", allocations:[{envelope, amount}], note?}
- *                                            → monthlyBudget per listed top-level envelope, unlisted → 0; 409 stale hash or
+ *   /api/envelopes/allocations             {month, expected_state_hash, dry_run?=true, mode:"replace"|"set", allocations:[{envelope (name|id), amount}], note?}
+ *                                            → monthlyBudget per listed top-level envelope (replace: unlisted → 0; set: listed only); 409 stale hash or
  *                                              month ≠ server month; 422 unknown envelope or total_allocated > checking
  *   /api/envelopes/reset-carry             {expected_state_hash, targets:[{envelope, expected_carry}], dry_run?=true, note?}
  *                                            → carryOver = 0 only (409 carry_mismatch if expected_carry differs)
@@ -183,6 +183,7 @@ export function planOnState(remoteState, kind, input, snapshotId = null) {
   if (kind === 'allocations') {
     if (input.month !== getCurrentMonth()) return { error: 'month_mismatch', status: 409, extra: { server_month: getCurrentMonth() } };
     const plan = planAllocations(state, input);
+    if (!plan.ok && plan.code === 'invalid_body') return { error: 'invalid_body', status: 400, extra: { message: plan.message } };
     if (!plan.ok) return { error: 'unknown_envelope', status: 422, extra: { envelopes: plan.envelopes, validEnvelopes: plan.validEnvelopes } };
     budgets = plan.set;
   } else if (kind === 'reset' || kind === 'start_fresh' || kind === 'reset_carry') {
@@ -438,6 +439,7 @@ export default async (req, context) => {
     : route.kind === 'allocations' ? validateAllocationsBody(body)
     : route.kind === 'restore' ? validateRestoreBody(body)
       : validateSnapshotBody(body);
+  if (!checked.ok && checked.code === 'bad_amount') return json(422, { ok: false, error: 'bad_amount', message: checked.message });
   if (!checked.ok) return json(400, { ok: false, error: 'invalid_body', message: checked.message });
   const input = checked.value;
   const cfg = { url, key, ownerId };

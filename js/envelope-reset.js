@@ -122,17 +122,18 @@ export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 /**
  * Allocations: {month, expected_state_hash, dry_run?, mode:"replace", allocations:[{envelope, amount}], note?}.
- * mode "replace": every top-level envelope not listed gets monthlyBudget 0. dry_run defaults to true.
+ * envelope = top-level name (case-insensitive) or id. mode "replace": unlisted top-level envelopes
+ * get monthlyBudget 0; mode "set": only listed ones change. dry_run defaults to true.
  */
 export function validateAllocationsBody(body) {
   if (!isObj(body)) return bad('JSON object body required');
   const extra = unknownKey(body, ['month', 'expected_state_hash', 'dry_run', 'mode', 'allocations', 'note']);
   if (extra) return bad(`Unknown field: ${extra}`);
   if (typeof body.month !== 'string' || !MONTH_RE.test(body.month)) return bad('month must be YYYY-MM');
-  if (body.mode !== 'replace') return bad('mode must be "replace"');
+  if (body.mode !== 'replace' && body.mode !== 'set') return bad('mode must be "replace" or "set"');
   const dry = dryRunOf(body); if (!dry.ok) return dry;
   const hash = hashOf(body); if (!hash.ok) return hash;
-  if (!Array.isArray(body.allocations)) return bad('allocations must be an array');
+  if (!Array.isArray(body.allocations) || (body.mode === 'set' && !body.allocations.length)) return bad('allocations must be an array (non-empty for mode "set")');
   if (body.allocations.length > RESET_MAX_TARGETS) return bad(`allocations: max ${RESET_MAX_TARGETS}`);
   const allocations = [];
   const seen = new Set();
@@ -145,21 +146,24 @@ export function validateAllocationsBody(body) {
     const k = n.value.trim().toLowerCase();
     if (seen.has(k)) return bad(`allocations[${i}].envelope listed twice`);
     seen.add(k);
-    const a = amountOf(t.amount, `allocations[${i}].amount`); if (!a.ok) return a;
+    const a = amountOf(t.amount, `allocations[${i}].amount`);
+    if (!a.ok) return { ...a, code: 'bad_amount' };
     allocations.push({ envelope: n.value, cents: a.value });
   }
   const note = noteOf(body); if (!note.ok) return note;
-  return { ok: true, value: { month: body.month, dryRun: dry.value, expectedHash: hash.value, mode: 'replace', allocations, note: note.value } };
+  return { ok: true, value: { month: body.month, dryRun: dry.value, expectedHash: hash.value, mode: body.mode, allocations, note: note.value } };
 }
 
-/** Replace plan: Map(top-level id → cents); unlisted top-level envelopes → 0. Never creates. */
+/** Map(top-level id → cents). replace: unlisted → 0; set: listed only. Never creates. */
 export function planAllocations(state, input) {
   const set = new Map();
-  for (const c of topLevel(state)) set.set(c.id, 0);
-  const unknown = [];
+  if (input.mode === 'replace') for (const c of topLevel(state)) set.set(c.id, 0);
+  const unknown = []; const hit = new Set();
   for (const a of input.allocations) {
-    const c = resolveTop(state, a.envelope);
+    const c = topLevel(state).find(x => String(x.id) === a.envelope) || resolveTop(state, a.envelope);
     if (!c) { unknown.push(a.envelope); continue; }
+    if (hit.has(c.id)) return { ok: false, code: 'invalid_body', message: `Envelope listed twice: ${cleanText(c.name, 80)}` };
+    hit.add(c.id);
     set.set(c.id, a.cents);
   }
   if (unknown.length) return { ok: false, code: 'unknown_envelope', envelopes: unknown, validEnvelopes: envelopeNames(state) };
