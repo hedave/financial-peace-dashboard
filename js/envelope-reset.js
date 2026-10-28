@@ -118,6 +118,54 @@ export function validateStartFreshBody(body) {
   return { ok: true, value: { dryRun: dry.value, expectedHash: hash.value, envelopes, note: note.value } };
 }
 
+export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * Allocations: {month, expected_state_hash, dry_run?, mode:"replace", allocations:[{envelope, amount}], note?}.
+ * mode "replace": every top-level envelope not listed gets monthlyBudget 0. dry_run defaults to true.
+ */
+export function validateAllocationsBody(body) {
+  if (!isObj(body)) return bad('JSON object body required');
+  const extra = unknownKey(body, ['month', 'expected_state_hash', 'dry_run', 'mode', 'allocations', 'note']);
+  if (extra) return bad(`Unknown field: ${extra}`);
+  if (typeof body.month !== 'string' || !MONTH_RE.test(body.month)) return bad('month must be YYYY-MM');
+  if (body.mode !== 'replace') return bad('mode must be "replace"');
+  const dry = dryRunOf(body); if (!dry.ok) return dry;
+  const hash = hashOf(body); if (!hash.ok) return hash;
+  if (!Array.isArray(body.allocations)) return bad('allocations must be an array');
+  if (body.allocations.length > RESET_MAX_TARGETS) return bad(`allocations: max ${RESET_MAX_TARGETS}`);
+  const allocations = [];
+  const seen = new Set();
+  for (let i = 0; i < body.allocations.length; i++) {
+    const t = body.allocations[i];
+    if (!isObj(t)) return bad(`allocations[${i}] must be an object`);
+    const ex = unknownKey(t, ['envelope', 'amount']);
+    if (ex) return bad(`Unknown field: allocations[${i}].${ex}`);
+    const n = envelopeName(t.envelope, `allocations[${i}].envelope`); if (!n.ok) return n;
+    const k = n.value.trim().toLowerCase();
+    if (seen.has(k)) return bad(`allocations[${i}].envelope listed twice`);
+    seen.add(k);
+    const a = amountOf(t.amount, `allocations[${i}].amount`); if (!a.ok) return a;
+    allocations.push({ envelope: n.value, cents: a.value });
+  }
+  const note = noteOf(body); if (!note.ok) return note;
+  return { ok: true, value: { month: body.month, dryRun: dry.value, expectedHash: hash.value, mode: 'replace', allocations, note: note.value } };
+}
+
+/** Replace plan: Map(top-level id → cents); unlisted top-level envelopes → 0. Never creates. */
+export function planAllocations(state, input) {
+  const set = new Map();
+  for (const c of topLevel(state)) set.set(c.id, 0);
+  const unknown = [];
+  for (const a of input.allocations) {
+    const c = resolveTop(state, a.envelope);
+    if (!c) { unknown.push(a.envelope); continue; }
+    set.set(c.id, a.cents);
+  }
+  if (unknown.length) return { ok: false, code: 'unknown_envelope', envelopes: unknown, validEnvelopes: envelopeNames(state) };
+  return { ok: true, set };
+}
+
 /**
  * Carry-only reset: {dry_run?, expected_state_hash, targets:[{envelope, expected_carry}], note?}.
  * Sets carry-over to 0 for each named envelope; never touches allocation.

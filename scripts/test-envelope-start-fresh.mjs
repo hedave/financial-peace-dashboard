@@ -237,6 +237,26 @@ await test('reset-carry: dry run default; 409 carry_mismatch writes nothing; rea
   assert.equal(await hashNow(), h);
 });
 
+await test('start-fresh / reset-carry / reset: 409 month_not_rolled_over on a pre-rollover row, writes nothing', async () => {
+  seedCarry();
+  remote.state.lastMonthProcessed = getPreviousMonth(YM);
+  const h = await hashNow();
+  for (const [fn, body] of [
+    [startFresh, { expected_state_hash: h, envelopes: 'all', dry_run: false }],
+    [startFresh, { expected_state_hash: h, envelopes: 'all' }],
+    [resetCarry, { expected_state_hash: h, targets: [{ envelope: 'Groceries', expected_carry: 0 }], dry_run: false }],
+    [reset, { expected_state_hash: h, default_amount: 0, dry_run: false }],
+  ]) {
+    const r = await fn(body);
+    assert.equal(r.status, 409, r.text);
+    assert.equal(r.json.error, 'month_not_rolled_over');
+    assert.equal(r.json.server_month, YM);
+  }
+  assert.equal(patches, 0, 'nothing written');
+  delete remote.state.lastMonthProcessed;
+  assert.equal((await startFresh({ expected_state_hash: h, envelopes: 'all' })).json.error, 'month_not_rolled_over', 'missing marker fails closed');
+});
+
 if (process.env.FP_SAMPLE) console.log(JSON.stringify(globalThis.__sample_start_fresh, null, 1));
 assert.deepEqual(stray, [], 'no network calls outside the fake Supabase');
 console.log(`envelope-start-fresh: ${passed} passed, ${failures.length} failed`);
