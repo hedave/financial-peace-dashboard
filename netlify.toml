@@ -1,7 +1,9 @@
 # Netlify auto-deploy: set env vars in Site configuration → Environment variables
 [build]
-  command = "node scripts/generate-config.js"
-  publish = "."
+  # Writes js/config.js, then copies ONLY public site files into dist/
+  # (no *.md, *.sql, scripts/, docs/ in the published output).
+  command = "node scripts/build-publish.mjs"
+  publish = "dist"
 
 [functions]
   # ingest-bank bundles store + normalizer; config.js is written by the build command
@@ -12,7 +14,14 @@
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
+    # Netlify already sends HSTS on HTTPS; pinned here so it survives config changes.
+    Strict-Transport-Security = "max-age=31536000"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), hid=(), magnetometer=(), gyroscope=(), accelerometer=(), interest-cohort=()"
+    # CDNs in use: cdn.jsdelivr.net (chart.js, pdf.js + worker), esm.sh (supabase-js),
+    # *.supabase.co (REST + realtime). The sha256 is update.html's inline script;
+    # regenerate it if that script changes.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://esm.sh 'sha256-HiJDlY7qEhQyfH4p8biPveej+hMZbkD1Uz2SwQXwtqU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://esm.sh https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 # Always revalidate HTML + SW so phones don't stick on old shell
 [[headers]]

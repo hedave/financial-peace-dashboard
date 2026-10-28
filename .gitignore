@@ -15,3 +15,6 @@ Thumbs.db
 .vscode/
 docs/.Rhistory
 .Rhistory
+
+# Build output (publish dir)
+dist/
