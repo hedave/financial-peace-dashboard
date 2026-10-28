@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import './polyfill-storage.mjs';
 import { store } from '../../js/store.js';
 import {
@@ -8,6 +8,58 @@ import {
 } from '../../js/ingest-normalize.js';
 
 const MAX_ROWS = 200;
+const MAX_BODY_BYTES = 256 * 1024;
+export const MIN_TOKEN_LENGTH = 32;
+const MAX_TOKEN_LENGTH = 512;
+const WINDOW_MS = 60_000;
+const MAX_PER_WINDOW = 30;
+const hits = new Map(); // best-effort per instance
+const ALLOWED_KEYS = new Set(['transactions', 'rows', 'source', 'account', 'note', 'apply', 'includePending']);
+
+function clientKey(req) {
+  return (
+    req.headers.get('x-nf-client-connection-ip') ||
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  );
+}
+
+function rateLimitOk(key) {
+  const now = Date.now();
+  let bucket = hits.get(key);
+  if (!bucket || now - bucket.start >= WINDOW_MS) {
+    bucket = { start: now, count: 0 };
+    hits.set(key, bucket);
+  }
+  bucket.count += 1;
+  return bucket.count <= MAX_PER_WINDOW;
+}
+
+/** Test hook: clear limiter state. */
+export function _resetRateLimit() {
+  hits.clear();
+}
+
+/** Returns an error string, or null when the body is acceptable. */
+export function validateIngestBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'JSON object body required';
+  for (const k of Object.keys(body)) {
+    if (!ALLOWED_KEYS.has(k)) return `Unknown field: ${k.slice(0, 40)}`;
+  }
+  if ('transactions' in body && 'rows' in body) return 'Send transactions or rows, not both';
+  const list = body.transactions ?? body.rows;
+  if (!Array.isArray(list)) return 'transactions must be an array';
+  if (!list.length) return 'No valid transactions';
+  if (list.length > MAX_ROWS) return `Max ${MAX_ROWS} transactions per drop`;
+  if (!list.every((r) => r && typeof r === 'object' && !Array.isArray(r))) return 'Each transaction must be an object';
+  for (const k of ['source', 'account', 'note']) {
+    if (k in body && body[k] != null && typeof body[k] !== 'string') return `${k} must be a string`;
+  }
+  for (const k of ['apply', 'includePending']) {
+    if (k in body && typeof body[k] !== 'boolean') return `${k} must be a boolean`;
+  }
+  return null;
+}
 
 function json(status, body) {
   return new Response(JSON.stringify(body), {
@@ -29,11 +81,13 @@ function env(name) {
 }
 
 function secretsMatch(provided, expected) {
-  if (!provided || !expected) return false;
-  const a = Buffer.from(String(provided));
-  const b = Buffer.from(String(expected));
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+  if (provided.length < MIN_TOKEN_LENGTH || provided.length > MAX_TOKEN_LENGTH) return false;
+  if (expected.length < MIN_TOKEN_LENGTH) return false;
+  // Hash both sides so the compare is constant-time regardless of length.
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b) && provided.length === expected.length;
 }
 
 function bearer(req) {
@@ -124,6 +178,9 @@ function applyRows(remoteState, importRows, includePending) {
 }
 
 export default async (req) => {
+  if (!rateLimitOk(clientKey(req))) {
+    return json(429, { error: 'Too many requests' });
+  }
   if (req.method !== 'POST') return json(405, { error: 'POST only' });
 
   const expected = env('FIGPIG_INGEST_SECRET');
@@ -131,21 +188,31 @@ export default async (req) => {
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
   const ownerId = env('FIGPIG_OWNER_USER_ID');
 
-  if (!expected || !supabaseUrl || !serviceKey || !ownerId) {
+  if (!expected || expected.length < MIN_TOKEN_LENGTH || !supabaseUrl || !serviceKey || !ownerId) {
     return json(503, { error: 'Ingest is not configured on this deploy' });
   }
   if (!secretsMatch(bearer(req), expected)) {
     return json(401, { error: 'Unauthorized' });
   }
 
+  const ctype = req.headers.get('content-type') || '';
+  if (!/^application\/json\b/i.test(ctype)) return json(415, { error: 'application/json required' });
+  const declared = Number(req.headers.get('content-length') || 0);
+  if (declared > MAX_BODY_BYTES) return json(413, { error: 'Body too large' });
+
   let body;
   try {
-    body = await req.json();
+    const text = await req.text();
+    if (Buffer.byteLength(text) > MAX_BODY_BYTES) return json(413, { error: 'Body too large' });
+    body = JSON.parse(text);
   } catch {
     return json(400, { error: 'JSON body required' });
   }
 
-  const txs = normalizeIngestTransactions(body.transactions || body.rows || []);
+  const invalid = validateIngestBody(body);
+  if (invalid) return json(400, { error: invalid });
+
+  const txs = normalizeIngestTransactions(body.transactions ?? body.rows);
   if (!txs.length) return json(400, { error: 'No valid transactions' });
   if (txs.length > MAX_ROWS) return json(400, { error: `Max ${MAX_ROWS} transactions per drop` });
 
